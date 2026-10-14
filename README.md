@@ -135,4 +135,5 @@ The project's own public domain (`ghostinprod.com`) is Ghost's brand and stays.
 
 ## Author and license
 
-Built and operated by [Eren Yalçın](https://github.com/erenyalcinai) with Ghost itself. MIT, see [LICENSE](LICENSE).
+Built and operated by [Eren Yalçın](https://github.com/erenyalcinai) with Ghost itself. Work enquiries: **eren@yalcin.ai**
+(part-time, remote). MIT, see [LICENSE](LICENSE).
