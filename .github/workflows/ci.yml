@@ -1,0 +1,22 @@
+name: ci
+# Yalnız KOD değişince koş: knowsync 15 dk'da bir bilgi commit'i itiyor,
+# her doküman senkronunu CI'ya bağlamak özel depo Actions dakikalarını boşuna
+# yakardı (günde ~96 koşum). Süzgeç, skip-ci işaretinin yerini alıyor: işaret
+# commit mesajının her yerinde saydığı için kod push'unu da sessizce iptal
+# edebiliyordu (2026-08-21'de oldu); yol süzgecinin böyle bir kör noktası yok.
+on:
+  push:
+    paths: ["ghost/**", "ops/**", "tests/**", ".github/workflows/**"]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Derleme kontrolü
+        run: python -m compileall ghost ops tests
+      - name: Çekirdek testleri
+        run: python -m unittest discover -s tests -v

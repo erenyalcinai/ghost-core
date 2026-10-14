@@ -1,0 +1,24 @@
+# Ghost webhook alıcısı — hooks.example.com (birincil) + hooks.owner.example (eski takma ad).
+#
+# NEDEN default_server AÇIKÇA YAZILI: 2026-08-20'ye kadar bu dosyada yalnız
+# hooks.owner.example yazıyordu. hooks.example.com TESADÜFEN çalışıyordu — tek server
+# bloğu olduğu için nginx onu örtük varsayılan sayıyor, her Host'a cevap
+# veriyordu (uydurma Host ile test edildi: 200). Sunucuya ikinci bir site
+# eklendiği gün varsayılan rol kayar ve example.com webhook'ları SESSİZCE düşerdi.
+# Artık hem isim açıkça yazılı hem varsayılan rol açıkça beyan edilmiş.
+#
+# Sertifika self-signed (CN=hooks.owner.example, SAN yok) — Cloudflare "Full"
+# modunda origin'i doğrulamadığı için iki isim de çalışır. Kurtarmada yeniden
+# üretilir; özel anahtar yedeklenmez (bkz. tesisat/KURULUM.md adım 7).
+server {
+    listen 80 default_server;
+    listen 443 ssl default_server;
+    server_name hooks.example.com hooks.owner.example;
+    ssl_certificate /etc/ssl/certs/ghost-hooks.crt;
+    ssl_certificate_key /etc/ssl/private/ghost-hooks.key;
+    client_max_body_size 1m;
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}

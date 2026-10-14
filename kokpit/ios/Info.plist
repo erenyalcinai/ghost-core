@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>tr</string>
+	<key>CFBundleDisplayName</key>
+	<string>Ghost</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string></string>
+	</dict>
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<!-- Faz 5 duyular. Konum: significant-change (semt hassasiyeti), takvim: yalnız okuma. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Ghost hangi semtte olduğunu bilsin — cevapları ve hatırlatmaları ona göre kursun.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Uygulama kapalıyken de yer değiştirdiğinde Ghost haberdar olsun (semt hassasiyeti, sürekli GPS yok).</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Ghost senin için gerçek bir iOS hatırlatıcısı kurabilsin — alarmı Ghost'a değil telefona bağlı olsun.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Ghost gününün ne kadar dolu olduğunu bilsin: yalnız başlık, saat ve yer okunur.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.example.ghost.kokpit.duyu</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Fotoğraf çekip doğrudan Ghost'a göndermek için.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Ghost'a sesle mesaj yazdırmak için.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Konuşmanı metne çevirip Ghost'a göndermek için.</string>
+	<!-- Sırlar: Secrets.xcconfig'ten build ayarı olarak gelir (git'te yok). -->
+	<key>GhostAPIBase</key>
+	<string>$(GHOST_API_BASE)</string>
+	<key>GhostDeviceID</key>
+	<string>$(GHOST_DEVICE_ID)</string>
+	<key>GhostDeviceKey</key>
+	<string>$(GHOST_DEVICE_KEY)</string>
+</dict>
+</plist>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.jarvis.wdarelay</string>
+    <!-- Mac 127.0.0.1:8101 → telefonun WDA'sı (Wi-Fi, gerekirse USB yedeği).
+         ai.jarvis.wdaforward'ın yerini aldı: o ray telefonun KABLOYLA takılı
+         olmasını şart koşuyordu. Ayrıntı ve hedef bulma sırası:
+         ops/wda_relay.py başındaki not. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/sahip/jarvis/ops/wda_relay.py</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardErrorPath</key>
+    <string>/Users/sahip/ghost-ios/wda_relay.err</string>
+</dict>
+</plist>

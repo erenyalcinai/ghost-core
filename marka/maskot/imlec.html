@@ -1,0 +1,69 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:1480px;background:#0B0C0E;color:#EDEAE4;font-family:"DejaVu Sans Mono",monospace;padding:44px}
+h1{font-size:27px;font-weight:400;letter-spacing:.1em;margin-bottom:10px}
+.lead{font-size:18px;color:#7E8288;line-height:1.6;margin-bottom:8px}
+.lead b{color:#EDEAE4;font-weight:400}
+hr{border:0;border-top:1px solid #23262B;margin:30px 0 22px}
+.sec{font-size:15px;letter-spacing:.18em;color:#5C6067;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+.card{background:#131519;border:1px solid #23262B;border-radius:12px;padding:22px 14px 16px;text-align:center}
+.art{height:170px;display:flex;align-items:center;justify-content:center}
+.tag{font-size:15px;letter-spacing:.13em;color:#EDEAE4;margin-top:6px}
+.st{font-size:13.5px;color:#7E8288;line-height:1.5;margin-top:7px}
+.mini{margin-top:14px;padding-top:11px;border-top:1px solid #23262B;display:flex;align-items:center;justify-content:center;gap:8px}
+.mini span{font-size:12px;color:#5C6067}
+.rules{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:8px}
+.rule{background:#131519;border:1px solid #23262B;border-radius:12px;padding:20px}
+.rule h3{font-size:15px;font-weight:400;letter-spacing:.11em;margin-bottom:11px}
+.rule p{font-size:14px;color:#7E8288;line-height:1.65}
+.foot{margin-top:26px;font-size:14px;color:#5C6067;line-height:1.8}
+.foot b{color:#9A9793;font-weight:400}
+</style></head><body>
+<h1>GHOST — E · İMLEÇ, ON HAL (video formu)</h1>
+<div class="lead">On hal <b>yalnızca gözleri, kesikleri ve parlaklığı</b> değiştirir — siluete dokunmaz.
+Bu yüzden A·blok için tanımlanan sistem E·imlece <b>olduğu gibi taşınır.</b></div>
+<div class="lead">E'nin kendi kuralı: <b>imleç ritmi.</b> Nötr halde 12 kare/sn'de 6 kare açık, 6 kare kapalı — durur, yanıp söner.</div>
+<hr><div class="sec">ON HAL</div>
+<div class="grid" id="g"></div>
+<hr><div class="sec">VİDEODA NEREDE</div>
+<div class="rules">
+<div class="rule"><h3>1 · BAŞLIK ÇUBUĞUNDA</h3><p>Terminal başlığının sağında 26px. Hikâye boyunca durur ve hali gerçek olayı takip eder: komut yazılırken dikkat, tararken düşünüyor, satır düşünce hata, prompt dönünce hazır.</p></div>
+<div class="rule"><h3>2 · KAPANIŞTA</h3><p>Altyazının üstünde 88px. Postun konusu hangi hal ise o: sessiz hata → 07, kapanma → 10, adres → 01. Yumuşak açılış YOK — tek karede girer.</p></div>
+<div class="rule"><h3>3 · DİPTE İMZA</h3><p>C·pencere, 34px, opaklık .5 — değişmez. Bu maskot değil, watermark. Zaten doğru.</p></div>
+</div>
+<div class="foot">
+<b>YAPILMAZ:</b> ağız · kaş · el/kol · gülümseme · palet dışı renk · gradyan · gölge · üç boyut · dönme · opaklık rampası · sevimlileştirme.<br>
+<b>PALET:</b> zemin #0B0C0E · imleç #EDEAE4 · ikincil (düşük güç, ikinci imleç) #5C5A57
+</div>
+<script>
+const B='<rect x="34" y="22" width="46" height="58" fill="#EDEAE4"/>';
+const E=(x1,x2,y,h,f)=>`<rect x="${x1}" y="${y}" width="9" height="${h}" fill="${f}"/><rect x="${x2}" y="${y}" width="9" height="${h}" fill="${f}"/>`;
+const D='#0B0C0E';
+const S=[
+['01','nötr','ayakta, boşta.<br>yanıp söner', B+E(43,62,40,14,D)],
+['02','kırpma','canlılık işareti.<br>iki karelik kesme', B+E(43,62,46,3,D)],
+['03','uyku','iş yok, düşük güç.<br>blok söner, gözler kapalı',
+  '<g transform="translate(0,3)"><rect x="34" y="22" width="46" height="58" fill="#5C5A57"/>'+E(43,62,50,3,D)+'</g>'],
+['04','dikkat','komut geldi, dinliyor.<br>gözler uzar', B+E(43,62,35,22,D)],
+['05','düşünüyor','arıyor, tarıyor.<br>gözler yana kayar', B+E(47,66,40,14,D)],
+['06','çalışıyor','iş yürüyor.<br>altta çubuk dolar',
+  B+E(43,62,40,14,D)+'<rect x="34" y="86" width="46" height="5" fill="#5C5A57"/><rect x="34" y="86" width="18" height="5" fill="#EDEAE4"/>'],
+['07','hata','iş düştü.<br>blok dilimlenip kayar',
+  ['22,15,0','37,15,6','52,14,-4','66,14,3'].map(v=>{const[y,h,dx]=v.split(',');
+   return `<g transform="translate(${dx},0)"><rect x="34" y="${y}" width="46" height="${h}" fill="#EDEAE4"/>`+
+   (+y<40&&+y+ +h>40?E(43,62,40,14,D):'')+'</g>';}).join('')],
+['08','hazır','prompt döndü.<br>solda ikinci imleç yanar',
+  '<rect x="14" y="40" width="9" height="14" fill="#5C5A57"/>'+B+E(43,62,40,14,D)],
+['09','kayboluş','yeniden başlıyor.<br>dither ile alttan silinir',
+  '<mask id="dz"><rect x="0" y="0" width="94" height="100" fill="#fff"/>'+
+  [0,1,2,3,4,5,6,7,8].map(i=>{const y=(80-(i+1)*5.8).toFixed(1),h=(5.8-i*0.72).toFixed(2);
+   return h>0?`<rect x="34" y="${y}" width="46" height="${h}" fill="#000"/>`:'';}).join('')+
+  '</mask><g mask="url(#dz)">'+B+E(43,62,40,14,D)+'</g>'],
+  ['10','yokluk','kapalı ama orada.<br>blok gider, gözler kalır', E(43,62,40,14,'#EDEAE4')],
+];
+document.getElementById('g').innerHTML=S.map(([n,t,d,c])=>
+ `<div class="card"><div class="art"><svg width="118" height="126" viewBox="0 0 94 100">${c}</svg></div>
+  <div class="tag">${n} · ${t}</div><div class="st">${d}</div>
+  <div class="mini"><svg width="15" height="16" viewBox="0 0 94 100">${c}</svg><span>16px</span></div></div>`).join('');
+</script></body></html>

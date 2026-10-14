@@ -1,0 +1,137 @@
+# Ghost Kokpit — xcodegen proje tanımı (KAYNAK bu dosyadır; .xcodeproj üretilir, git'e girmez).
+#   cd kokpit/ios && xcodegen generate
+name: GhostKokpit
+options:
+  bundleIdPrefix: com.example.ghost
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+  # Secrets.xcconfig yoksa build_install.sh örnekten boş kopya üretir; yine de
+  # xcodegen'in eksik dosyada durmasını istemiyoruz.
+  disabledValidations: [missingConfigFiles]
+configFiles:
+  Debug: Secrets.xcconfig
+  Release: Secrets.xcconfig
+# Dış paket (2026-09-26, ses ajanı): ElevenLabs Agents Swift SDK (LiveKit WebRTC üstünde).
+# Yalnız iOS hedefine bağlanır; Mac hedefi KonusView'ı canImport ile yer tutucu gösterir.
+packages:
+  ElevenLabs:
+    url: https://github.com/elevenlabs/elevenlabs-swift-sdk.git
+    from: "3.3.1"
+settings:
+  base:
+    DEVELOPMENT_TEAM: TEAMID0000
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+targets:
+  GhostKokpit:
+    type: application
+    platform: iOS
+    sources:
+      - path: GhostKokpit
+    dependencies:
+      - target: GhostKokpitPaylas    # Share Extension ("Ghost'a gönder"), PlugIns'e gömülür
+      - target: GhostKokpitWidget    # Widget + Live Activity
+      - package: ElevenLabs          # Konuş ekranı (ses ajanı, WebRTC)
+    entitlements:
+      path: GhostKokpit.entitlements
+      properties:
+        keychain-access-groups: [$(AppIdentifierPrefix)com.example.ghost.kokpit]
+        aps-environment: development    # Faz 2 push; Xcode dev imzası → APNs sandbox
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.ghost.kokpit
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_NAME: Ghost
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+        ENABLE_PREVIEWS: YES
+        MARKETING_VERSION: "0.15"
+        CURRENT_PROJECT_VERSION: "25"
+        # Dış paket: yalnız ElevenLabs (ses ajanı). Gerisi Foundation/SwiftUI/CryptoKit/Security.
+        OTHER_LDFLAGS: ""
+
+  # Share Extension: uygulamanın Net/ ve Model/ kaynaklarını paylaşır (GhostAPI + Keychain),
+  # kimliği ortak Keychain grubundan okur. UI: UIKit, tek kart.
+  GhostKokpitPaylas:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: GhostKokpitPaylas
+      - path: GhostKokpit/Net
+      - path: GhostKokpit/Model
+    entitlements:
+      path: GhostKokpitPaylas/GhostKokpitPaylas.entitlements
+      properties:
+        keychain-access-groups: [$(AppIdentifierPrefix)com.example.ghost.kokpit]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.ghost.kokpit.paylas
+        PRODUCT_NAME: GhostPaylas
+        INFOPLIST_FILE: GhostKokpitPaylas/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: YES
+
+  # Widget + Live Activity: nabız widget'ı (ana ekran + kilit ekranı) ve iş kartı.
+  # Kimlik ortak Keychain grubundan; Net/ + Model/ + Tema paylaşılır.
+  GhostKokpitWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: GhostKokpitWidget
+      - path: GhostKokpit/Net
+      - path: GhostKokpit/Model
+      - path: GhostKokpit/Views/Tema.swift
+    entitlements:
+      path: GhostKokpitWidget/GhostKokpitWidget.entitlements
+      properties:
+        keychain-access-groups: [$(AppIdentifierPrefix)com.example.ghost.kokpit]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.ghost.kokpit.widget
+        PRODUCT_NAME: GhostWidget
+        INFOPLIST_FILE: GhostKokpitWidget/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: YES
+
+  # macOS (2026-09-26, Sahip kararı): aynı Model/Net/Views, ayrı giriş + pencere düzeni.
+  # Telefon duyuları (konum/takvim/eller/kamera/mikrofon/Live Activity) Mac'e GİRMEZ.
+  # Paylaşım uzantısı ve widget yalnız iOS'ta. Derleme: ./build_install.sh mac
+  GhostKokpitMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: GhostKokpitMac
+      - path: GhostKokpit
+        excludes:
+          - "App/GhostKokpitApp.swift"
+          - "App/Bildirim.swift"
+          - "App/Duyular.swift"
+          - "App/Eller.swift"
+          - "App/Konusma.swift"
+          - "Views/Kamera.swift"
+          - "Model/Etkinlik.swift"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.ghost.kokpit.mac
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_NAME: Ghost
+        INFOPLIST_FILE: GhostKokpitMac/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        ENABLE_PREVIEWS: YES
+        ENABLE_HARDENED_RUNTIME: NO
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        OTHER_LDFLAGS: ""

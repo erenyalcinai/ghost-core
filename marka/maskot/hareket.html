@@ -1,0 +1,120 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0B0C0E;color:#EDEAE4;font-family:ui-monospace,"DejaVu Sans Mono",Menlo,monospace;padding:52px 46px;width:1480px}
+h1{font-size:15px;letter-spacing:.22em;text-transform:uppercase;color:#6C6A66;font-weight:400;margin-bottom:6px}
+.sub{font-size:13px;color:#4A4845;margin-bottom:34px;line-height:1.6}
+h2{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#6C6A66;font-weight:400;margin:38px 0 16px;padding-top:26px;border-top:1px solid #1A1D21}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:20px}
+.card{background:#111316;border:1px solid #1E2126;border-radius:12px;padding:20px 14px 16px;text-align:center}
+.art{height:150px;display:flex;align-items:center;justify-content:center}
+.tag{margin-top:12px;font-size:11px;letter-spacing:.15em;color:#8A8783;text-transform:uppercase}
+.state{margin-top:7px;font-size:11px;line-height:1.5;color:#5C5A57}
+.mini{margin-top:14px;display:flex;gap:8px;align-items:center;justify-content:center;padding-top:12px;border-top:1px solid #1A1D21}
+.mini span{font-size:9px;color:#3E3C3A;letter-spacing:.08em}
+.rules{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.rule{background:#0E1013;border:1px solid #1A1D21;border-radius:12px;padding:20px}
+.rule b{display:block;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#EDEAE4;font-weight:400;margin-bottom:10px}
+.rule p{font-size:12px;line-height:1.7;color:#5C5A57}
+.no{margin-top:26px;font-size:12px;line-height:1.9;color:#4A4845}
+.no b{color:#8A8783;font-weight:400}
+</style></head><body>
+<h1>Ghost — hareket sistemi ve on hal</h1>
+<div class="sub">Tek karakter, on durum. Her hal Ghost'un gerçek bir durumuna karşılık gelir — süs değil, gösterge.<br>
+Gövde ve göz konumu sabittir; değişen yalnızca gözler, kesikler ve parlaklıktır.</div>
+
+<h2>On hal</h2>
+<div class="grid">
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/>
+<rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/>
+</svg></div><div class="tag">01 · nötr</div><div class="state">ayakta, boşta.<br>varsayılan hal</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/><rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/></svg><span>16px</span></div></div>
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/>
+<rect x="26" y="41" width="9" height="3" fill="#0B0C0E"/><rect x="45" y="41" width="9" height="3" fill="#0B0C0E"/>
+</svg></div><div class="tag">02 · kırpma</div><div class="state">canlılık işareti.<br>iki karelik kesme</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/><rect x="26" y="41" width="9" height="3" fill="#0B0C0E"/><rect x="45" y="41" width="9" height="3" fill="#0B0C0E"/></svg><span>16px</span></div></div>
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<g transform="translate(0,3)">
+<path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#5C5A57"/>
+<rect x="26" y="45" width="9" height="3" fill="#0B0C0E"/><rect x="45" y="45" width="9" height="3" fill="#0B0C0E"/></g>
+</svg></div><div class="tag">03 · uyku</div><div class="state">iş yok, düşük güç.<br>gövde söner, gözler kapalı</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#5C5A57"/><rect x="26" y="45" width="9" height="3" fill="#0B0C0E"/><rect x="45" y="45" width="9" height="3" fill="#0B0C0E"/></svg><span>16px</span></div></div>
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/>
+<rect x="26" y="32" width="9" height="19" fill="#0B0C0E"/><rect x="45" y="32" width="9" height="19" fill="#0B0C0E"/>
+</svg></div><div class="tag">04 · dikkat</div><div class="state">komut geldi, dinliyor.<br>gözler uzar</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/><rect x="26" y="32" width="9" height="19" fill="#0B0C0E"/><rect x="45" y="32" width="9" height="19" fill="#0B0C0E"/></svg><span>16px</span></div></div>
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/>
+<rect x="30" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="49" y="36" width="9" height="13" fill="#0B0C0E"/>
+</svg></div><div class="tag">05 · düşünüyor</div><div class="state">arıyor, tarıyor.<br>gözler yana kayar</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/><rect x="30" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="49" y="36" width="9" height="13" fill="#0B0C0E"/></svg><span>16px</span></div></div>
+
+</div>
+<div class="grid" style="margin-top:20px">
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/>
+<rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/>
+<rect x="16" y="93" width="48" height="5" fill="#5C5A57"/><rect x="16" y="93" width="19" height="5" fill="#EDEAE4"/>
+</svg></div><div class="tag">06 · çalışıyor</div><div class="state">iş yürüyor.<br>altta çubuk dolar</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/><rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="16" y="93" width="48" height="5" fill="#5C5A57"/><rect x="16" y="93" width="19" height="5" fill="#EDEAE4"/></svg><span>16px</span></div></div>
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<defs>
+<g id="gb"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/>
+<rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/></g>
+<clipPath id="b1"><rect x="0" y="0" width="80" height="26"/></clipPath>
+<clipPath id="b2"><rect x="0" y="26" width="80" height="20"/></clipPath>
+<clipPath id="b3"><rect x="0" y="46" width="80" height="22"/></clipPath>
+<clipPath id="b4"><rect x="0" y="68" width="80" height="32"/></clipPath>
+</defs>
+<g clip-path="url(#b1)"><use href="#gb"/></g>
+<g clip-path="url(#b2)" transform="translate(6,0)"><use href="#gb"/></g>
+<g clip-path="url(#b3)" transform="translate(-4,0)"><use href="#gb"/></g>
+<g clip-path="url(#b4)" transform="translate(3,0)"><use href="#gb"/></g>
+</svg></div><div class="tag">07 · hata</div><div class="state">iş düştü.<br>gövde dilimlenip kayar</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><g clip-path="url(#b1)"><use href="#gb"/></g><g clip-path="url(#b2)" transform="translate(6,0)"><use href="#gb"/></g><g clip-path="url(#b3)" transform="translate(-4,0)"><use href="#gb"/></g><g clip-path="url(#b4)" transform="translate(3,0)"><use href="#gb"/></g></svg><span>16px</span></div></div>
+
+<div class="card"><div class="art"><svg width="122" height="130" viewBox="-14 0 94 100">
+<rect x="-12" y="38" width="9" height="13" fill="#5C5A57"/>
+<path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/>
+<rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/>
+</svg></div><div class="tag">08 · hazır</div><div class="state">prompt döndü.<br>solda imleç yanar</div>
+<div class="mini"><svg width="17" height="18" viewBox="-14 0 94 100"><rect x="-12" y="38" width="9" height="13" fill="#5C5A57"/><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/><rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/></svg><span>16px</span></div></div>
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<defs><mask id="dz"><rect width="80" height="100" fill="#fff"/><g fill="#000">
+<rect x="0" y="30" width="80" height="1"/><rect x="0" y="38" width="80" height="1.5"/>
+<rect x="0" y="45" width="80" height="2"/><rect x="0" y="52" width="80" height="2.5"/>
+<rect x="0" y="58" width="80" height="3"/><rect x="0" y="64" width="80" height="3.5"/>
+<rect x="0" y="70" width="80" height="4"/><rect x="0" y="76" width="80" height="5"/>
+<rect x="0" y="83" width="80" height="6"/></g></mask></defs>
+<g mask="url(#dz)"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/>
+<rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/></g>
+</svg></div><div class="tag">09 · kayboluş</div><div class="state">yeniden başlıyor.<br>alttan yukarı silinir</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><g mask="url(#dz)"><path d="M40 6C22 6 12 20 12 38v50l9-9 9 9 10-9 10 9 9-9 9 9V38C68 20 58 6 40 6z" fill="#EDEAE4"/><rect x="26" y="36" width="9" height="13" fill="#0B0C0E"/><rect x="45" y="36" width="9" height="13" fill="#0B0C0E"/></g></svg><span>16px</span></div></div>
+
+<div class="card"><div class="art"><svg width="104" height="130" viewBox="0 0 80 100">
+<rect x="26" y="36" width="9" height="13" fill="#EDEAE4"/><rect x="45" y="36" width="9" height="13" fill="#EDEAE4"/>
+</svg></div><div class="tag">10 · yokluk</div><div class="state">kapalı ama orada.<br>gövde gider, gözler kalır</div>
+<div class="mini"><svg width="14" height="18" viewBox="0 0 80 100"><rect x="26" y="36" width="9" height="13" fill="#EDEAE4"/><rect x="45" y="36" width="9" height="13" fill="#EDEAE4"/></svg><span>16px</span></div></div>
+
+</div>
+
+<h2>Hareket kuralı — üç ilke</h2>
+<div class="rules">
+<div class="rule"><b>1 · Makine hareketi</b><p>Ghost canlı gibi kıpırdamaz. Esneme, zıplama, yumuşak geçiş, döndürme, ölçek yok. Hareket ya vardır ya yoktur — ara kare yoktur. 12 kare/saniyeye kilitli, tam piksel adımlarla.</p></div>
+<div class="rule"><b>2 · Üç temel hareket</b><p><b>Kırpma</b> — gözler iki kare kapanır. <b>Kayma</b> — dilim yatayda tam piksel atlar (hata). <b>Sönme</b> — dither ile satır satır silinme (kayboluş). Başka hareket icat edilmez; her hal bu üçünün bileşimidir.</p></div>
+<div class="rule"><b>3 · Hal gösterge, süs değil</b><p>Bir hal ancak Ghost gerçekten o durumdaysa kullanılır. "Hata" hali yalnızca gerçek bir hata anlatılırken çıkar. Yanlış hal, yanlış bilgidir.</p></div>
+</div>
+
+<div class="no"><b>YAPILMAZ:</b> ağız · kaş · el/kol · gülümseme · gözyaşı · renk (palet dışı) · gradyan · gölge · üç boyut · dönme · sevimlileştirme.<br>
+<b>PALET:</b> zemin #0B0C0E · hayalet #EDEAE4 · ikincil (düşük güç, imleç) #5C5A57</div>
+</body></html>

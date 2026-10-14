@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.jarvis.tunnel</string>
+    <!-- Ters tünel: Mac'teki WDA ucunu (8101) VPS'in LOCALHOST'una taşır.
+         Böylece Ghost telefonu doğrudan sürer, araya ikinci bir ajan girmez.
+         127.0.0.1 önekine DOKUNMA: VPS'te ufw 80/443 dışını kapatır, 0.0.0.0'a
+         açmak telefonu internete açmak olur. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/ssh</string>
+        <string>-i</string>
+        <string>/Users/sahip/.ssh/ghost_runtime</string>
+        <string>-N</string>
+        <string>-o</string><string>BatchMode=yes</string>
+        <string>-o</string><string>ExitOnForwardFailure=yes</string>
+        <string>-o</string><string>ServerAliveInterval=30</string>
+        <string>-o</string><string>ServerAliveCountMax=3</string>
+        <string>-o</string><string>StrictHostKeyChecking=accept-new</string>
+        <string>-R</string>
+        <string>127.0.0.1:8101:127.0.0.1:8101</string>
+        <!-- İkinci ray: Mac komut ucu (ai.jarvis.maclink). Aynı tünel, ayrı
+             port. 127.0.0.1 öneki ŞART — bkz. yukarıdaki not. -->
+        <string>-R</string>
+        <string>127.0.0.1:8765:127.0.0.1:8765</string>
+        <string>ghost@203.0.113.10</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardErrorPath</key>
+    <string>/Users/sahip/jarvis/ops/tunnel.err</string>
+</dict>
+</plist>

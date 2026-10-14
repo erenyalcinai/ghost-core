@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.jarvis.maclink</string>
+    <!-- Mac ucu: VPS'ten gelen komutu anında koşturur (kuyruk yedek hat kalır).
+         Yalnız 127.0.0.1'i dinler; dışarıya açılan tek kapı ters SSH tüneli. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/sahip/jarvis/ops/mac_agent.py</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardErrorPath</key>
+    <string>/Users/sahip/jarvis/ops/maclink.err</string>
+</dict>
+</plist>

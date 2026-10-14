@@ -1,0 +1,309 @@
+{
+  "ad": "Owner Example",
+  "unvan": "engineer",
+  "siteler": [
+    {
+      "alan": "example.com",
+      "baslik": "example.com",
+      "proje": "Pages",
+      "url": "https://example.com",
+      "izle": true,
+      "trafik": true
+    },
+    {
+      "alan": "ghostinprod.com",
+      "baslik": "ghostinprod.com",
+      "proje": "Pages",
+      "url": "https://ghostinprod.com",
+      "izle": true,
+      "strict200": true,
+      "trafik": true
+    },
+    {
+      "alan": "app-a.example.com",
+      "baslik": "app-a.example.com",
+      "proje": "Pages",
+      "url": "https://app-a.example.com",
+      "izle": true,
+      "trafik": true
+    },
+    {
+      "alan": "api.app-a.example.com",
+      "baslik": "api.app-a.example.com",
+      "proje": "Pages",
+      "url": "https://api.app-a.example.com",
+      "izle": true
+    },
+    {
+      "alan": "app-b.example.com",
+      "baslik": "app-b.example.com",
+      "proje": "Pages",
+      "url": "https://app-b.example.com",
+      "izle": true,
+      "trafik": true
+    },
+    {
+      "alan": "owner.example",
+      "baslik": "owner.example",
+      "proje": "Pages",
+      "url": "https://owner.example",
+      "izle": true,
+      "trafik": true
+    },
+    {
+      "alan": "familyco.example.com",
+      "baslik": "familyco.example.com",
+      "proje": "Pages",
+      "url": "https://familyco.example.com",
+      "izle": true,
+      "trafik": true
+    },
+    {
+      "alan": "example-org.com",
+      "baslik": "example-org.com",
+      "proje": "Pages",
+      "url": "https://example-org.com",
+      "izle": true
+    },
+    {
+      "alan": "owner-card.example/…",
+      "baslik": "owner-card.example",
+      "proje": "Pages",
+      "url": "https://owner-card.example/c/XXXXXXXXXXXX/",
+      "izle": true,
+      "strict200": true,
+      "nfc": true
+    },
+    {
+      "alan": "hooks.owner.example",
+      "baslik": "hooks.owner.example",
+      "proje": "Pages",
+      "url": "https://hooks.owner.example",
+      "izle": true,
+      "get_only": true
+    }
+  ],
+  "masa_kok": [
+    "AppA",
+    "App B",
+    "Saat",
+    "Yalco",
+    "Ghost",
+    "Raporlar",
+    "Paylaşımlar"
+  ],
+  "asr_sozluk": [
+    "Ghost",
+    "Kokpit",
+    "Echo"
+  ],
+  "varliklar": [
+    [
+      "Sahip",
+      "kişi",
+      "example"
+    ],
+    [
+      "app-a.example.com",
+      "site",
+      "example"
+    ],
+    [
+      "api.app-a.example.com",
+      "site",
+      "example"
+    ],
+    [
+      "app-b.example.com",
+      "site",
+      "example"
+    ],
+    [
+      "owner.example",
+      "site",
+      "example"
+    ],
+    [
+      "familyco.example.com",
+      "site",
+      "example"
+    ],
+    [
+      "example.com",
+      "site",
+      "example"
+    ],
+    [
+      "owner-card.example",
+      "site",
+      "example"
+    ],
+    [
+      "AppA",
+      "uygulama",
+      "example"
+    ],
+    [
+      "AppB",
+      "uygulama",
+      "example"
+    ],
+    [
+      "appc",
+      "uygulama",
+      "example"
+    ],
+    [
+      "app-a-backend",
+      "backend",
+      "example"
+    ],
+    [
+      "app-c-backend",
+      "backend",
+      "example"
+    ],
+    [
+      "Ghost",
+      "proje",
+      "example"
+    ],
+    [
+      "Cloudflare",
+      "hesap",
+      "example"
+    ],
+    [
+      "NameCheap",
+      "hesap",
+      "example"
+    ],
+    [
+      "VPS",
+      "cihaz",
+      "example"
+    ],
+    [
+      "Mac",
+      "cihaz",
+      "example"
+    ]
+  ],
+  "iliskiler": [
+    [
+      "Sahip",
+      "sahibi",
+      "AppA"
+    ],
+    [
+      "Sahip",
+      "sahibi",
+      "AppB"
+    ],
+    [
+      "Sahip",
+      "sahibi",
+      "appc"
+    ],
+    [
+      "Sahip",
+      "sahibi",
+      "Ghost"
+    ],
+    [
+      "Cloudflare",
+      "barındırır",
+      "app-a.example.com"
+    ],
+    [
+      "Cloudflare",
+      "barındırır",
+      "app-b.example.com"
+    ],
+    [
+      "Cloudflare",
+      "barındırır",
+      "owner.example"
+    ],
+    [
+      "Cloudflare",
+      "barındırır",
+      "example.com"
+    ],
+    [
+      "Cloudflare",
+      "barındırır",
+      "api.app-a.example.com"
+    ],
+    [
+      "Cloudflare",
+      "barındırır",
+      "owner-card.example"
+    ],
+    [
+      "NameCheap",
+      "kayıtçısı",
+      "app-a.example.com"
+    ],
+    [
+      "NameCheap",
+      "kayıtçısı",
+      "owner.example"
+    ],
+    [
+      "NameCheap",
+      "kayıtçısı",
+      "example.com"
+    ],
+    [
+      "AppA",
+      "backend'i",
+      "app-a-backend"
+    ],
+    [
+      "app-a-backend",
+      "sunar",
+      "api.app-a.example.com"
+    ],
+    [
+      "AppA",
+      "landing'i",
+      "app-a.example.com"
+    ],
+    [
+      "AppB",
+      "landing'i",
+      "app-b.example.com"
+    ],
+    [
+      "appc",
+      "backend'i",
+      "app-c-backend"
+    ],
+    [
+      "appc",
+      "landing'i",
+      "owner.example"
+    ],
+    [
+      "Ghost",
+      "çalışır",
+      "VPS"
+    ],
+    [
+      "Ghost",
+      "çalışır",
+      "Mac"
+    ]
+  ],
+  "ad_kisa": "Owner",
+  "ses": {
+    "makineler": "VPS (Ghost'un beyni, 7/24); Mac (işçi); iPhone (uzuv).",
+    "urunler": "örnek profil — sayı ve durum için araç çağır.",
+    "dunya": "Ghost, Kokpit, siteler, Mac, telefon, kod, deploy, commit"
+  },
+  "ssh_parmak_izleri": [
+    "SHA256:0000000000000000000000000000000000000000000"
+  ],
+  "ev_sehirleri": []
+}

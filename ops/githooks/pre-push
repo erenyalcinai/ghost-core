@@ -1,0 +1,87 @@
+#!/bin/sh
+# Ghost test kapısı — kod bare repoya (dolayısıyla Mac işçisine) testler
+# geçmeden gidemez.
+#
+# NEDEN VAR (2026-08-21): deploy.sh testleri koşuyordu ama ops/ altındaki bir
+# değişikliği doğrudan commit+push etmek hiçbir kapıdan geçmiyordu — Mac o
+# bare repodan çekip çalıştırdığı için kod, tek test koşmadan canlıya
+# çıkabiliyordu. Nitekim mac_worker.py'nin hafıza-senkron yaması o gece böyle
+# gitti (sonradan koşuldu, geçti; ama sıra yanlıştı).
+#
+# Yalnız KOD değişince koşar (ghost/, ops/, tests/). Sebep: Mac'teki knowsync
+# 30 dk'da bir dossier/playbooks'u otomatik commit+push ediyor; her doküman
+# senkronunu teste bağlamak, ilgisiz bir kırık test yüzünden Ghost'un bilgi
+# akışını sessizce durdururdu. Aralık hesaplanamazsa GÜVENLİ tarafa düşülür:
+# testler koşar.
+#
+# Acil kaçış: GHOST_SKIP_TESTS=1 git push ...  (bilerek gürültülü)
+
+BASE="$(git rev-parse --show-toplevel)" || exit 0
+SIFIR="0000000000000000000000000000000000000000"
+
+if [ "${GHOST_SKIP_TESTS:-0}" = "1" ]; then
+    echo "⚠️  TEST KAPISI ATLANDI (GHOST_SKIP_TESTS=1) — bilerek yapıldıysa sorun yok."
+    exit 0
+fi
+
+kod=0
+SHA=""
+while read -r _yerel_ref yerel_sha _uzak_ref uzak_sha; do
+    [ -z "$yerel_sha" ] && continue
+    [ "$yerel_sha" = "$SIFIR" ] && continue          # dal silme: kod gitmiyor
+    if [ "$uzak_sha" = "$SIFIR" ]; then
+        kod=1; SHA="$yerel_sha"; break                # yeni dal: emin ol, koş
+    fi
+    degisen="$(git diff --name-only "$uzak_sha" "$yerel_sha" 2>/dev/null)" || {
+        kod=1; SHA="$yerel_sha"; break                # aralık okunamadı: koş
+    }
+    if printf '%s\n' "$degisen" | grep -qE '^(ghost/|ops/|tests/)'; then
+        kod=1; SHA="$yerel_sha"
+    fi
+done
+
+if [ "$kod" = "0" ]; then
+    echo "→ test kapısı: kod değişmemiş (yalnız bilgi/doküman), atlandı."
+    exit 0
+fi
+
+# NEDEN ARŞİV, ÇALIŞMA AĞACI DEĞİL (2026-08-24): kapı testleri BASE'de
+# koşuyordu ve orada iki şey vardı ki CI'da yok — (1) `.env` (gitignore'da):
+# telegram_bridge/selfcheck/uptime_watch import anında koşulsuz açıyordu, kapı
+# yeşil görüp push'a izin verdi, CI iki gün kırmızı kaldı; (2) commit'lenmemiş
+# yerel dosyalar: kapı push EDİLMEYEN bir ağacı test ediyordu. `git archive`
+# ikisini birden kapatır — tam olarak push edilen ağaç, .env'siz, CI'nın gördüğü
+# dosya kümesinin aynısı. Kapı ile CI aynı ortamı test etmiyorsa kapı bir şey
+# korumuyordur.
+TMP="$(mktemp -d 2>/dev/null)" || TMP=""
+if [ -z "$TMP" ] || [ -z "$SHA" ]; then
+    echo "⚠ arşiv ortamı hazırlanamadı — testler çalışma ağacında koşuyor." >&2
+    TMP=""
+else
+    if git -C "$BASE" archive "$SHA" 2>/dev/null | (cd "$TMP" && tar -x); then
+        :
+    else
+        echo "⚠ push edilen ağaç ($SHA) açılamadı — çalışma ağacına düşülüyor." >&2
+        rm -rf "$TMP"; TMP=""
+    fi
+fi
+
+KOSUM="${TMP:-$BASE}"
+if [ -n "$TMP" ]; then
+    echo "→ test kapısı: kod değişti, testler koşuyor (push edilen ağaç, .env'siz — CI ile aynı)..."
+else
+    echo "→ test kapısı: kod değişti, testler koşuyor..."
+fi
+if ! (cd "$KOSUM" && python3 -m compileall -q ghost ops tests >/dev/null \
+      && python3 -m unittest discover -s tests -q); then
+    [ -n "$TMP" ] && rm -rf "$TMP"
+    echo "" >&2
+    echo "✗ PUSH DURDURULDU — testler geçmedi." >&2
+    [ -n "$TMP" ] && echo "  (CI ortamında koşuldu: .env YOK. Yerelde geçip burada" >&2
+    [ -n "$TMP" ] && echo "   düşüyorsa modül import anında .env gibi izlenmeyen bir dosya okuyordur.)" >&2
+    echo "  Düzelt, ya da bilerek geçmek için: GHOST_SKIP_TESTS=1 git push ..." >&2
+    exit 1
+fi
+[ -n "$TMP" ] && rm -rf "$TMP"
+echo "✓ testler geçti, push sürüyor."
+exit 0

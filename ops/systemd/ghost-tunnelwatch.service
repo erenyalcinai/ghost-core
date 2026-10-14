@@ -1,0 +1,11 @@
+[Unit]
+Description=Ghost ters tunel nobetcisi (zombi sshd oturumu temizler)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/ghost/jarvis/ops/tunnel_watch.py
+TimeoutStartSec=120
+# Sağlıklı tur SESSİZ olsun: 2 dk'da bir 'Starting/Finished' yazmak
+# günde ~1440 journal satırı demekti (ölçüldü) ve nöbetçi bu makinenin
+# en gürültülü yazıcısı olurdu. Uyarı/hata seviyesi geçmeye devam eder.
+LogLevelMax=warning
