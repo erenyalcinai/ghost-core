@@ -26,6 +26,70 @@ here and probably the most useful.
 | Lessons | 170 operational lessons, auto-extracted from commit messages, curated in [LESSONS.md](LESSONS.md) |
 | History | 65 days, 680+ commits in the private tree, ~83% authored by the agent under the owner's direction |
 
+## What it does, day to day
+
+Mechanisms are below; this is the outcome side. Numbers are from the private tree on 2026-10-15,
+day 65. Where a reader lives only in the private tree it is marked *(private)*: the gate that
+constrains it is public, the code that reads the data is not.
+
+### For one person
+
+- **Morning report.** What it did overnight, what it is waiting on you for, how the business is
+  doing. On Telegram and on the Pulse page of the cockpit. 589 briefing lines so far.
+- **Reads your mail.** Your inbox is forwarded to its own address and spooled into a digest; it
+  reads your Gmail over IMAP with Gmail's own query language, full history. *(private)*
+- **Writes into your phone.** Real iOS reminders and calendar events, queued through the cockpit,
+  with the alarm living on the phone so it fires with the server off. Geofences you set from where
+  you are standing wake the agent when you arrive.
+- **Knows your context.** Your location, today's calendar and your battery are one line in every
+  turn. Stale data is dropped rather than guessed.
+- **Searches your past.** Apple Notes, Photos, iCloud Drive, WhatsApp (live and from backup),
+  SMS/iMessage history, call log, contacts, Safari history, all from an unencrypted iPhone backup
+  it takes itself every night, plus 2,623 ChatGPT conversations imported and full-text indexed.
+  Every read goes through one localhost process with a token and a log (`ops/mac_veri_okuyucu.py`);
+  the readers for mail, chat history and the backup are *(private)*.
+- **Uses your machines.** Screenshots, clicks, typing and app launches on the Mac in ~0.3 s; the
+  same on an iPhone over Wi-Fi. The cockpit shows you the live screen.
+- **Talks.** A voice agent that answers from tools and forwards real work instead of pretending.
+- **Shows instead of telling.** Tables, diffs, charts and approval cards drawn by the server inside
+  the native app; a shared Desk of cards you can add notes and files to. 80 images and files sent
+  into the app so far.
+- **Remembers.** 164 memories and an entity graph injected into every turn; standing goals it
+  works on when idle.
+
+### For a studio or a team
+
+- **Ships apps.** Builds, signs and uploads iOS apps; wrote the store listing in two languages,
+  took the screenshots, answered App Review and filed the in-app purchase. App B went live on
+  the App Store on 2026-10-04 this way, with the owner doing two things: logging in and saying go.
+- **Deploys sites.** Cloudflare Pages and Workers, DNS, redirects via Page Rules when the modern
+  API is closed to it. 220 deployments of its own diary site alone.
+- **Watches.** Uptime, open ports, SSH logins, Sentry errors, App Store review status, PostHog
+  traffic with the owner and bots filtered out, subscriber counts read straight from the D1
+  database. A self-check every few minutes; 172 alerts raised in 65 days, most of them about
+  its own stale code.
+- **Reports on the business.** A daily business digest (42 snapshots), a weekly synthesis, a
+  daily intelligence briefing on the market *(private)*.
+- **Fixes itself.** Restarts stale services without killing the reply in flight, restores its own
+  git hooks, updates its CLI daily, notices when the model alias map has gone stale.
+- **Keeps books.** 1,934 autonomous actions in the audit log; 1,071 webhook jobs and 17,435 chat
+  turns in the event log; 710 commits, 172 lessons.
+- **Works while you sleep.** A job queue for the Mac that runs when it wakes; cron and systemd
+  units for the rest; a physical key that can take the Mac away from it.
+
+### Data it can reach
+
+| Source | How | In this tree |
+|---|---|---|
+| Telegram, native iOS/macOS app, voice | bridge, cockpit API, ElevenLabs Agents webhooks | yes |
+| Mac: shell, GUI, screen | reverse tunnel fast lane + queue, computer-use driver | yes |
+| iPhone: screen, taps, apps | WebDriverAgent over Wi-Fi relay | yes |
+| Private Mac data: Notes, Photos, Files, WhatsApp, backup | single Full-Disk-Access reader, localhost + token + log | gate yes, readers private |
+| Mail: own inbox, forwarded inbox, Gmail IMAP | spool + digest, IMAP reader | private |
+| ChatGPT history | export import + FTS | private |
+| GitHub, Sentry, Cloudflare, App Store Connect, PostHog, D1 | MCP servers and REST | wiring pattern yes, business scripts private |
+| Owner context: location, calendar, battery | cockpit senses | yes |
+
 ## What makes it different
 
 **It keeps itself safe in production, not in a demo.**
