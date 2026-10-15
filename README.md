@@ -161,6 +161,21 @@ dies, the Mac takes over the Telegram listener (baton policy) so the owner at le
   into a playbook automatically. Knowledge is written where it is produced and moved to
   where it is read, without anyone remembering to do it.
 
+**It builds and corrects itself, through itself.** The agent edits its own repository from
+inside its own chat session: it patches `ghost/` and the Swift app, writes the tests, commits,
+and the push goes through the same test gate as any human push (`ops/githooks/pre-push`). The
+running bridge then replaces itself with the new code only when idle (`ops/self_restart.sh`);
+the self-check notices when a process is still on stale code and renews it; the Mac worker
+reloads new code within 30 s on its own. The loop closes on knowledge, not just code: every
+root cause is written as a `Ders:` block in the commit, extracted into the lessons file
+automatically, and the rules that must change behaviour go into the agent's own operating
+context (`CLAUDE.md`), which it is instructed to keep correct: a stale line there misleads
+every future session, so it fixes the line when it sees it. Its memory directory is written
+the same way. The publishing script that produced this repository, the scrubber, the CI
+workflow and this README were written by the agent. About 83% of the private tree's commits
+are its own. What it may not do on its own: anything classed permanent or spend, anything
+while `FREEZE` exists, and anything on the Mac while the key is out.
+
 **Your data, and who may read it.** The owner's private data (Notes, Photos, iCloud files,
 WhatsApp, SMS/iMessage, calls, contacts, Safari, Mac Mail, a nightly unencrypted iPhone backup
 the agent takes itself) is readable by exactly one process on the Mac: a Full-Disk-Access
