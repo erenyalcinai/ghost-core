@@ -6,6 +6,10 @@ a Mac it uses as a worker, an iPhone it physically controls, a Telegram bridge, 
 native iOS/macOS cockpit app, a voice agent, a persistent memory, a governance layer
 with approval gates, and a blind second-eye verifier that can veto its own reports.
 
+For its owner it is the thing that reads the mail, searches the last ten years of messages,
+notes, photos and calls when asked, writes reminders into the phone, drives the Mac, ships
+the apps, and reports every morning. For a studio it is the invisible half of the team.
+
 This repository is the **open core** of that system. It was built by one engineer and
 the agent itself over 65 days, in production, with real failures. The lessons those
 failures produced are in [LESSONS.md](LESSONS.md); that file is the most honest thing
@@ -156,6 +160,18 @@ dies, the Mac takes over the Telegram listener (baton policy) so the owner at le
 - **Lessons pipeline** (`ops/ders_yaz.py`): a `Ders:` block in a commit message is extracted
   into a playbook automatically. Knowledge is written where it is produced and moved to
   where it is read, without anyone remembering to do it.
+
+**Your data, and who may read it.** The owner's private data (Notes, Photos, iCloud files,
+WhatsApp, SMS/iMessage, calls, contacts, Safari, Mac Mail, a nightly unencrypted iPhone backup
+the agent takes itself) is readable by exactly one process on the Mac: a Full-Disk-Access
+reader bound to localhost, token-gated, with every read written to a log the owner can open
+(`ops/mac_veri_okuyucu.py`, 14 endpoints). The fast lane the agent uses for everything else
+deliberately has no such access. A YubiKey in the Mac is the physical switch: pull it and the
+reader answers "locked". The rule the agent follows is written, not implied: it searches
+personal history only when the question is about the owner's own life, never for code,
+infrastructure or business work, and it says "not found" only after it has looked everywhere
+(`ops/mac_veri.py` documents the sources). Backup, chat history and mail readers that import
+third-party data (Gmail IMAP, ChatGPT export) stayed private; the gate is public.
 
 **It has hands, not just an API.**
 - **Mac as a worker**: a fast lane (reverse SSH tunnel, ~0.3 s round trip) for commands,
