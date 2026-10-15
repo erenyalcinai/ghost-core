@@ -28,7 +28,7 @@ a collision is not; on any doubt the VPS listens.
 Grouped by concern. Line counts are from this tree.
 
 **Input and dispatch**
-- `bus.py` (111) — event bus on SQLite; every input is one event type. *Status: written to, no central consumer yet; the real flow is still the bridge's own job queue.*
+- `bus.py` (111) — event bus on SQLite; every input is one event type. *Status: all automated requests (monitors, scheduler, goals, webhooks, weekly synthesis) are consumed from it by the bridge; chat input still bypasses it.*
 - `komutlar.py` (692) — command registry: slash commands and their handlers, moved out of the bridge.
 - `cc_komutlar.py` (124) — discovers Claude Code skills/commands so the chat engine can use them.
 - `intent.py` (102) — catches record-creating intents in free text.
@@ -79,7 +79,7 @@ Grouped by concern. Line counts are from this tree.
 - `ses_ajani.py` (661) — the voice agent "Echo" (ElevenLabs Agents): answers from tools, forwards work to Ghost, never claims work is done; prompt facts come from the owner profile.
 
 **Other**
-- `email.py` (43) — inbound e-mail via a Cloudflare worker; outbound is stubbed (no key, refuses politely).
+- `email.py` (43) — outbound via Resend, real but unwired until `RESEND_API_KEY` exists, audited as a permanent action; the inbound Cloudflare worker is not in this tree.
 - `dersler.py` (82) — lessons extraction (see §5).
 - `agents/` — five departments as YAML (engineering, intelligence, finance, earnings, operations); a department is a persona + tool set + routing keywords, not code. The earnings department points at the economy module, which is not in this tree; its two commands say so.
 - `tools/registry.py` (111) — capability inventory.
@@ -107,7 +107,7 @@ Grouped by concern. Line counts are from this tree.
 
 ```
 read ──► reversible-write ──► permanent-write ──► spend
-(auto)   (auto + audit)       (approval)          (approval + vault)
+(auto)   (auto + audit)       (approval)          (approval)
 ```
 
 `/freeze` stops every level at once. Every autonomous action lands in `ops/audit.jsonl`. Weekly
@@ -137,7 +137,7 @@ screens, settings, pairing, voice ("Konuş"). The HTTP protocol is documented in
 ## 7. Known limitations (kept honest)
 
 - Sandbox has no filesystem or network isolation.
-- Event bus has no central consumer; dispatch still lives in the bridge.
+- Chat input bypasses the event bus; automated inputs go through it.
 - Single owner, single Telegram id, Turkish UI.
 - The Mac fast lane is single-threaded; one hung command blocks it (there is a sentinel for that).
 - Outbound e-mail is stubbed.
