@@ -11,7 +11,7 @@ notes, photos and calls when asked, writes reminders into the phone, drives the 
 the apps, and reports every morning. For a studio it is the invisible half of the team.
 
 This repository is the **open core** of that system. It was built by one engineer and
-the agent itself over 65 days, in production, with real failures. The lessons those
+the agent itself, in production since 11 August 2026, with real failures. The lessons those
 failures produced are in [LESSONS.md](LESSONS.md); that file is the most honest thing
 here and probably the most useful.
 
@@ -28,7 +28,7 @@ here and probably the most useful.
 | Tests | 508, run in ~18 s with `python -m unittest`, no network, CI on every push |
 | Scheduling units | 8 launchd agents (Mac) + 3 systemd units (VPS) in this tree; the bridge and self-check units themselves live in the private deploy |
 | Lessons | 170 operational lessons, auto-extracted from commit messages, curated in [LESSONS.md](LESSONS.md) |
-| History | 65 days, 680+ commits in the private tree, ~83% authored by the agent under the owner's direction |
+| History | Started 11 August 2026; this open-core snapshot is from day 65 (680+ commits in the private tree, ~83% authored by the agent under the owner's direction) |
 
 ## What it does, day to day
 
