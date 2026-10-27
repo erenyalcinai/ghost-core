@@ -88,3 +88,9 @@ reset --hard, drop table, üzerine yaz — hepsi onay ister.
   `python3 -m ghost.gorevler etkinlik "<ad>" "<başlangıç>" ["bitiş"] ["yer"]`
 - **`/hatirlat` ile aynı şey DEĞİL:** o Ghost'un zamanlayıcısı, Telegram mesajı atar
   (telefon sessizdeyse kaybolur). Bu iOS'un kendi alarmı — Ghost kapalıyken de çalar.
+
+## Olay → kural motoru (2026-10-26)
+- Kural motoru (Ghost'un CLI'si, Telegram komutu değil — "şu olursa şunu yap" deyince Ghost kurar):
+  `python3 -m ghost.kurallar liste | ekle "<ad>" <olay|monitor|bolge|masa>:<ad|*> <sohbet|is|bildir> "<eylem>" [--soguma sn] | sil <id> | kapat/ac <id> | dene <tur>:<ad> | olaylar [N]`
+  Tetik kaynakları: iPhone Kısayollar otomasyonu (POST `https://hooks.owner.example/kisayol` gövde `{"olay":"sarj_takildi"}`,
+  rehber `docs/kisayollar.md`), monitör değişimi (`/izle`), bölge giriş/çıkış (`/bolge`), Masa'ya sahibin eklediği kayıt.

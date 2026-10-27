@@ -47,6 +47,18 @@ SSH_KEY = os.path.join(HOME, ".ssh", "ghost_runtime")  # ghost-only anahtar
 RQUEUE = "/home/ghost/jarvis/ops/mac-queue"
 CLAUDE = ENV.get("CLAUDE_BIN", "/usr/local/bin/claude")
 
+
+def _alt_env():
+    """claude alt süreci için ortam: launchd'nin verdiği os.environ + secrets.env'deki
+    uzun ömürlü OAuth belirteci. 2026-10-25: Mac Keychain'deki OAuth oturumu süresi
+    dolmuştu (refresh yok), claude -p "could not be refreshed" diyordu; VPS gibi
+    CLAUDE_CODE_OAUTH_TOKEN ile kimlik doğrulanır, dosyadaki değer alt sürece geçmeliydi."""
+    env = dict(os.environ)
+    tok = ENV.get("CLAUDE_CODE_OAUTH_TOKEN")
+    if tok and not env.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
+    return env
+
 SSH = ["ssh", "-i", SSH_KEY, "-o", "ConnectTimeout=10",
        "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes",
        "-o", "ControlMaster=auto",
@@ -147,7 +159,7 @@ MCP_MOBILE = os.path.join(BASE, "mcp-mobile.json")
 
 
 def _claude_once(prompt, sid, resume):
-    env = dict(os.environ)
+    env = _alt_env()
     env["PATH"] = env.get("PATH", "") + ":/usr/local/bin:/opt/homebrew/bin"
     base = [CLAUDE, "-p", prompt, "--output-format", "json",
             "--dangerously-skip-permissions"]
@@ -332,7 +344,7 @@ def _run_job(raw, path, claimed, name, quiet):
         return True
     if job.get("rc"):
         # Remote-control oturumu (telefondaki Claude uygulamasında görünür)
-        env = dict(os.environ)
+        env = _alt_env()
         env["PATH"] = env.get("PATH", "") + ":/usr/local/bin:/opt/homebrew/bin"
         env.pop("CLAUDE_CODE_CHILD_SESSION", None)
         sname = "ghost-" + uuid.uuid4().hex[:6]
@@ -620,7 +632,7 @@ def sync_knowledge():
         if (os.path.exists(KNOWSYNC_MARK)
                 and time.time() - os.path.getmtime(KNOWSYNC_MARK) < 1800):
             return
-        env = dict(os.environ)
+        env = _alt_env()
         env["GIT_SSH_COMMAND"] = ("ssh -i %s -o BatchMode=yes -o ConnectTimeout=10"
                                   % SSH_KEY)
 
@@ -637,7 +649,15 @@ def sync_knowledge():
         pull = git("pull", "--rebase", "--autostash", "vps", "main", timeout=120)
         if pull.returncode != 0:
             git("rebase", "--abort")
-            log("bilgi senkron: rebase çakışması — iptal edildi, elle bak")
+            # 2026-10-25: her pull hatası "çakışma" diye yazılıyordu; 25 Ekim'de gün boyu
+            # loglanan 15 "çakışma" aslında fetch'in düşmesiydi (Mac VPS'e ssh ile
+            # ulaşamıyordu, reflog'da tek rebase izi yok). Gerçek sebep log'a girsin.
+            err = ((pull.stderr or "") + (pull.stdout or "")).strip().replace("\n", " | ")
+            if "CONFLICT" in err or "could not apply" in err:
+                log("bilgi senkron: rebase çakışması — iptal edildi, elle bak: %s" % err[-240:])
+            else:
+                log("bilgi senkron: pull başarısız (rc=%d, çakışma değil): %s"
+                    % (pull.returncode, err[-240:]))
         else:
             git("push", "vps", "main", timeout=120)
         with open(KNOWSYNC_MARK, "w", encoding="utf-8") as f:

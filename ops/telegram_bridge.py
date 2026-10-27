@@ -62,6 +62,7 @@ from ghost import akis, apns, bus, channels, health, kokpit, komutlar  # noqa: E
 from ghost import kesik_mesaj
 from ghost import kalici_oturum, kota  # noqa: E402  (2026-09-07: tek süreç çok tur + abonelik kotası)
 from ghost import modeller  # noqa: E402  (2026-10-01: takma ad → en güncel tam kimlik)
+from ghost import kurallar  # noqa: E402  (2026-10-26: olay → kural motoru; Masa gelen kutusu tick'i)
 
 
 def _with_memory(text):
@@ -105,10 +106,15 @@ MCP_CONFIG = os.path.join(BASE, "mcp.json")  # varsa entegrasyonlar yüklenir (y
 # yalnız gerekli olan(lar) yüklenir (bkz. _mcp_servers_for) — her mesajda
 # üçünü birden (playwright headless Chromium dahil) ayağa kaldırmak yerine.
 MCP_CONFIGS = {
-    "github": os.path.join(BASE, "mcp-github.json"),
+    "github": os.path.join(BASE, "mcp-github.json"),        # salt-okunur uç (2026-10-19: 46→28 araç)
+    "github-yaz": os.path.join(BASE, "mcp-github-yaz.json"),  # tam uç; yalnız PR/issue YAZMA niyetinde
     "sentry": os.path.join(BASE, "mcp-sentry.json"),
     "playwright": os.path.join(BASE, "mcp-playwright.json"),
+    "sosumi": os.path.join(BASE, "mcp-sosumi.json"),        # Apple doküman/HIG/WWDC, 4 araç, anahtarsız
+    "posthog": os.path.join(BASE, "mcp-posthog.json"),      # salt-okunur, cli kipi (tek exec aracı)
 }
+# Belirsiz mesajda yüklenen "güvenli" küme — posthog ve github-yaz yalnız anahtar kelimeyle.
+MCP_DEFAULT = ("github", "sentry", "playwright", "sosumi")
 UPTIME_STATE = os.path.join(OPS, "uptime_state.json")
 LOG_FILE = os.path.join(OPS, "bridge.log")
 REQUESTS = os.path.join(OPS, "requests")     # nöbetçi/cron → otomatik iş kuyruğu
@@ -232,11 +238,22 @@ PLAYWRIGHT_KW = re.compile(
     r"screenshot|gez|dola[şs]|sayfay[ıi] a[çc]|giri[şs] yap)",
     re.IGNORECASE,
 )
+# 2026-10-19: PostHog artık MCP (salt-okunur, cli kipi) — curl-only listesinden çıktı.
 CURL_ONLY_KW = re.compile(
-    r"\b(cloudflare|dns|zone|trafik|traffic|posthog|metrik|funnel|retention|"
-    r"kullan[ıi]c[ıi] say[ıi]|aktif kullan[ıi]c[ıi]|abone)",
+    r"\b(cloudflare|dns|zone|trafik|traffic)",
     re.IGNORECASE,
 )
+POSTHOG_KW = re.compile(
+    r"\b(posthog|metrik|funnel|retention|kullan[ıi]c[ıi] say[ıi]|aktif kullan[ıi]c[ıi]|"
+    r"abone|olay say[ıi]|event|hogql)", re.IGNORECASE)
+# Apple doküman MCP'si (sosumi.ai): Swift/iOS işinde bayat API bilgisini canlı kaynakla düzeltir.
+SOSUMI_KW = re.compile(
+    r"\b(swift|swiftui|swiftdata|xcode|widgetkit|storekit|uikit|appkit|combine|"
+    r"appb|desk t|kokpit|ios ?\d{2}|macos|apple dok)", re.IGNORECASE)
+# GitHub YAZMA niyeti: tam uç (PR/issue/yorum oluşturma); okuma salt-okunur uçta.
+GITHUB_YAZ_KW = re.compile(
+    r"\b(pr a[çc]|pull request a[çc]|issue a[çc]|issue olu[şs]tur|yorum (yaz|ekle|b[ıi]rak)|"
+    r"merge et|birle[şs]tir|release (a[çc]|olu[şs]tur)|etiket(le| ekle))", re.IGNORECASE)
 
 
 def _mcp_servers_for(text):
@@ -244,17 +261,23 @@ def _mcp_servers_for(text):
     ama trivial olmayan mesaj) güvenli tarafta kal: üçünü de yükle — yetenek
     kaybı olmasın, sadece NET kategorilerde daralt."""
     servers = set()
-    if GITHUB_KW.search(text):
+    if GITHUB_YAZ_KW.search(text):
+        servers.add("github-yaz")   # tam uç; salt-okunur olanla birlikte yüklenmez
+    elif GITHUB_KW.search(text):
         servers.add("github")
     if SENTRY_KW.search(text):
         servers.add("sentry")
     if PLAYWRIGHT_KW.search(text):
         servers.add("playwright")
+    if SOSUMI_KW.search(text):
+        servers.add("sosumi")
+    if POSTHOG_KW.search(text):
+        servers.add("posthog")
     if servers:
         return sorted(servers)
     if CURL_ONLY_KW.search(text):
-        return []  # cloudflare/posthog → zaten curl, hiçbir MCP gerekmiyor
-    return list(MCP_CONFIGS)  # belirsiz mesaj — eski davranış: hepsini yükle
+        return []  # cloudflare → zaten curl, hiçbir MCP gerekmiyor
+    return list(MCP_DEFAULT)  # belirsiz mesaj: güvenli küme (posthog/github-yaz hariç)
 
 
 def _duyu_note():
@@ -292,7 +315,7 @@ def _tool_note(servers):
                 "hız için bilinçli seçim, ARIZA DEĞİL. Araç gereken bir şey "
                 "sorulursa 'bağlantı düştü/koptu' DEME; aracın bu turda yüklü "
                 "olmadığını söyle ve konuyu net sorarsa yükleneceğini belirt.]\n")
-    eksik = [n for n in MCP_CONFIGS if n not in servers]
+    eksik = [n for n in MCP_DEFAULT if n not in servers]
     if not eksik:
         return ""
     return ("[ARAÇ DURUMU: bu turda yüklü MCP: %s. Yüklenmeyen: %s — konu dışı "
@@ -1357,8 +1380,12 @@ class Manager:
                     log("ikinci göz hatası (#%s): %r" % (jid, e))
             takildi = verify.blocks(karar)
             durum = "hata" if err else ("denetimde takıldı" if takildi else "bitti")
+            # Hata sebebi kayda geçsin: önceden iş "hata" ile kapanır ama NEDEN
+            # hiçbir yerde durmazdı (iş #52, 19 Ekim: 8 sn'de hata, sebep yok).
+            # Sentez ve denetçi tahmin etmek yerine okusun (haftalık sentez 25 Ekim).
             self._set(jid, status=durum, ended=time.strftime("%F %T"),
-                      **({"verify": karar} if karar else {}))
+                      **({"verify": karar} if karar else {}),
+                      **({"hata": (res or "")[:500]} if err else {}))
             governance.audit("bridge", "job.finish", governance.READ,
                              "#%d %s %s (%ds)" % (jid, kind,
                                                   "hata" if err else durum, dur))
@@ -2064,6 +2091,7 @@ def main():
         signal.signal(signal.SIGTERM, _kapanis)
     prev_owner = None  # bayrak-kazanma tespiti (devir notu) için önceki sahip
     poll_fail_streak = 0  # ardışık poll timeout sayacı (log gürültüsünü azaltmak için)
+    poll_fail_t0 = 0.0    # serinin başlangıcı — düzelince "N hata, X sn kesinti" için
     # --- devralma durumu (bkz. ghost/baton_policy.py) ---
     basladi_ts = int(time.time())     # VPS açılış bekleme penceresinin sıfırı
     vps_karar_verildi = ROLE != "vps"  # Mac'te pencere yok
@@ -2162,6 +2190,10 @@ def main():
                 goals.tick()
             except Exception as e:
                 log("tick hata[goals]: %r" % e)
+            try:
+                kurallar.tick()
+            except Exception as e:
+                log("tick hata[kurallar]: %r" % e)
         # ---- bayrak kontrolü: yalnızca bayrak bende ise dinle ----
         b = baton_get()
         now = int(time.time())
@@ -2253,10 +2285,18 @@ def main():
         try:
             updates = api("getUpdates", offset=offset, timeout=POLL_TIMEOUT,
                           http_timeout=POLL_TIMEOUT + 10)
+            if poll_fail_streak >= 3:  # gerçek kesinti bitti → tek satır özet
+                log("poll düzeldi: %d hata, %d sn kesinti"
+                    % (poll_fail_streak, time.time() - poll_fail_t0))
             poll_fail_streak = 0
         except Exception as e:
             poll_fail_streak += 1
-            if poll_fail_streak == 1 or poll_fail_streak % 3 == 0:
+            if poll_fail_streak == 1:
+                poll_fail_t0 = time.time()
+            # Tekil Telegram zaman aşımları (ardışık 1-2) kendiliğinden düzelir ve
+            # haftada ~370 satır gürültü yapıyordu; gerçek kesinti (22 Ekim 01:23,
+            # 51 ardışık) aralarında görünmüyordu. 3'e ulaşınca yaz, sonra her 10'da.
+            if poll_fail_streak == 3 or (poll_fail_streak > 3 and poll_fail_streak % 10 == 0):
                 log("poll hata (ardışık %d): %r" % (poll_fail_streak, e))
             time.sleep(3)
             continue
@@ -2310,6 +2350,12 @@ def main():
             text = (msg.get("text") or "").strip()
             channels.son_kanal_ayarla("telegram")   # cevap Telegram'a; uygulamaya push yok
             if text:
+                if not (msg.get("forward_origin") or msg.get("forward_from")):
+                    try:  # sahibi doğrulanmış, iletilmemiş mesaj: gerçek onay kapısı
+                        from ghost import sahne as _sahne
+                        _sahne.sahip_onayi_kaydet(text, "telegram")
+                    except Exception:
+                        pass
                 kokpit.outbox_yaz(text, "sahip")  # kokpit dökümü: sahibin tarafı
             # FREEZE: acil durdurma — sadece durum/çözme komutları çalışır
             if governance.is_frozen():

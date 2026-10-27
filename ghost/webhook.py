@@ -178,6 +178,21 @@ def handle_hook(source, payload, secret_ok):
         # numarasına indirgenmiş olurdu. Bu yüzden SMS yalnızca kaydedilir ve
         # bildirilir; ne yapılacağına Sahip karar verir.
         return _handle_sms(payload)
+    if isinstance(payload, dict) and payload.get("olay"):
+        # Duyu yolu (2026-10-26): iOS Kısayollar otomasyonu {"olay": "sarj_takildi"}
+        # gibi bir OLAY bildirir, komut değil. Olay kaydedilir, eşleşen kurallar
+        # koşar (ghost/kurallar.py); kural yoksa yalnız kayıt + ilk görülmede haber.
+        if _hiz_asildi(source):
+            return 429, "hız sınırı"
+        olay = str(payload["olay"])[:80]
+        governance.audit("webhook", source, governance.READ, "olay: %s" % olay)
+        try:
+            from ghost import kurallar
+            kurallar.olay_kaydet(olay, payload, kaynak=source)
+            kurallar.tetikle("olay", olay, payload)
+        except Exception:
+            pass
+        return 200, "olay"
     if isinstance(payload, dict) and payload.get("text"):
         # Siri/Kestirme yolu: gelen metin doğrudan işe döner
         if _hiz_asildi(source):

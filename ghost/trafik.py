@@ -7,6 +7,7 @@ saatte bir `tazele()` ile `ops/site_trafik_state.json` yazar, Nabız yalnız oku
 
     python3 -m ghost.trafik olc     # şimdi ölç ve yaz
     python3 -m ghost.trafik oku     # Nabız'ın göreceği JSON
+    python3 -m ghost.trafik gecmis [N]  # son N ölçüm: Nabız ne gösterdi + Mac tüneli (2026-10-26)
 """
 import json
 import os
@@ -87,7 +88,46 @@ def olc(gun=GUN):
     with open(yol + ".tmp", "w", encoding="utf-8") as f:
         json.dump(kayit, f, ensure_ascii=False)
     os.replace(yol + ".tmp", yol)
+    gecmis_yaz(kayit)
     return kayit
+
+
+GECMIS = "site_trafik_gecmis.jsonl"
+
+
+def gecmis_yaz(kayit):
+    """Her ölçümü tek satır olarak sakla: Nabız'ın o saat NE GÖSTERDİĞİ + Mac tüneli o an
+    ne durumdaydı. 2026-10-26 Sahip üç kez "Mac bağlıyken ziyaret artıyor, kapalıyken hiç
+    artmıyor" dedi; PostHog ham verisi aksini gösteriyordu ama Nabız'ın gösterdiği sayının
+    geçmişi hiçbir yerde yoktu (state dosyası her saat ezilir, git izlemez). Bu dosya o
+    tartışmayı veriyle kapatır. Hata ölçümü düşürmez."""
+    try:
+        tunel = ""
+        try:
+            with open(os.path.join(config.OPS, "tunnel_watch_state.json"), encoding="utf-8") as f:
+                tunel = (json.load(f) or {}).get("durum", "")
+        except Exception:
+            pass
+        siteler = kayit.get("siteler", {}).values()
+        satir = {"at": kayit.get("at"), "g7": kayit.get("toplam_g7", 0), "g1": kayit.get("toplam_g1", 0),
+                 "sahip7": sum(s.get("sahip7", 0) for s in siteler),
+                 "bot7": sum(s.get("bot7", 0) for s in siteler), "tunel": tunel}
+        with open(os.path.join(config.OPS, GECMIS), "a", encoding="utf-8") as f:
+            f.write(json.dumps(satir, ensure_ascii=False) + "\n")
+        return satir
+    except Exception as e:
+        sys.stderr.write("trafik geçmişi yazılamadı: %r\n" % e)
+        return None
+
+
+def gecmis_oku(son=48):
+    """Son N ölçüm satırı (eskiden yeniye)."""
+    try:
+        with open(os.path.join(config.OPS, GECMIS), encoding="utf-8") as f:
+            satirlar = [json.loads(l) for l in f if l.strip()]
+    except Exception:
+        return []
+    return satirlar[-son:]
 
 
 def tazele(zorla=False):
@@ -143,6 +183,12 @@ def oku():
 def main(argv):
     if not argv or argv[0] == "oku":
         print(json.dumps(oku(), ensure_ascii=False, indent=1))
+    elif argv[0] == "gecmis":
+        son = int(argv[1]) if len(argv) > 1 else 48
+        print("%-19s %4s %4s %6s %5s  %s" % ("ölçüm", "7g", "24s", "sahip7", "bot7", "tünel"))
+        for r in gecmis_oku(son):
+            print("%-19s %4d %4d %6d %5d  %s" % (r.get("at", ""), r.get("g7", 0), r.get("g1", 0),
+                                               r.get("sahip7", 0), r.get("bot7", 0), r.get("tunel", "")))
         return 0
     if argv[0] == "olc":
         k = olc()

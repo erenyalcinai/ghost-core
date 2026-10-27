@@ -23,6 +23,7 @@ sıradan bir mesaj gibi okur, ayrı bir dispatcher yok.
 import json
 import os
 import re
+import secrets
 import sys
 import time
 
@@ -237,7 +238,8 @@ def onay(baslik, onizleme, eylem_id=None, aciklama=""):
     olarak gelir; Ghost 'Onayla' görmeden ilerlemez. (Köprünün pending.json'una dışarıdan
     yazılmaz — tek yazar köprüdür, yarış yok.)"""
     from ghost import kokpit
-    eid = eylem_id or ("onay-%d" % int(time.time()))
+    # Rastgele id (2026-10-27 denetimi): saat damgası tahmin edilebilir, metinle taklit edilirdi.
+    eid = eylem_id or ("onay-" + secrets.token_hex(8))
     diff_mi = onizleme.lstrip().startswith(("---", "+++", "@@", "diff "))
     b = [{"tur": "kart", "baslik": baslik, "metin": aciklama or "Aşağıdakini uygulayayım mı?", "durum": "uyari"},
          {"tur": "diff" if diff_mi else "metin", "metin": onizleme[:8000]},
@@ -271,6 +273,7 @@ def eylem(eylem_id, veri=None, alanlar=None, cihaz=None):
         metin = "\n".join(satirlar)
     else:
         metin = "[Sahne eylem: %s] %s" % (eylem_id, veri or "")
+        sahip_onayi_kaydet(metin, "kokpit-eylem")    # imzalı istekten geldi (api /v1/eylem)
     kokpit.outbox_yaz(metin, "sahip")
     kokpit.mesaj_kuyrukla(metin, cihaz)
     cozumle(eylem_id, veri)
@@ -370,6 +373,81 @@ def cozumle_serbest(metin):
                 return eid if cozumle(eid, "onayla") else None
     return None
 
+
+
+# ----------------------------------------------------------------------------
+# GERÇEK ONAY KAYDI (2026-10-27 güvenlik denetimi). Modelin sohbette "onayla" GÖRMESİ
+# onay değildir — o metin bir mailin, sayfanın, araç çıktısının içinden de gelebilir.
+# Onay yalnız sahibin gerçek giriş kapılarında kaydedilir: imzalı Kokpit isteği
+# (/v1/eylem, /v1/mesaj) ve sahibi doğrulanmış Telegram mesajı. Geri alınmaz işi yapan
+# betik (ör. ops/gmail_gonder.py) bu kayda bakar; model kaydı yazamaz, çünkü bu
+# fonksiyonu yalnız o kapılar çağırır.
+# ----------------------------------------------------------------------------
+ONAY_OMUR_SN = 24 * 3600
+
+
+def _onay_yolu():
+    return os.path.join(config.OPS, "sahne_onaylar.json")
+
+
+def _onaylar():
+    try:
+        with open(_onay_yolu(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _onaylar_yaz(d):
+    simdi = time.time()
+    d = {k: v for k, v in d.items() if simdi - float(v.get("ts") or 0) < 7 * 86400}
+    yol = _onay_yolu()
+    tmp = yol + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, yol)
+
+
+def sahip_onayi_kaydet(metin, kanal):
+    """sahibin GERÇEK mesajı bir onay-* kartını onaylıyorsa kaydet. outbox_yaz'dan ÖNCE
+    çağrılmalı (o, kartın butonlarını kapatır). Döndürür: onaylanan eid ya da None."""
+    m = (metin or "").strip()
+    eid = None
+    e = EYLEM_DESEN.match(m)
+    if e:
+        if e.group(1).strip().startswith("onay-") and e.group(2).strip().lower() == "onayla":
+            eid = e.group(1).strip()
+    elif _ONAY_EVET.match(m):
+        ids = []
+        for b in oku().get("bilesenler") or []:
+            _eylem_idleri(b, ids)
+        bekleyen = [i for i in dict.fromkeys(ids) if i.startswith("onay-")]
+        if len(bekleyen) == 1:      # birden çok açık kart varsa düz "evet" hiçbirini onaylamaz
+            eid = bekleyen[0]
+    if not eid:
+        return None
+    try:
+        d = _onaylar()
+        d[eid] = {"ts": time.time(), "kanal": str(kanal)[:40], "tuketildi": False}
+        _onaylar_yaz(d)
+    except Exception:
+        return None
+    return eid
+
+
+def onay_gecerli(eid, omur_sn=ONAY_OMUR_SN):
+    """eid sahibin gerçek kapısından onaylanmış, süresi dolmamış ve tüketilmemiş mi?"""
+    v = _onaylar().get(str(eid or ""))
+    return bool(v) and not v.get("tuketildi") and time.time() - float(v.get("ts") or 0) < omur_sn
+
+
+def onay_tuket(eid):
+    """Tek kullanımlık: onaylı iş yapıldıktan sonra aynı onay ikinci kez geçmez."""
+    d = _onaylar()
+    if str(eid) in d:
+        d[str(eid)]["tuketildi"] = True
+        _onaylar_yaz(d)
 
 
 def _siteler_tablosu(n):

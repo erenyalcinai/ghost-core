@@ -76,6 +76,43 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):  # journal'a kısa satır
         sys.stderr.write("%s %s\n" % (time.strftime("%F %T"), fmt % a))
 
+    _ACIK_CACHE = {"at": 0.0, "obj": None}
+
+    def _acik_nabiz(self):
+        """Herkese açık nabız: gün sayısı, siteler kaç/kaç ayakta, şu an ne yapıyor.
+        Yalnız sayı ve üç kelimelik durum; içerik, kimlik, iş adı YOK. 30 sn bellek önbelleği."""
+        c = H._ACIK_CACHE
+        now = time.time()
+        if c["obj"] is None or now - c["at"] > 30:
+            obj = {"gun": max(0, int((now - 1786406400) // 86400)),   # 2026-08-11 UTC'den beri (site ile aynı: tam gün)
+                   "siteler_ok": 0, "siteler_n": 0, "durum": "nobette"}
+            try:
+                with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ops", "uptime_state.json"), encoding="utf-8") as f:
+                    st = json.load(f)
+                vals = [bool(v.get("ok")) if isinstance(v, dict) else bool(v) for v in st.values()]
+                obj["siteler_n"], obj["siteler_ok"] = len(vals), sum(vals)
+            except Exception:
+                pass
+            # 2026-10-26 (Sahip: kart hep "sahiple konuşuyor" diyordu): sohbet_durumu() bir dict döner,
+            # boş olmadığı için hep doğruydu → 'nobette' hiç görünmüyordu. 'is' ise health._is()'e
+            # (AppA İŞ NABZI metrikleri, 'aktif' anahtarı yok) bakıyordu — doğru kaynak iş kuyruğu.
+            try:
+                if (akis.sohbet_durumu() or {}).get("aktif"):
+                    obj["durum"] = "sohbet"
+                elif (health._isler() or {}).get("aktif"):
+                    obj["durum"] = "is"
+            except Exception:
+                pass
+            c["at"], c["obj"] = now, obj
+        b = json.dumps(c["obj"]).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.send_header("Cache-Control", "public, max-age=60")
+        self.send_header("Access-Control-Allow-Origin", "https://sahip.kim")
+        self.end_headers()
+        self.wfile.write(b)
+
     def _json(self, code, obj):
         b = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
@@ -161,6 +198,8 @@ class H(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         if u.path == "/v1/ping":
             return self._json(200, {"ok": True, "at": time.strftime("%F %T")})
+        if u.path == "/v1/acik/nabiz":        # sahip.kim Ghost kartı — herkese açık, kimliksiz, içeriksiz (2026-10-23)
+            return self._acik_nabiz()
         cihaz = self._auth("GET", b"")
         if not cihaz:
             return
@@ -436,6 +475,10 @@ class H(BaseHTTPRequestHandler):
                 if governance.is_frozen() and metin.split(None, 1)[0].lower() not in (
                         "/unfreeze", "/freeze", "/durum", "/saglik", "/help"):
                     return self._json(423, {"hata": "FREEZE aktif — yalnız /unfreeze, /durum"})
+                try:  # imzalı istek: gerçek onay kapısı (ghost/sahne.py GERÇEK ONAY KAYDI)
+                    sahne.sahip_onayi_kaydet(metin, "kokpit-mesaj")
+                except Exception:
+                    pass
                 mid = kokpit.outbox_yaz(metin, "sahip")
                 channels.son_kanal_ayarla("kokpit")      # cevap uygulamaya push olsun
                 kokpit.mesaj_kuyrukla(metin, cihaz["id"], sesli=bool(veri.get("sesli")))
@@ -490,6 +533,11 @@ class H(BaseHTTPRequestHandler):
                 kokpit.outbox_yaz("📍 " + metin.split(" Bu bir otomatik")[0].replace("[Bölge] ", ""), "ghost")
                 channels.son_kanal_ayarla("kokpit")
                 kokpit.mesaj_kuyrukla(metin, cihaz["id"])
+                try:  # kural motoru (2026-10-26): bolge:<ad> tetiği, bölge mesajına EK
+                    from ghost import kurallar
+                    kurallar.tetikle("bolge", veri.get("ad", ""), {"olay": veri.get("olay", "")})
+                except Exception:
+                    pass
                 return self._json(200, {"ok": True})
             if u.path.startswith("/v1/kararlar/"):
                 pid = u.path.rsplit("/", 1)[1]

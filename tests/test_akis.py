@@ -453,3 +453,35 @@ class BitmemisAkis(unittest.TestCase):
         c.commit()
         c.close()
         self.assertFalse(akis.sohbet_durumu()["aktif"])
+
+
+class AcikNabiz(unittest.TestCase):
+    """sahip.kim Ghost kartı: /v1/acik/nabiz 'durum' alanı. 2026-10-26 kusuru: sohbet_durumu()
+    dict'i hep doğru sayılıyordu → kart hep 'sahiple konuşuyor'; 'is' yanlış kaynağa bakıyordu."""
+    def _cek(self, sohbet, is_aktif):
+        from unittest import mock
+        api.H._ACIK_CACHE = {"at": 0.0, "obj": None}
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), api.H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % srv.server_address[1]
+        try:
+            with mock.patch.object(akis, "sohbet_durumu", return_value={"aktif": sohbet, "ozet": "", "ts": "", "sure_sn": 0, "basladi": ""}), \
+                 mock.patch.object(api.health, "_isler", return_value={"aktif": is_aktif, "bekleyen_onay": 0, "ozet": []}):
+                st, j = _istek(base, "GET", "/v1/acik/nabiz")
+        finally:
+            srv.shutdown()
+            api.H._ACIK_CACHE = {"at": 0.0, "obj": None}
+        self.assertEqual(st, 200)
+        return j
+
+    def test_bosta_nobette(self):
+        j = self._cek(sohbet=False, is_aktif=0)
+        self.assertEqual(j["durum"], "nobette")
+        self.assertEqual(set(j), {"gun", "siteler_ok", "siteler_n", "durum"})  # kimlik/içerik sızmaz
+
+    def test_sohbet_oncelikli(self):
+        self.assertEqual(self._cek(sohbet=True, is_aktif=1)["durum"], "sohbet")
+
+    def test_is_kuyrugu(self):
+        self.assertEqual(self._cek(sohbet=False, is_aktif=2)["durum"], "is")

@@ -67,6 +67,14 @@ else
 fi
 
 KOSUM="${TMP:-$BASE}"
+# NEDEN TMPDIR (2026-10-24): testler tempfile.mkdtemp ile ~180 dizin bırakıyor ve
+# hiçbiri silinmiyor. VPS'te /tmp tmpfs = RAM. 19-24 Ekim arası GitHub push'u
+# kırıkken knowsync kapıyı 15 dk'da bir koşturdu → 102 bin dizin, 1.25 GB RAM
+# (Nabız "boş 1144 MB" dedi, Sahip sordu). Testlerin geçici dosyası kapının
+# kendi dizinine gider ve kapı biterken onunla silinir; test tek tek düzeltilmez.
+TESTTMP="$(mktemp -d 2>/dev/null)" || TESTTMP=""
+if [ -n "$TESTTMP" ]; then export TMPDIR="$TESTTMP"; fi
+temizle() { [ -n "$TMP" ] && rm -rf "$TMP"; [ -n "$TESTTMP" ] && rm -rf "$TESTTMP"; }
 if [ -n "$TMP" ]; then
     echo "→ test kapısı: kod değişti, testler koşuyor (push edilen ağaç, .env'siz — CI ile aynı)..."
 else
@@ -74,7 +82,7 @@ else
 fi
 if ! (cd "$KOSUM" && python3 -m compileall -q ghost ops tests >/dev/null \
       && python3 -m unittest discover -s tests -q); then
-    [ -n "$TMP" ] && rm -rf "$TMP"
+    temizle
     echo "" >&2
     echo "✗ PUSH DURDURULDU — testler geçmedi." >&2
     [ -n "$TMP" ] && echo "  (CI ortamında koşuldu: .env YOK. Yerelde geçip burada" >&2
@@ -82,6 +90,6 @@ if ! (cd "$KOSUM" && python3 -m compileall -q ghost ops tests >/dev/null \
     echo "  Düzelt, ya da bilerek geçmek için: GHOST_SKIP_TESTS=1 git push ..." >&2
     exit 1
 fi
-[ -n "$TMP" ] && rm -rf "$TMP"
+temizle
 echo "✓ testler geçti, push sürüyor."
 exit 0

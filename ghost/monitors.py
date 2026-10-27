@@ -146,6 +146,11 @@ def tick(fetch=None, send=None, now=None):
                 delivered = _queue_analysis(mon, note)
             else:
                 delivered = send(note) is not False
+            try:  # kural motoru (2026-10-26): monitor:<ad> tetiği, mevcut davranışa EK
+                from ghost import kurallar
+                kurallar.tetikle("monitor", mon["name"], {"url": mon["url"], "id": mon["id"]})
+            except Exception:
+                pass
             if delivered:
                 fired.append(mon["id"])
         elif status.startswith("erişilemedi") and mon["last_status"] == "ok":

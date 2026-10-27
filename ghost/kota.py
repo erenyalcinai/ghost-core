@@ -13,6 +13,7 @@ import os
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
@@ -39,7 +40,8 @@ def _belirtec_kayitli():
     try:
         with open(BELIRTEC_DOSYASI, encoding="utf-8") as f:
             d = json.load(f)
-        if d.get("accessToken") and d.get("expiresAt", 0) / 1000 - time.time() > 300:
+        exp = d.get("expiresAt") or 0
+        if d.get("accessToken") and (not exp or exp / 1000 - time.time() > 300):
             return d
     except Exception:
         pass
@@ -156,16 +158,35 @@ def yenile(min_yas=0):
     if os.environ.get("GHOST_TEST"):
         return None
     eski = _oku_ham()
-    if min_yas and eski.get("ts") and time.time() - eski["ts"] < min_yas:
+    simdi = time.time()
+    # Kısıtlayıcı son DENEMEYE bakar, son başarıya değil (2026-10-19 kök neden: 14 Ekim'den
+    # beri her hata eski ts'yi koruyordu → her turda yeni istek → uç 429 verdi → kilit).
+    son_deneme = max(eski.get("ts") or 0, eski.get("hata_ts") or 0)
+    if min_yas and son_deneme and simdi - son_deneme < min_yas:
+        return eski
+    if (eski.get("bekle_ts") or 0) > simdi:  # 429 Retry-After süresi dolmadı
         return eski
     try:
         d = belirtec()
         ham = cek(d)
-        kayit = {"ts": int(time.time()), "at": time.strftime("%F %T"),
+        kayit = {"ts": int(simdi), "at": time.strftime("%F %T"),
                  "plan": _plan_adi(d), "kaynak": "mac-keychain",
                  "limitler": normalize(ham), "hata": None}
+    except urllib.error.HTTPError as e:
+        kayit = dict(eski, hata="HTTP %s" % e.code, hata_ts=int(simdi))
+        if e.code == 429:
+            try:
+                bekle = int(e.headers.get("Retry-After") or 0)
+            except ValueError:
+                bekle = 0
+            kayit["bekle_ts"] = int(simdi + max(60, min(bekle or 1800, 6 * 3600)))
+        elif e.code == 401:
+            try:
+                os.remove(BELIRTEC_DOSYASI)  # bayat belirteç → bir sonraki tur Mac'ten okur
+            except OSError:
+                pass
     except Exception as e:
-        kayit = dict(eski, hata="%s" % e, hata_ts=int(time.time()))
+        kayit = dict(eski, hata="%s" % e, hata_ts=int(simdi))
     _yaz(kayit)
     return kayit
 

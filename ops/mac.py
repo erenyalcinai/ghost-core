@@ -58,6 +58,10 @@ def _token():
 
 
 def _cagir(yol, veri=None, zaman=180):
+    # 2026-10-26: bir test sahte iste'yi ıskalayıp GERÇEK Mac'e çıktı (2026-10-26, kişisel veri testi).
+    # Kapı ağ katmanında: GHOST_TEST altında hızlı hat hiç aranmaz (tests/common.py tek işaret).
+    if os.environ.get("GHOST_TEST") == "1":
+        return {"hata": "test ortamı: Mac hızlı hattına çıkılmaz"}
     req = urllib.request.Request(
         UC + yol, data=json.dumps(veri).encode() if veri is not None else None,
         method="POST" if veri is not None else "GET",

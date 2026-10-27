@@ -187,6 +187,13 @@ BRAIN_STAMP = os.path.join(OPS, ".brain_probe")
 
 CLI_STAMP = os.path.join(OPS, "cli_update.stamp")
 CLI_GAP = 24 * 3600
+MAC_CLI_STAMP = os.path.join(OPS, "mac_cli_update.stamp")
+# Mac'teki Claude CLI kullanıcı npm önekinde (~/.local root'a ait → resmi yükleyici kuramıyor;
+# /usr/local npm'i sudo ister). 2026-10-27: Mac 2.1.220'de kalmıştı, VPS 2.1.311.
+MAC_CLI_GUNCELLE = ('export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH; P=$HOME/.ghost/araclar/npm; '
+                    'E=$($P/bin/claude --version 2>/dev/null | cut -d" " -f1); '
+                    'npm install -g --prefix $P @anthropic-ai/claude-code@latest >/dev/null 2>&1; '
+                    'echo "$E $($P/bin/claude --version 2>/dev/null | cut -d" " -f1)"')
 
 
 def _tam_model(m):
@@ -228,6 +235,38 @@ def cli_guncel_tut():
     except OSError:
         pass
     return out
+
+
+def mac_cli_guncel_tut():
+    """Mac'teki Claude CLI'yi günde bir npm @latest'e çek (hızlı hat). Mac kapalıysa damga
+    basılmaz → Mac açılınca ilk turda dener. Mac işçisi CLAUDE_BIN ile bu ikiliyi kullanır;
+    koşan oturum etkilenmez. Döner: bildirilecek satırlar (boş = sessiz)."""
+    if os.environ.get("GHOST_TEST"):
+        return []
+    try:
+        if time.time() - os.path.getmtime(MAC_CLI_STAMP) < CLI_GAP:
+            return []
+    except OSError:
+        pass
+    try:
+        from ops import mac
+        r = mac.komut(MAC_CLI_GUNCELLE, zaman=240)
+    except Exception as e:  # noqa: BLE001
+        log("mac cli güncelleme: Mac'e ulaşılamadı (%r)" % e)
+        return []
+    if not isinstance(r, dict) or r.get("hata") or r.get("rc"):
+        log("mac cli güncelleme hata: %s" % str(r)[:200])
+        return []
+    parca = (r.get("cikti") or "").split()
+    try:
+        open(MAC_CLI_STAMP, "w").close()
+    except OSError:
+        pass
+    if len(parca) == 2 and parca[0] != parca[1]:
+        log("Mac claude CLI %s → %s" % tuple(parca))
+    elif len(parca) < 2:
+        log("mac cli güncelleme: sürüm okunamadı (%r)" % parca)
+    return []
 
 
 def brain_reachable():
@@ -649,6 +688,7 @@ def main():
         if sorun:
             problems.append(sorun)
     problems.extend(cli_guncel_tut())
+    problems.extend(mac_cli_guncel_tut())
     cleanup()
     try:  # abonelik kotası (Nabız "Kota" bölümü) — 15 dk'da bir tazele, sessiz
         from ghost import kota
