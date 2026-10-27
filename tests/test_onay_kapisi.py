@@ -54,6 +54,14 @@ class OnayKaydi(Temel):
         sahne.onay("Tek", "özet", eylem_id="onay-aaaaaaaaaaaaaaaa")
         self.assertEqual(sahne.sahip_onayi_kaydet("evet", "test"), "onay-aaaaaaaaaaaaaaaa")
 
+    def test_belirsiz_duz_cevap_onay_degil(self):
+        for m in ("tamam, bekle", "devam etme", "olur mu?", "ok ama önce bana göster"):
+            sahne.onay("Tek", "özet", eylem_id="onay-bbbbbbbbbbbbbbbb")
+            self.assertIsNone(sahne.sahip_onayi_kaydet(m, "test"), m)
+        for m in ("evet", "Onayla.", "tamam 👍", "evet yap"):
+            sahne.onay("Tek", "özet", eylem_id="onay-cccccccccccccccc")
+            self.assertEqual(sahne.sahip_onayi_kaydet(m, "test"), "onay-cccccccccccccccc", m)
+
     def test_sure_dolunca_gecmez(self):
         eid = sahne.sahip_onayi_kaydet("[Sahne eylem: onay-0011223344556677] onayla", "test")
         self.assertFalse(sahne.onay_gecerli(eid, omur_sn=0))

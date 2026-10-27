@@ -69,6 +69,9 @@ def _sir_okuma(komut):
     for parca in PARCA.split(komut):
         parca = re.sub(r"^(\w+=\S*\s+)+", "", parca.strip())       # VAR=x komut
         parca = re.sub(r"^(cd\s+\S+|exec|time|nohup|env\s+-i)\s*", "", parca)
+        if re.match(r"^(grep|egrep|fgrep|rg)\b", parca):
+            parca = re.sub(r"('[^']*'|\"[^\"]*\")", "", parca, count=1)      # desen
+        parca = re.sub(r"\S+\.pub\b", "", parca)                               # açık anahtar
         if not parca or not SIR_DOSYA.search(parca) or YUKLEME.match(parca):
             continue
         if re.match(r"^(echo|printf)\b[^<]*>>\s*\S*secrets\.env\s*$", parca):
@@ -166,15 +169,23 @@ KORUNAN = (
     os.path.join(KOK, ".claude", "settings.json"),
     os.path.join(KOK, ".claude", "settings.local.json"),
     os.path.join(KOK, "ops", "guvenlik_kapisi.py"),
+    os.path.join(KOK, "ops", "sahne_onaylar.json"),
+    os.path.join(KOK, "ghost", "sahne.py"),
+    os.path.join(KOK, "ops", "gmail_gonder.py"),
 )
+KORUNAN_DIZIN = (os.path.join(KOK, "ops", "gmail_taslak"),)
 KORUNAN_AD = re.compile(r"(\.claude/settings(\.local)?\.json|guvenlik_kapisi\.py)")
-_P = r"(?:\.claude/settings(?:\.local)?\.json|guvenlik_kapisi\.py)"
+_P = (r"(?:\.claude/settings(?:\.local)?\.json|guvenlik_kapisi\.py|sahne_onaylar\.json|ghost/sahne\.py|"
+      r"gmail_gonder\.py|gmail_taslak/)")
 DEGISTIRME = re.compile(
     r"(?<![0-9&])>{1,2}\s*['\"]?\S*" + _P + "|"
     r"\b(?:sed\s+-i|perl\s+-[a-z]*i|mv|rm|ln|truncate|chmod|tee|git\s+(?:checkout|restore|apply))\b[^;&|\n]*" + _P + "|"
     r"\b(?:cp|install|rsync|dd)\b[^;&|\n#]*\s['\"]?\S*" + _P + r"['\"]?\s*(?:$|[;&|\n#])|"
     r"open\([^)\n]*" + _P + r"[^)\n]*,\s*['\"][wax+]|" + _P + r"[^\n]{0,40}\)\.write_(?:text|bytes)|"
-    r"disableAllHooks", re.M)
+    r"disableAllHooks|"
+    # onay kaydını yazan/tüketen ve SMTP alt fonksiyonunu doğrudan çağırmak (yalnız kendi kapıları çağırır)
+    r"sahip_onayi_kaydet\s*\(|onay_tuket\s*\(|sahne\.eylem\(|_smtp_gonder\s*\(|import\s+gmail_gonder|gmail_gonder\s+as\b|"
+    r"from\s+gmail_gonder\s+import", re.M)
 ONAY = re.compile(r"\bonay-[0-9a-f]{16}\b")
 
 
@@ -201,6 +212,25 @@ def _yurutulen(komut):
         if m:
             bitis = m.groups()[-1]
     return "\n".join(out)
+
+
+YORUMLAYICI = re.compile(r"\b(python3?|node|bash|sh|zsh|perl|ruby|osascript)\b")
+
+
+def _kod_metni(komut):
+    """Koşacak kod: yorumlayıcıya gitmeyen heredoc gövdeleri ve git commit -m metni çıkarılır."""
+    satirlar, out, bitis = komut.split("\n"), [], None
+    for satir in satirlar:
+        if bitis is not None:
+            if satir.strip() == bitis:
+                bitis = None
+            continue
+        out.append(satir)
+        m = re.search(r"<<-?\s*['\"]?(\w+)['\"]?", satir)
+        if m and not YORUMLAYICI.search(satir):
+            bitis = m.group(1)
+    metin = "\n".join(out)
+    return re.sub(r"(\bgit\s+commit\b[^;&|\n]*?\s-m\s+)('[^']*'|\"(?:[^\"\\]|\\.)*\")", r"\1''", metin)
 
 
 def _sir_adlari():
@@ -241,7 +271,7 @@ def _yol_korunan(yol):
         y = os.path.realpath(os.path.expanduser(yol or ""))
     except Exception:
         return False
-    return y in KORUNAN
+    return y in KORUNAN or any(y == d or y.startswith(d + os.sep) for d in KORUNAN_DIZIN)
 
 
 def karar_bash(komut):
@@ -252,7 +282,8 @@ def karar_bash(komut):
                 "Anahtarı kullanmak için ortamdaki $DEGISKEN'i komutta doğrudan kullan; değeri ekrana basma.")
     if ORTAM_DOKUM.search(k):
         return "Ortam topluca dökülemez (env/printenv/export -p/environ). Gereken tek değişkeni $AD ile kullan."
-    if SMTP_KULLANIM.search(k) and not re.match(r"^\s*(cd\s+\S+\s*&&\s*)?python3?\s+(\S*/)?ops/gmail_gonder\.py\b", k):
+    tek_cli = re.fullmatch(r"\s*(cd\s+\S+\s*&&\s*)?python3?\s+(\S*/)?ops/gmail_gonder\.py\b[^;&|\n`$]*", k)
+    if SMTP_KULLANIM.search(k) and not tek_cli:
         return ("Mail yalnız ops/gmail_gonder.py hazirla → Sahip onayı → gonder --onay yoluyla gider; "
                 "SMTP/Gmail şifresi doğrudan kullanılamaz.")
     adlar = _sir_adlari() | _yakalananlar(k)[1] | {
@@ -278,7 +309,7 @@ def karar_bash(komut):
     kc = _kisisel_cikis(k)
     if kc:
         return kc
-    if DEGISTIRME.search(k):
+    if DEGISTIRME.search(_kod_metni(k)):
         if _onay_gecerli(k):
             return None
         return ("Güvenlik kapısı ve Claude ayar dosyaları yalnız sahibin gerçek onayıyla değişir: "

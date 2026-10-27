@@ -335,6 +335,10 @@ def cozumle_metinden(metin):
 
 
 _ONAY_EVET = re.compile(r"^\W*(onayla|onaylıyorum|onay|evet|tamam|olur|ok|okey|yap|devam|uygula|yayınla)\b", re.I)
+# Gerçek onay kaydı için KATI: mesajın tamamı kısa bir evet olmalı ("tamam, bekle", "olur mu?",
+# "devam etme" onay DEĞİL). Görünüm (cozumle_serbest) gevşek kalıbı kullanmaya devam eder.
+_ONAY_KESIN = re.compile(r"^\W*(onayla|onaylıyorum|onay|evet|tamam|olur|ok|okey|yap|devam|uygula|yayınla)"
+                         r"(\s+(onaylıyorum|yap|gönder|uygula|devam))?[\s.!👍✅]*$", re.I)
 _ONAY_HAYIR = re.compile(r"^\W*(vazgeç|vazgec|hayır|hayir|iptal|yapma|dur|bekle|olmaz|şimdi değil)\b", re.I)
 
 
@@ -403,10 +407,22 @@ def _onaylar_yaz(d):
     simdi = time.time()
     d = {k: v for k, v in d.items() if simdi - float(v.get("ts") or 0) < 7 * 86400}
     yol = _onay_yolu()
-    tmp = yol + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    import tempfile
+    fd, tmp = tempfile.mkstemp(prefix=".sahne_onaylar.", dir=os.path.dirname(yol))
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False)
     os.replace(tmp, yol)
+
+
+def _kilitli(fn):
+    """Onay kaydı oku-değiştir-yaz: API, köprü ve kanca ayrı süreçler — dosya kilidiyle sırala."""
+    import fcntl
+    with open(_onay_yolu() + ".kilit", "a") as k:
+        fcntl.flock(k, fcntl.LOCK_EX)
+        try:
+            return fn()
+        finally:
+            fcntl.flock(k, fcntl.LOCK_UN)
 
 
 def sahip_onayi_kaydet(metin, kanal):
@@ -418,7 +434,7 @@ def sahip_onayi_kaydet(metin, kanal):
     if e:
         if e.group(1).strip().startswith("onay-") and e.group(2).strip().lower() == "onayla":
             eid = e.group(1).strip()
-    elif _ONAY_EVET.match(m):
+    elif _ONAY_KESIN.match(m):
         ids = []
         for b in oku().get("bilesenler") or []:
             _eylem_idleri(b, ids)
@@ -427,10 +443,12 @@ def sahip_onayi_kaydet(metin, kanal):
             eid = bekleyen[0]
     if not eid:
         return None
-    try:
+    def yaz():
         d = _onaylar()
         d[eid] = {"ts": time.time(), "kanal": str(kanal)[:40], "tuketildi": False}
         _onaylar_yaz(d)
+    try:
+        _kilitli(yaz)
     except Exception:
         return None
     return eid
@@ -444,10 +462,20 @@ def onay_gecerli(eid, omur_sn=ONAY_OMUR_SN):
 
 def onay_tuket(eid):
     """Tek kullanımlık: onaylı iş yapıldıktan sonra aynı onay ikinci kez geçmez."""
-    d = _onaylar()
-    if str(eid) in d:
-        d[str(eid)]["tuketildi"] = True
-        _onaylar_yaz(d)
+    def yaz():
+        d = _onaylar()
+        if str(eid) in d:
+            d[str(eid)]["tuketildi"] = True
+            d[str(eid)]["tuketim_ts"] = time.time()
+            _onaylar_yaz(d)
+    _kilitli(yaz)
+
+
+def onay_az_once_tuketildi(eid, pencere_sn=120):
+    """Geri alınmaz işi yapan alt fonksiyon için: bu onay GERÇEK kayıttan az önce mi tüketildi?
+    (Üst fonksiyon onay_gecerli → onay_tuket yapar; alt fonksiyon doğrudan çağrılırsa geçmez.)"""
+    v = _onaylar().get(str(eid or ""))
+    return bool(v) and v.get("tuketildi") and time.time() - float(v.get("tuketim_ts") or 0) < pencere_sn
 
 
 def _siteler_tablosu(n):
