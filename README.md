@@ -288,6 +288,43 @@ lessons) is English. If you read the code, a few words carry most of the weight:
 *köprü* bridge · *nöbetçi* sentinel · *uzuv* limb · *hızlı hat* fast lane · *sahip* owner ·
 *sahne* stage · *masa* desk · *nabız* pulse · *ders* lesson · *onay* approval.
 
+## Threat model
+
+Read this before judging the security design: every choice below is made against **this** model,
+not a general one.
+
+**Trusted:**
+- **The owner.** It is one person's system; there is no defence against its own owner and none is
+  intended.
+- **The model.** A current frontier model is assumed not to act against the owner on its own.
+
+**The adversary is the internet:**
+- **Untrusted content** reaching the agent: e-mails, web pages, documents, messages from strangers
+  (prompt injection; also plausible-but-false claims).
+- **Remote attackers** probing exposed services: webhooks, the cockpit API, SSH.
+- **Compromised dependencies** (supply chain).
+- **Stolen credentials and account takeover.**
+
+**Out of scope:** physical access to the owner's machines and attackers on the owner's local network.
+
+**What that means for the layers:**
+- **Primary defences are against the internet.**
+  - Only 22/80/443 are exposed, and 80/443 only via Cloudflare; SSH is key-only; webhooks need a
+    token and are rate-limited; cockpit requests are signed.
+  - Untrusted text is read by a tool-less, secret-less quarantine model.
+  - Unattended jobs cannot take irreversible actions; irreversible actions need the owner's real
+    approval.
+  - Secrets and personal data cannot be sent to unknown hosts; secret values cannot be committed.
+  - Dependency versions are pinned; the owner's accounts use 2FA.
+- **Defence in depth, not a cage.** The root-owned tool guard, the restricted root key and the
+  emergency stop protect against a *manipulated* session — an injection that got partly through —
+  not against a hostile model. They are seatbelts.
+- **Deliberately absent:** full OS isolation of the agent, separation of the agent from its own
+  credentials, and narrow per-task permissions on the owner's Mac. Under this threat model they
+  would cost daily usefulness without matching gain.
+- **If your threat model differs** — a shared machine, an untrusted operator, a model you do not
+  trust — this design is not sufficient as is. Start with OS-level isolation.
+
 ## What this is not
 
 - **Not a product.** No installer, no support, no roadmap for other users. It is a

@@ -15,7 +15,7 @@ Hedefi kendisi bulur, sırayla:
   1. GHOST_WDA_HOST ortam değişkeni (elle sabitlemek istersen)
   2. son çalışan adres (~/ghost-ios/wda_host)   ← DHCP değişse de çoğu zaman aynı
   3. ~/ghost-ios/wda.log içindeki ServerURLHere satırı (WDA her başlayışta yazar)
-  4. USB yedeği: `ios forward 8102 8100` → 127.0.0.1:8102
+  4. USB yedeği: `iproxy -s 127.0.0.1 8102:8100` → yalnız 127.0.0.1:8102 (2026-10-28; go-ios forward ağa açıktı)
   5. son çare: yerel /24 taraması (telefon DHCP'de IP değiştirmişse)
 Her aday `GET /status` ile DOĞRULANIR — açık port değil, cevap veren WDA aranır.
 
@@ -146,10 +146,19 @@ def _onbellek_yaz(hedef):
         pass
 
 
+IPROXY = next((y for y in ("/opt/homebrew/bin/iproxy", "/usr/local/bin/iproxy") if os.path.exists(y)), None)
+
+
 def _usb_yedegi():
-    """USB hattı varsa `ios forward 8102 8100` ile yerel bir uç aç."""
+    """USB hattı varsa telefonun 8100'ünü 127.0.0.1:8102'ye taşı.
+
+    GÜVENLİK (2026-10-28): eskiden `ios forward 8102 8100` kullanılıyordu; go-ios TÜM ağ arayüzlerinde
+    dinliyor (bağlama seçeneği yok) ve Mac güvenlik duvarı kapalı → aynı Wi-Fi'daki herkes 8102'den
+    Ghost'un iPhone'unu kimliksiz sürebiliyordu (26 Eylül'den beri açıktı). Artık libimobiledevice
+    `iproxy` (-s 127.0.0.1, yalnız Mac'in kendisi). iproxy yoksa yedek AÇILMAZ — ağa açık uç açmaktansa
+    USB yedeğinden vazgeçilir (Wi-Fi yolu sürer)."""
     global _usb
-    if not os.path.exists(IOS_BIN):
+    if not os.path.exists(IOS_BIN) or not IPROXY:
         return None
     if _usb is None or _usb.poll() is not None:
         try:
@@ -161,7 +170,7 @@ def _usb_yedegi():
             return None          # cihaz kabloda yok; süreç açıp çöp bırakma
         try:
             _usb = subprocess.Popen(
-                [IOS_BIN, "forward", str(USB_PORT), str(TELEFON_PORT)],
+                [IPROXY, "-u", UDID, "-s", "127.0.0.1", "%d:%d" % (USB_PORT, TELEFON_PORT)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError:
             return None
