@@ -25,7 +25,7 @@ here and probably the most useful.
 | Core Python (`ghost/`) | ~10,800 lines, 46 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
 | Organs (`ops/`) | ~9,600 lines: bridge, sentinels, Mac and iPhone limbs |
 | Cockpit app (`kokpit/ios`) | ~7,800 lines Swift, iOS + macOS targets, one source |
-| Tests | 544, run in ~20 s with `python -m unittest`, no network, CI on every push |
+| Tests | 572, run in ~20 s with `python -m unittest`, no network, CI on every push |
 | Scheduling units | 8 launchd agents (Mac) + 3 systemd units (VPS) in this tree; the bridge and self-check units themselves live in the private deploy |
 | Lessons | 170 operational lessons, auto-extracted from commit messages, curated in [LESSONS.md](LESSONS.md) |
 | History | Started 11 August 2026; this open-core snapshot is from day 78 (880+ commits in the private tree, most authored by the agent under the owner's direction) |
@@ -226,7 +226,7 @@ weekly transparency report turns the audit log into "what I did on my own, what 
 what you refused". Continuity hooks flag a session that is about to end without writing anything
 down; idle time goes to standing goals.
 
-**It is tested like it will be run.** 544 tests in 20 s with every path redirected and the
+**It is tested like it will be run.** 572 tests in 20 s with every path redirected and the
 network cut (`tests/common.py`, after a test once leaked into production), a pre-push gate that
 runs them, and CI that runs the same command on the same file set.
 
@@ -273,7 +273,7 @@ but optional; they need your own hardware and Apple developer setup.
 
 ```bash
 git clone https://github.com/erenyalcinai/ghost-core && cd ghost-core
-python3 -m unittest discover -s tests        # 544 tests, ~20 s, no network
+python3 -m unittest discover -s tests        # 572 tests, ~20 s, no network
 cp ops/sahip.example.json ops/sahip.json     # owner profile: sites, products, root cards
 printf 'TELEGRAM_BOT_TOKEN=...\nTELEGRAM_OWNER_ID=...\nCLAUDE_BIN=/path/to/claude\n' > .env
 python3 ops/telegram_bridge.py

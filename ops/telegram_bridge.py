@@ -1378,7 +1378,7 @@ class Manager:
                         text, res, run_claude, kind=kind, jid=jid)
                 except Exception as e:       # denetçi asla işi düşürmesin
                     log("ikinci göz hatası (#%s): %r" % (jid, e))
-            takildi = verify.blocks(karar)
+            takildi = verify.blocks(karar, text)
             durum = "hata" if err else ("denetimde takıldı" if takildi else "bitti")
             # Hata sebebi kayda geçsin: önceden iş "hata" ile kapanır ama NEDEN
             # hiçbir yerde durmazdı (iş #52, 19 Ekim: 8 sn'de hata, sebep yok).

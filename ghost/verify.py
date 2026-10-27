@@ -143,9 +143,16 @@ def parse(out):
     return karar, _al("GEREKÇE"), _al("KONTROL")
 
 
-def blocks(karar):
-    """İşin temiz '✅ bitti' olarak raporlanmasını engelliyor mu?"""
-    return karar in ENGELLEYEN
+def blocks(karar, metin=None):
+    """İşin temiz '✅ bitti' olarak raporlanmasını engelliyor mu?
+    'doğrulanamadı' da engeller — iş geri alınmaz (PERMANENT) ya da harcama (SPEND) sınıfındaysa
+    (2026-10-27, dış inceleme: kritik işte doğrulanamayan sonuç başarı sayılmamalı)."""
+    if karar in ENGELLEYEN:
+        return True
+    if karar == BELIRSIZ and metin:
+        from ghost import governance
+        return governance.classify(metin) in (governance.PERMANENT, governance.SPEND)
+    return False
 
 
 def log(rec):

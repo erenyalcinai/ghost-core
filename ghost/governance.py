@@ -58,17 +58,30 @@ def requires_approval(cls, guard_on=True):
     return _ORDER.get(cls, 0) >= _ORDER[PERMANENT]
 
 
+AUDIT_YEDEK = "/tmp/ghost_audit_yedek.jsonl"     # ana günlük yazılamazsa (disk dolu/izin)
+
+
 def audit(actor, action, cls=READ, detail="", decision=None):
     """Her otonom/önemli eylem tek satır JSON olarak günlüğe."""
     rec = {"ts": time.strftime("%F %T"), "actor": actor, "action": action,
            "class": cls, "detail": str(detail)[:500]}
     if decision is not None:
         rec["decision"] = decision
+    satir = json.dumps(rec, ensure_ascii=False) + "\n"
     try:
         with open(config.AUDIT_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+            f.write(satir)
+    except OSError as e:
+        # Sessiz kayıp yok (2026-10-27, dış inceleme): yedek dosyaya + stderr'e (journald).
+        # selfcheck yedek dosya varsa alarm verir; ana günlüğe dönünce elle birleştirilir.
+        rec["audit_hatasi"] = repr(e)[:120]
+        try:
+            with open(AUDIT_YEDEK, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+        import sys
+        print("AUDIT YAZILAMADI: %s" % satir.strip()[:400], file=sys.stderr)
     return rec
 
 

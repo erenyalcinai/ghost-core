@@ -432,6 +432,28 @@ def _user_env():
     return e
 
 
+def hook_bayat_uyar(kod_ts):
+    """Webhook sunucusu (ghost-hook, SİSTEM birimi) bayat kodla koşuyorsa uyar — yenileyemeyiz
+    (VPS'te sudo yok). NEDEN (2026-10-27): webhook 'her_zaman_onay' düzeltmesi commit'lendi ama
+    ghost-hook 26 Ekim'den beri koşuyordu; düzeltme canlı sanıldı, değildi. Günde bir kez uyarır."""
+    if IS_MAC:
+        return None
+    try:
+        r = subprocess.run(["systemctl", "show", "ghost-hook", "-p", "MainPID", "--value"],
+                           capture_output=True, text=True, timeout=10)
+        pid = int(r.stdout.strip() or 0)
+        if not pid or not bayat_kod(kod_ts, _surec_ts(pid)):
+            return None
+        isaret = os.path.join(BASE, "ops", ".hook_bayat_uyari")
+        if os.path.exists(isaret) and time.time() - os.path.getmtime(isaret) < 86400:
+            return None
+        open(isaret, "w").close()
+        return ("🪝 Webhook sunucusu (ghost-hook) bayat kodla koşuyor — yenile: Mac'ten "
+                "ssh -i ~/.ssh/ghost_vps root@VPS 'systemctl restart ghost-hook'")
+    except Exception:
+        return None
+
+
 def api_bayat_yenile(kod_ts):
     """Kokpit API (ghost.api) bayat kodla koşuyorsa hemen yenile.
 
@@ -682,11 +704,22 @@ def main():
     sorun = api_bayat_yenile(kod_ts)
     if sorun:
         problems.append(sorun)
+    sorun = hook_bayat_uyar(kod_ts)
+    if sorun:
+        problems.append(sorun)
     for kontrol in (test_kapisi_yerinde, github_kimligi_yerinde,
                     tunel_nobetcisi_yerinde, sahip_profili_yerinde):
         sorun = kontrol()
         if sorun:
             problems.append(sorun)
+    try:  # denetim günlüğü yazılamamış kayıt (governance.audit yedeği) — sessiz kayıp yok
+        from ghost import governance as _gov
+        if os.path.exists(_gov.AUDIT_YEDEK) and os.path.getsize(_gov.AUDIT_YEDEK) > 0:
+            n = sum(1 for _ in open(_gov.AUDIT_YEDEK, encoding="utf-8", errors="replace"))
+            problems.append("🧾 Denetim günlüğü %d kaydı yazamadı (yedek %s) — disk/izin kontrol et."
+                            % (n, _gov.AUDIT_YEDEK))
+    except Exception:
+        pass
     problems.extend(cli_guncel_tut())
     problems.extend(mac_cli_guncel_tut())
     cleanup()
