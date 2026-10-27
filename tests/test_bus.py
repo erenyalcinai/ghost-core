@@ -42,3 +42,28 @@ class TestSandbox(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSahiplenme(unittest.TestCase):
+    """Atomik sahiplenme (dış inceleme GPT, 2026-10-27): bir olay bir kez alınır; işlenirken
+    çökülürse yeniden koşmaz, bayat sahiplenme olarak görünür olur."""
+
+    def setUp(self):
+        while bus.claim_next("sahip-test"):
+            pass
+
+    def test_ayni_olay_iki_kez_alinmaz(self):
+        eid = bus.emit("sahip-test", "test", {"n": 1})
+        ev = bus.claim_next("sahip-test")
+        self.assertEqual(ev["id"], eid)
+        self.assertIsNone(bus.claim_next("sahip-test"))
+        bus.mark(eid, "done")
+
+    def test_yarida_kalan_bayat_olur_yeniden_kosmaz(self):
+        eid = bus.emit("sahip-test", "test", {"prompt": "x"})
+        bus.claim_next("sahip-test")
+        self.assertEqual(bus.bayat_sahiplenmeler("sahip-test", yas_sn=3600), [])
+        bayat = bus.bayat_sahiplenmeler("sahip-test", yas_sn=-5)
+        self.assertEqual([b["id"] for b in bayat], [eid])
+        self.assertIsNone(bus.claim_next("sahip-test"))
+        self.assertEqual(bus.bayat_sahiplenmeler("sahip-test", yas_sn=-5), [])

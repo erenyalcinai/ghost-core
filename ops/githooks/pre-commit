@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Ghost sır kapısı — sahnelenen değişiklikte bir sırrın DÜZ DEĞERİ varsa commit DURUR.
+
+NEDEN VAR (2026-10-27, bağımsız güvenlik incelemesi): `main`'e commit = 15 dk içinde GitHub
+(knowsync). `git add -f secrets.env` ya da bir betiğe yapıştırılmış token sessizce dışarı
+çıkabiliyordu; güvenlik kapısı yalnız oturumun komutuna bakar, commit'in İÇERİĞİNE bakmaz.
+
+Bakılan: secrets.env ve .env'deki değerler (≥12 karakter; yol/URL olmayan), özel anahtar
+başlıkları, sır dosyalarının kendisinin sahnelenmesi. Değer ekrana BASILMAZ — yalnız dosya adı
+ve anahtarın ADI. Kaçış yok: değeri dosyadan çıkar (güvenlik kapısı --no-verify'ı da kapatır).
+"""
+import os
+import re
+import subprocess
+import sys
+
+KOK = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
+GIZLI_DEGIL = {"NTFY_TOPIC", "CLOUDFLARE_ACCOUNT_ID", "POSTHOG_HOST", "POSTHOG_PROJECT_ID", "ASC_ISSUER_ID",
+               "ASC_KEY_ID", "ASC_KEY_PATH", "APNS_KEY_ID", "APNS_TEAM_ID", "APNS_KEY_PATH", "APNS_TOPIC",
+               "ELEVENLABS_VOICE_ID", "GMAIL_ADDRESS", "WIKIDATA_USER", "APPLE_ID", "HF_API_KEY_ID",
+               "JARVIS_CLAUDE_ARGS", "CLAUDE_BIN", "TELEGRAM_CHAT_ID"}
+SIR_DOSYA = re.compile(r"(^|/)(secrets\.env|\.env|[^/]*\.p8|id_[a-z0-9]+|ghost_vps|ghost_runtime|\.git-credentials|\.netrc)$")
+OZEL_ANAHTAR = re.compile(r"-----BEGIN ([A-Z]+ )?PRIVATE KEY-----")
+
+
+def degerler():
+    out = {}
+    for ad in ("secrets.env", ".env"):
+        try:
+            with open(os.path.join(KOK, ad), encoding="utf-8") as f:
+                for satir in f:
+                    m = re.match(r"\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$", satir.rstrip("\n"))
+                    if not m or m.group(1) in GIZLI_DEGIL:
+                        continue
+                    v = m.group(2).strip().strip("'\"")
+                    if len(v) >= 12 and not v.startswith(("/", "~", "http", "-")):
+                        out[v] = m.group(1)
+        except OSError:
+            pass
+
+    import glob as _glob
+    import json as _json
+
+    def _yuru(o, anahtar=""):
+        if isinstance(o, dict):
+            for a, b in o.items():
+                yield from _yuru(b, a)
+        elif isinstance(o, list):
+            for b in o:
+                yield from _yuru(b, anahtar)
+        elif isinstance(o, str) and re.search(r"(?i)auth|token|key|secret|pass", anahtar):
+            yield re.sub(r"^(Bearer|token|Basic)\s+", "", o.strip())
+    for yol in _glob.glob(os.path.join(KOK, "mcp*.json")):      # MCP uç başlıkları (GitHub PAT'leri)
+        if yol.endswith(".example.json"):
+            continue
+        try:
+            for v in _yuru(_json.load(open(yol, encoding="utf-8"))):
+                if len(v) >= 12 and not v.startswith(("/", "~", "http", "-", "$")):
+                    out[v] = "MCP başlığı"
+        except (OSError, ValueError):
+            pass
+    return out
+
+
+def main():
+    adlar = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+                           capture_output=True, text=True).stdout.split()
+    bulgu = [f"{a}: sır dosyası commit'lenemez" for a in adlar if SIR_DOSYA.search(a)]
+    diff = subprocess.run(["git", "diff", "--cached", "-U0", "--no-color", "--diff-filter=ACMR"],
+                          capture_output=True, text=True, errors="replace").stdout
+    vs = degerler()
+    dosya = "?"
+    for satir in diff.splitlines():
+        if satir.startswith("+++ "):
+            dosya = satir[6:] if satir.startswith("+++ b/") else satir[4:]
+            continue
+        if not satir.startswith("+") or satir.startswith("+++"):
+            continue
+        if OZEL_ANAHTAR.search(satir):
+            bulgu.append(f"{dosya}: özel anahtar bloğu")
+        for v, ad in vs.items():
+            if v in satir:
+                bulgu.append(f"{dosya}: {ad} değeri")
+    if bulgu:
+        print("⛔ Ghost sır kapısı — commit durdu (değerler basılmadı):", file=sys.stderr)
+        for b in sorted(set(bulgu)):
+            print("   - " + b, file=sys.stderr)
+        print("   Değeri dosyadan çıkar, $DEGISKEN/secrets.env kullan; sahneden çıkar: git restore --staged <dosya>",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

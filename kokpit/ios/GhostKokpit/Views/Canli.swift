@@ -92,7 +92,7 @@ struct CanliGorunum: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else {
                 VStack(spacing: 6) {
-                    Image(systemName: kaynak == "mac" ? "appbopcomputer" : "iphone")
+                    Image(systemName: kaynak == "mac" ? "desktopcomputer" : "iphone")
                         .font(.title2).foregroundStyle(Renk.ikincil)
                     Text(hata ?? oynatici.hata ?? "bağlanıyor…")
                         .font(.footnote).foregroundStyle(Renk.ikincil)

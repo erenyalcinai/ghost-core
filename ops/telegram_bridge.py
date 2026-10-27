@@ -1378,7 +1378,13 @@ class Manager:
                         text, res, run_claude, kind=kind, jid=jid)
                 except Exception as e:       # denetçi asla işi düşürmesin
                     log("ikinci göz hatası (#%s): %r" % (jid, e))
+                # Denetim gerekiyordu ama karar yok (denetçi çöktü) → "doğrulanamadı", ✅ DEĞİL.
+                # Önceden karar None kalıyor, blocks(None) engellemiyordu: denetçi düşünce iş
+                # temiz "bitti" görünüyordu (dış inceleme GPT, 2026-10-27).
+                if karar is None:
+                    karar, denetim = verify.BELIRSIZ, "🔍 İkinci göz koşamadı — sonuç doğrulanmadı."
             takildi = verify.blocks(karar, text)
+            dogrulanmadi = karar == verify.BELIRSIZ
             durum = "hata" if err else ("denetimde takıldı" if takildi else "bitti")
             # Hata sebebi kayda geçsin: önceden iş "hata" ile kapanır ama NEDEN
             # hiçbir yerde durmazdı (iş #52, 19 Ekim: 8 sn'de hata, sebep yok).
@@ -1390,16 +1396,19 @@ class Manager:
                              "#%d %s %s (%ds)" % (jid, kind,
                                                   "hata" if err else durum, dur))
             if not err:  # hafıza sarayı: yapılan iş kalıcı belleğe iner
+                # Denetimden geçmeyen/doğrulanamayan sonuç ayrı türle iner ('iş-dogrulanmadi'):
+                # gelecek oturum onu olgu diye değil, şüpheli kayıt diye görür.
                 try:
                     memory.remember("iş #%d (%s): %s → %s%s"
                                     % (jid, kind,
                                        self.jobs[jid].get("prompt", "")[:150],
                                        res[:400],
                                        ("\n[İKİNCİ GÖZ: %s — %s]" % (karar, denetim)
-                                        if takildi else "")), kind="iş")
+                                        if (takildi or dogrulanmadi) else "")),
+                                    kind="iş-dogrulanmadi" if (takildi or dogrulanmadi) else "iş")
                 except Exception:
                     pass
-            icon = "❌" if err else ("⚠️" if takildi else "✅")
+            icon = "❌" if err else ("⚠️" if takildi else ("☑️" if dogrulanmadi else "✅"))
             kind_lbl = self.jobs[jid].get("department") or kind
             send(self.chat_id, "%s %s tamamlandı (%d sn):\n\n%s%s" %
                  (icon, kind_lbl.capitalize(), dur, res,
@@ -2028,8 +2037,14 @@ def check_requests(mgr):
     dosya) okunur. Dosya yolu: önce .proc'a TAŞI (sahiplen), işle, sil."""
     if governance.is_frozen():
         return  # acil durdurma: otomatik işler de bekler
+    for ev in bus.bayat_sahiplenmeler("request"):   # önceki süreç işlerken düştü
+        p = ev.get("payload") or {}
+        log("istek #%s yarıda kaldı (sahiplenilmiş, bitmemiş) → failed" % ev["id"])
+        send(mgr.chat_id, "⚠️ Otomatik istek #%s (%s) köprü yeniden başlarken yarıda kaldı; "
+             "iki kez koşmasın diye yeniden başlatılmadı:\n%s"
+             % (ev["id"], ev.get("source", ""), str(p.get("prompt") or p.get("kind") or "")[:200]))
     for _ in range(20):  # tur başına tavan — tek tur sonsuz döngüye girmesin
-        ev = bus.next_pending("request")
+        ev = bus.claim_next("request")   # atomik sahiplenme (pending → claimed)
         if not ev:
             break
         try:

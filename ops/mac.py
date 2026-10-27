@@ -27,7 +27,7 @@ KOORDİNAT (2026-08-23'te ölçüldü, tahmin değil): `ekran` çıktısı sips 
 ile küçültülür → görüntü 1512x982 = NOKTA uzayı. cua'nın tıklama uzayı ise
 GERÇEK PİKSEL (3024x1964). İkisi 2 kat farklı; ilk denemede tıklama ekranın
 sol üst çeyreğine düştü. Bu yüzden `tikla`/`kaydir` görüntüden okunan noktayı
-kendisi çarpar. Ham piksel veriyorsan (get_appbop_state çıktısı) --px de.
+kendisi çarpar. Ham piksel veriyorsan (get_desktop_state çıktısı) --px de.
 
 Ölçüm (2026-08-20): kuyruk 6-14 sn, bu uç ~0.2 sn. Fark işin süresinden değil,
 30 sn'lik yoklama aralığından geliyordu.
@@ -115,7 +115,7 @@ def olcek():
     except Exception:
         pass
     # screenshot_out_file: metadata'yı al, dev b64'ü tünelden geçirme.
-    d = cua("get_appbop_state", {"screenshot_out_file": "/Users/sahip/jarvis/ops/mac_olcek.png"})
+    d = cua("get_desktop_state", {"screenshot_out_file": "/Users/sahip/jarvis/ops/mac_olcek.png"})
     try:
         c = float(d["screenshot_height"]) / float(d["screen_height"])
     except Exception:
@@ -130,7 +130,7 @@ def olcek():
 def tikla(x, y, sag=False, cift=False, on=False, px=False):
     k = 1.0 if px else olcek()
     d = {"x": int(round(float(x) * k)), "y": int(round(float(y) * k)),
-         "scope": "appbop"}
+         "scope": "desktop"}
     if sag:
         d["button"] = "right"
     if cift:
@@ -141,7 +141,7 @@ def tikla(x, y, sag=False, cift=False, on=False, px=False):
 
 
 def yaz(metin, on=False):
-    d = {"text": metin, "scope": "appbop"}
+    d = {"text": metin, "scope": "desktop"}
     if on:
         d["delivery_mode"] = "foreground"
     return cua("type_text", d)
@@ -150,7 +150,7 @@ def yaz(metin, on=False):
 def tus(kombo, on=False):
     """cmd+n / cmd+shift+4 / enter / esc"""
     k = [p.strip() for p in kombo.replace("-", "+").split("+") if p.strip()]
-    d = {"scope": "appbop"}
+    d = {"scope": "desktop"}
     if on:
         d["delivery_mode"] = "foreground"
     if len(k) == 1:
@@ -172,7 +172,7 @@ def kaydir(x, y, yon="asagi", miktar=5, sayfa=False, px=False):
     k = 1.0 if px else olcek()
     d = {"x": int(round(float(x) * k)), "y": int(round(float(y) * k)),
          "direction": YON.get(str(yon).lower(), "down"),
-         "amount": max(1, min(50, int(miktar))), "scope": "appbop"}
+         "amount": max(1, min(50, int(miktar))), "scope": "desktop"}
     if sayfa:
         d["by"] = "page"
     return cua("scroll", d)

@@ -160,7 +160,7 @@ struct UzuvlarSeridi: View {
             if acik {
                 HStack(alignment: .top, spacing: 10) {
                     if Duzen.macKarti {
-                        UzuvKarti(kaynak: "mac", ad: "Mac", simge: "appbopcomputer",
+                        UzuvKarti(kaynak: "mac", ad: "Mac", simge: "desktopcomputer",
                                   duraklat: tamEkran != nil) { tamEkran = UzuvSecimi(id: "mac") }
                     }
                     UzuvKarti(kaynak: "telefon", ad: "iPhone", simge: "iphone",

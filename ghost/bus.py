@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS events(
   type TEXT NOT NULL,           -- chat|job|mac|monitor|incident|webhook|schedule
   source TEXT NOT NULL,         -- telegram|cron|uptime|email|...
   payload TEXT NOT NULL,        -- JSON
-  status TEXT NOT NULL DEFAULT 'pending',  -- pending|done|failed
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending|claimed|done|failed
   done_ts TEXT
 );
 CREATE INDEX IF NOT EXISTS ev_status ON events(status, id);
@@ -64,6 +64,42 @@ def next_pending(ev_type=None):
         return None
     return {"id": r[0], "ts": r[1], "type": r[2], "source": r[3],
             "payload": json.loads(r[4])}
+
+
+def claim_next(ev_type):
+    """Sıradaki bekleyen olayı ATOMİK sahiplen (pending → claimed) ve döndür; yoksa None.
+    next_pending yalnız okur: iki tüketici aynı olayı alabilir, işleme sırasında çökülürse olay
+    'pending' kalıp yeniden koşar (dış inceleme GPT, 2026-10-27). Sahiplenilen olay mark() ile
+    done/failed olur; çökmede 'claimed' kalır ve bayat_sahiplenmeler() onu bulur — kendiliğinden
+    YENİDEN KOŞMAZ (yan etkili bir iş iki kez yapılmasın; en çok bir kez + görünür)."""
+    c = _conn()
+    try:
+        r = c.execute("UPDATE events SET status='claimed', done_ts=? WHERE id=("
+                      "SELECT id FROM events WHERE status='pending' AND type=? ORDER BY id LIMIT 1) "
+                      "AND status='pending' RETURNING id, ts, type, source, payload",
+                      (time.strftime("%F %T"), ev_type)).fetchone()
+        c.commit()
+    finally:
+        c.close()
+    if not r:
+        return None
+    return {"id": r[0], "ts": r[1], "type": r[2], "source": r[3],
+            "payload": json.loads(r[4])}
+
+
+def bayat_sahiplenmeler(ev_type, yas_sn=600):
+    """Sahiplenilip yas_sn'den uzun süredir bitmemiş olaylar → 'failed' yapılır ve döndürülür
+    (köprü çökmüş/yeniden başlamış, iş yarıda kalmış). Çağıran sahibine haber verir."""
+    sinir = time.strftime("%F %T", time.localtime(time.time() - yas_sn))
+    c = _conn()
+    try:
+        rows = c.execute("UPDATE events SET status='failed', done_ts=? WHERE status='claimed' "
+                         "AND type=? AND done_ts < ? RETURNING id, ts, source, payload",
+                         (time.strftime("%F %T"), ev_type, sinir)).fetchall()
+        c.commit()
+    finally:
+        c.close()
+    return [{"id": r[0], "ts": r[1], "source": r[2], "payload": json.loads(r[3])} for r in rows]
 
 
 def mark(event_id, status="done"):
