@@ -72,9 +72,15 @@ def _uyar(metin):
 
 
 def _queue_job(prompt, kind, announce=None, classify=None):
-    """Dış kaynaklı istek → olay veriyolu (gate=True: onay kapısından geçer)."""
+    """Dış kaynaklı istek → olay veriyolu (gate=True: onay kapısından geçer).
+
+    GÜVENLİK (2026-10-27 denetimi): webhook'tan gelen SERBEST metin (text/job) her zaman
+    sahibin onayına düşer. Anahtar kelime sınıflandırması "şunu şuraya gönder" gibi veri
+    sızdırmayı yakalamıyordu ve tek WEBHOOK_SECRET birden çok kaynakta (e-posta işçisi,
+    SMS, Kısayollar) ortak. Bu yol üretimde kullanılmıyor; sahip için akış değişmez."""
     from ghost import bus
-    bus.istek(prompt, kind, "webhook", announce=announce, gate=True, classify=classify)
+    bus.istek(prompt, kind, "webhook", announce=announce, gate=True, classify=classify,
+              her_zaman_onay=True)
 
 
 def _decode_subject(s):

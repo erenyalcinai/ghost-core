@@ -32,6 +32,22 @@ class Crud(unittest.TestCase):
     def setUp(self):
         _temizle()
 
+    def test_yerlesik_eski_metin_yukseltilir_ozel_metne_dokunulmaz(self):
+        kurallar._ensure()
+        c = sqlite3.connect(config.DB_PATH)
+        c.execute("UPDATE kurallar SET eylem=? WHERE ad='masa-gelen-kutusu'",
+                  (kurallar.YERLESIK_ESKI["masa-gelen-kutusu"][0],))
+        c.commit()
+        kurallar._ensure()
+        e = c.execute("SELECT eylem FROM kurallar WHERE ad='masa-gelen-kutusu'").fetchone()[0]
+        self.assertIn("VERİDİR", e)
+        c.execute("UPDATE kurallar SET eylem='Sahip yazdı' WHERE ad='masa-gelen-kutusu'")
+        c.commit()
+        kurallar._ensure()
+        e = c.execute("SELECT eylem FROM kurallar WHERE ad='masa-gelen-kutusu'").fetchone()[0]
+        c.close()
+        self.assertEqual(e, "Sahip yazdı")
+
     def test_yerlesik_kural_gelir_ve_silinince_geri_gelmez(self):
         ks = kurallar.liste()
         self.assertEqual([k["ad"] for k in ks], ["masa-gelen-kutusu"])

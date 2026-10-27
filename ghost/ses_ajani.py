@@ -198,6 +198,8 @@ ARAC_ADLARI = [a["tool_config"]["name"] for a in ARACLAR]
 
 def arac_calistir(ad, veri):
     """POST /v1/ses/arac/<ad> gövdesi → ajanın okuyacağı KISA düz metin (LLM'e gider)."""
+    if ad in HASSAS_ARACLAR and not oturum_acik():
+        return {"metin": "Bu araç yalnız Kokpit'ten açılmış bir konuşmada çalışır; şu an açık oturum yok."}
     if ad == "durum":
         return {"metin": durum_metni()}
     if ad == "siteler":
@@ -220,6 +222,8 @@ def arac_calistir(ad, veri):
         g = " ".join((veri.get("gorev") or "").split())
         if len(g) < 4:
             return {"metin": "Görev metni boş ya da çok kısa geldi; Ghost'a iletilmedi. sahibe ne istediğini tekrar sor."}
+        if not _gorev_say():
+            return {"metin": "Bu saat içinde çok fazla görev iletildi; Ghost'a iletilmedi. sahibe biraz sonra tekrar denemesini söyle."}
         from ghost import channels, kokpit
         metin = "[Sesle, ses ajanı üzerinden] " + g[:1500]
         mid = kokpit.outbox_yaz(metin, "sahip")
@@ -589,7 +593,61 @@ def token():
     code, js = _call("GET", "/convai/conversation/token?agent_id=" + k["agent_id"], timeout=20)
     if code >= 300 or not js.get("token"):
         return None, "jeton alınamadı (%s): %s" % (code, json.dumps(js, ensure_ascii=False)[:300])
+    oturum_ac()
     return js["token"], None
+
+
+# ------------------------------------------------------------------ oturum penceresi
+# GÜVENLİK (2026-10-27 denetimi): araç uçları yalnız paylaşılan sırla korunuyordu; sır
+# ElevenLabs'te de duruyor. Hassas araçlar (görev iletme, hafıza, son mesajlar) artık
+# yalnız sahibin imzalı Kokpit isteğiyle (GET /v1/ses/token) açtığı konuşma penceresinde
+# çalışır; görev iletme saatte tavanlıdır. Sahip için hiçbir şey değişmez: Konuş'a basmak
+# zaten jetonu alır.
+OTURUM_PENCERE_SN = 90 * 60
+GOREV_SAAT_TAVAN = 20
+HASSAS_ARACLAR = ("gorev", "hafiza", "son_mesajlar")
+
+
+def _oturum_yolu():
+    return os.path.join(config.OPS, "ses_oturum.json")
+
+
+def _oturum_oku():
+    try:
+        with open(_oturum_yolu(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _oturum_yaz(d):
+    tmp = _oturum_yolu() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f)
+    os.replace(tmp, _oturum_yolu())
+
+
+def oturum_ac():
+    d = _oturum_oku()
+    d["acildi"] = time.time()
+    _oturum_yaz(d)
+
+
+def oturum_acik():
+    return time.time() - float(_oturum_oku().get("acildi") or 0) < OTURUM_PENCERE_SN
+
+
+def _gorev_say():
+    """Son bir saatteki görev sayısını tutar; tavan aşıldıysa False."""
+    d = _oturum_oku()
+    simdi = time.time()
+    g = [t for t in d.get("gorevler") or [] if simdi - t < 3600]
+    if len(g) >= GOREV_SAAT_TAVAN:
+        return False
+    d["gorevler"] = g + [simdi]
+    _oturum_yaz(d)
+    return True
 
 
 def imzali_ws():

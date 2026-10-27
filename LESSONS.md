@@ -522,3 +522,12 @@ A "secrets scan" is not enough: identity leaks into code comments, seed data, te
 
 ### 2026-10-14 — Move personal constants out of code into a profile file
 Hard-coded personal constants make code inseparable from its owner; moving them to a profile file and generating the sample from the same redaction mapping keeps both trees on one source. Also, a `git ls-files` filter does not see a new file until it is added, so an ImportError in the clean tree was caused by staging, not code.
+
+### 2026-10-27 — Text the model sees is not approval
+Approval used to be a chat line ("[action: id] approve") with a timestamp id; any mail, page or tool output could contain that line. Irreversible actions now check an approval record written only at the owner's real entry points (signed app request, owner-verified non-forwarded chat message), single-use and time-limited, with random ids.
+
+### 2026-10-27 — Runs that read untrusted text get no tools and no secrets
+The morning brief read web pages while allowed to Read and Write files; the mail digest was "tool-less" only in its docstring. Both now run in an empty temp directory with an explicit tool list (`--tools ""` or web-only) and only the auth token in the environment, and the shell, not the model, writes the output file.
+
+### 2026-10-27 — Replay real history before installing a security hook
+A PreToolUse hook that blocks reading secret files, dumping the environment and sending secrets or personal data to unknown hosts first blocked about 10% of three weeks of real tool calls (ssh -i key paths, sourcing the env file, URLs inside request bodies). Three narrowing passes brought it to about 1%, almost all genuine "print the secret" commands. The hook protects its own file and settings, so later changes go through the owner's approval card; re-test that write path after every narrowing.

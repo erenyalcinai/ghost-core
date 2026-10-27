@@ -88,7 +88,7 @@ class PaylasimEsitligi(unittest.TestCase):
         self.assertIn("Read ile aç", g)
         self.assertIn("önemli olanı anlat", g)
         b = tb._medya_prompt("belge", "/x/r.pdf", "r.pdf", "özetle")
-        self.assertIn("(ad: r.pdf)", b)
+        self.assertIn('(ad: "r.pdf";', b)
         self.assertTrue(b.endswith("özetle"))
 
     def test_check_kokpit_paylasim_ve_sesli(self):

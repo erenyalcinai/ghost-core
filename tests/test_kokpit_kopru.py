@@ -127,7 +127,7 @@ class CokluGonderi(unittest.TestCase):
         tb.check_kokpit(m)
         self.assertEqual(len(sohbetler), 1)
         self.assertIn("1 dosya gönderdi", sohbetler[0])
-        self.assertIn("(ad: a.pdf)", sohbetler[0])
+        self.assertIn('(ad: "a.pdf")', sohbetler[0])
 
     def test_tek_dosya_grup_yolu_kullanmaz(self):
         m = SahteMgr(res=None)

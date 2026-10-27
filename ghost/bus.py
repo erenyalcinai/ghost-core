@@ -85,7 +85,8 @@ def stats():
     return dict(rows)
 
 
-def istek(prompt, kind, source, announce=None, gate=False, classify=None, model=None):
+def istek(prompt, kind, source, announce=None, gate=False, classify=None, model=None,
+          her_zaman_onay=False):
     """Otomatik iş isteği (köprü işe çevirir). Eski ops/requests/*.json alanlarıyla
     bire bir: prompt, kind, announce, gate (dış kaynaklı → onay kapısı), classify
     (sınıflandırma için güvenilir metin), model."""
@@ -98,6 +99,8 @@ def istek(prompt, kind, source, announce=None, gate=False, classify=None, model=
         payload["classify"] = classify
     if model:
         payload["model"] = model
+    if her_zaman_onay:          # serbest dış metin: sınıfı ne olursa olsun önce sahibe sorulur
+        payload["her_zaman_onay"] = True
     return emit("request", source, payload)
 
 

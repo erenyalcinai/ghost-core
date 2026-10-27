@@ -25,6 +25,32 @@ NABIZ = {
 
 
 class Araclar(unittest.TestCase):
+    def setUp(self):
+        import os
+        try:
+            os.remove(ses_ajani._oturum_yolu())
+        except FileNotFoundError:
+            pass
+        ses_ajani.oturum_ac()      # Kokpit'ten açılmış konuşma (imzalı /v1/ses/token)
+
+    def test_hassas_araclar_oturumsuz_calismaz(self):
+        import os
+        os.remove(ses_ajani._oturum_yolu())
+        with mock.patch("ghost.kokpit.outbox_yaz") as oy:
+            for ad in ses_ajani.HASSAS_ARACLAR:
+                out = ses_ajani.arac_calistir(ad, {"gorev": "sitelerin trafiğini çıkar", "sorgu": "x"})
+                self.assertIn("açık oturum yok", out["metin"], ad)
+            oy.assert_not_called()
+
+    def test_gorev_saat_tavani(self):
+        with mock.patch("ghost.kokpit.outbox_yaz", return_value=1), \
+             mock.patch("ghost.kokpit.mesaj_kuyrukla") as mk, \
+             mock.patch("ghost.channels.son_kanal_ayarla"):
+            for _ in range(ses_ajani.GOREV_SAAT_TAVAN + 2):
+                out = ses_ajani.arac_calistir("gorev", {"gorev": "bir iş yap lütfen"})
+        self.assertEqual(mk.call_count, ses_ajani.GOREV_SAAT_TAVAN)
+        self.assertIn("çok fazla", out["metin"])
+
     def test_arac_listesi_ile_dallar_tutarli(self):
         # ElevenLabs'e tanıtılan her araç arac_calistir'de bir dala düşmeli (bilinmeyen araç yok)
         for ad in ses_ajani.ARAC_ADLARI:
