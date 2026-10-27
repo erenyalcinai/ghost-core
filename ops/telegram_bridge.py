@@ -715,7 +715,7 @@ def _run_kalici(kalici, prompt, model, session_id, resume, limit, on_usage, on_e
 
 
 def run_claude(prompt, model, session_id=None, resume=False, on_proc=None,
-               use_mcp=True, timeout=None, on_usage=None, on_event=None, kalici=None):
+               use_mcp=True, timeout=None, on_usage=None, on_event=None, kalici=None, ozerk=False):
     """(sonuç_metni, session_id, hata_mı) döndürür. on_proc: Popen'ı kaydeder.
 
     kalici: ghost.kalici_oturum.KaliciOturum verilirse tur o süreçte koşar
@@ -755,8 +755,12 @@ def run_claude(prompt, model, session_id=None, resume=False, on_proc=None,
     elif session_id:
         cmd += ["--session-id", session_id]
     try:
+        # Özerk iş (gözetimsiz): GHOST_OZERK=1 Claude SÜRECİNİN ortamına girer; güvenlik kapısı bu
+        # işaretle geri alınmaz eylemleri (deploy, push, silme, mail, dışarı POST) araç seviyesinde
+        # reddeder. Oturumun Bash'i bu ortamı değiştiremez — kanca claude sürecinin çocuğudur (2026-10-28).
+        env = dict(_env, GHOST_OZERK="1") if ozerk else _env
         proc = subprocess.Popen(cmd, cwd=BASE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, env=_env,
+                                stderr=subprocess.PIPE, text=True, env=env,
                                 start_new_session=True)
         if on_proc:
             on_proc(proc)
@@ -1331,11 +1335,12 @@ class Manager:
             prompt = (_tool_note(job_mcp)
                       + agents.system_prefix(text, dep=dep) + text)  # tek route çağrısı
             prompt = cc_komutlar.prompt_kur(text, prompt)  # /arastir, /istihbarat, /denetim işleri skill'le koşar
+            ozerk = text.startswith(AUTONOMOUS_GUARD)   # sahibin onayladığı iş bu öneki taşımaz
             res, _, err = run_claude(
                 prompt, model, session_id=sid, resume=False,
                 use_mcp=job_mcp,
                 on_proc=lambda p, j=jid: self.procs.__setitem__(j, p),
-                on_event=akis.olay_kaydedici("is#%s" % jid))
+                on_event=akis.olay_kaydedici("is#%s" % jid), ozerk=ozerk)
             self.procs.pop(jid, None)
             if err and engines.is_cost_limit(res):
                 # Maliyet/kota sınırı: iş yolunda da yedek motora DÜŞME.
@@ -1358,6 +1363,9 @@ class Manager:
                     % (jid, CLAUDE_TIMEOUT))
             elif err and (governance.is_frozen() or self.jobs.get(jid, {}).get("status") == "iptal"):
                 log("iş #%d FREEZE/iptal ile kesildi — yedek motora düşülmedi" % jid)
+            elif err and ozerk:
+                # Özerk iş yedek motora (codex) düşmez: o motor güvenlik kapısının DIŞINDA koşar.
+                log("iş #%d özerk — yedek motora düşülmedi (kapı dışı motor)" % jid)
             elif err:
                 # Beyin (Claude) düştü → yedek motora düş (sohbet yolundaki gibi).
                 # Önceden iş yolu YEDEKSİZDİ: Claude auth/limit ölünce iş sessizce

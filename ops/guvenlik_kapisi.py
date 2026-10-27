@@ -497,6 +497,49 @@ def _ham_dis_metin(k):
     return False
 
 
+# --- 9. özerk oturum: geri alınmaz eylem YOK (2026-10-28, dış inceleme GPT: "onay regex'le, tanınmayan iş READ") ---
+# Gözetimsiz işler (nöbetçi/zamanlayıcı/hedef) köprüde GHOST_OZERK=1 ile koşar; ön onay metin regex'ine bakıyordu,
+# kaçan iş yalnız istemdeki "yapma" ricasıyla korunuyordu. Burada EYLEM seviyesinde: deploy, push/commit, silme,
+# mail gönderme, dışarıya yazan HTTP, servis/yeniden başlatma, GitHub yazma. Sınıflandırıcı ne derse desin geçmez.
+# Okuma/araştırma/taslak/öneri serbest; iş gerçekten eylem istiyorsa sonuç sahibe öneri olarak döner.
+OZERK_YASAK = [
+    (r"\bgit\s+(?:-c\s+\S+\s+)*(push|commit|reset\s+--hard|rebase|tag|merge)\b", "git yazma (commit = yayın)"),
+    (r"\bwrangler(@\S+)?\b[^;&|\n]*\b(deploy|publish|delete|secret|d1\s+execute|kv\b|r2\b)", "Cloudflare deploy/yazma"),
+    (r"(?:^|[;&|(]|&&)\s*(?:\S+=\S*\s+)*(?:\S*/)?deploy\.sh\b|\bnpm\s+publish\b|\bpip\s+upload\b|\btwine\b", "deploy/yayın"),
+    (r"\bgmail_gonder\.py\s+gonder\b", "mail gönderme"),
+    (r"\bgh\s+(pr|release|repo|issue|api)\s+(create|merge|delete|edit|close|comment|-X)", "GitHub yazma"),
+    (r"\brm\s+(-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+(?!/tmp/|\$TMPDIR|\$\{?TMPDIR)", "özyinelemeli/zorla silme (yalnız /tmp serbest)"),
+    (r"\b(systemctl|launchctl|service)\s+(?:--?[\w-]+\s+)*(restart|stop|disable|kill|kickstart|bootout|unload)|self_restart\.sh|reboot_vps\.sh|\breboot\b",
+     "servis durdurma/yeniden başlatma"),
+    (r"\bghost\.masa\s+(sil|tasi|adlandir|geri)\b|\bghost\.kurallar\s+(ekle|sil|kapat|ac)\b", "Masa/kural değişikliği"),
+    (r"\bASC_READ_ONLY=0\b|\basc\b[^;&|\n]*\b(submit|upload|create|update|delete|publish)\b", "App Store Connect yazma"),
+]
+# Dışarıya YAZAN HTTP: veri gövdesi ya da yazma yöntemi; okuma amaçlı POST uçları istisna.
+OZERK_HTTP_YAZ = re.compile(r"\bcurl\b[^;&|\n]*(\s-X\s*(POST|PUT|PATCH|DELETE)|--request\s+(POST|PUT|PATCH|DELETE)|"
+                            r"\s-d\s|\s--data(-\w+)?\s|\s-F\s|\s--form\s|\s--json\s|\s-T\s|--upload-file)", re.I)
+OZERK_OKUMA_POST = re.compile(r"posthog\.com[^\s'\"]*/query|\$\{?POSTHOG_HOST\}?[^\s'\"]*/query|"
+                              r"api\.cloudflare\.com/client/v4/graphql|api\.telegram\.org/bot|127\.0\.0\.1|localhost")
+OZERK_MCP_YAZ = re.compile(r"^mcp__github__(create_|push_files|merge_|delete_|update_|add_|fork_|issue_write|"
+                           r"sub_issue_write|pull_request_review_write|request_copilot)")
+
+
+def _ozerk_engel(k):
+    if os.environ.get("GHOST_OZERK") != "1":
+        return None
+    kabuk = ham = _kod_govdeleri(_kod_metni(k))[0]
+    if not re.search(r"(^|[\s;&|(])(sh|bash|zsh)\s+-\w*c\b|(^|[\s;&|(])(eval|xargs|ssh|nohup|setsid)\s|komut|mac_cmd", kabuk):
+        kabuk = re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", "''", kabuk)   # tırnak içi metin komut değildir (grep deseni)
+    for desen, ad in OZERK_YASAK:
+        if re.search(desen, kabuk, re.M):
+            return ("Özerk (gözetimsiz) işte geri alınmaz eylem yapılamaz: %s. Araştır, hazırla, ÖNER — "
+                    "eylemi Sahip onaylasın (sonuca 'önerilen eylem' olarak yaz)." % ad)
+    for parca in PARCA_AG.split(ham):           # adres çoğu zaman tırnak içinde: ham metinde bak
+        if OZERK_HTTP_YAZ.search(parca) and not OZERK_OKUMA_POST.search(parca):
+            return ("Özerk işte dışarıya yazan HTTP isteği (POST/PUT/DELETE/veri gövdesi) yapılamaz; "
+                    "okuma uçları (PostHog query, Cloudflare GraphQL, Telegram bildirimi) serbest. Eylemi sahibe öner.")
+    return None
+
+
 def karar_bash(komut, _derinlik=0):
     """Engel sebebi (str) ya da None."""
     k = re.sub(r"\\[ \t]*\n", " ", _yurutulen(komut or ""))     # satır devamı (\) tek komut
@@ -579,6 +622,9 @@ def karar_bash(komut, _derinlik=0):
             return ("Sır değişkeni (%s) izinsiz adrese gidemez: %s. İzinli alan listesi "
                     "ops/guvenlik_kapisi.py IZINLI_ALAN; yeni alan Sahip onayıyla eklenir."
                     % (", ".join(sorted(kullanilan)), ", ".join(sorted(set(yasak)))))
+    oz = _ozerk_engel(k)
+    if oz:
+        return oz
     kc = _kisisel_cikis(k)
     if kc:
         return kc
@@ -605,6 +651,8 @@ def karar(girdi):
     # oturumun değil, onu başlatan claude sürecinin çocuğudur.
     if arac == "WebFetch" and os.environ.get("GHOST_KUM") != "1":
         return KARANTINA_MESAJ + " (WebFetch yerine: python3 ops/karantina.py web <url> \"soru\")"
+    if os.environ.get("GHOST_OZERK") == "1" and OZERK_MCP_YAZ.match(arac):
+        return "Özerk (gözetimsiz) işte GitHub'a yazılamaz (%s). Hazırla ve sahibe öner." % arac
     if arac == "Bash":
         return karar_bash(str(gi.get("command") or ""))
     if arac in ("Read", "NotebookRead", "Grep", "Glob"):

@@ -209,6 +209,33 @@ class Kapi(unittest.TestCase):
         with mock.patch.dict(os.environ, {"GHOST_KUM": "1"}):     # sabah brifingi kum havuzu
             self.assertIsNone(g.karar({"tool_name": "WebFetch", "tool_input": {"url": "https://x.example", "prompt": "p"}}))
 
+    def test_ozerk_iste_geri_alinmaz_eylem_yok(self):
+        """2026-10-28 (GPT bulgu 1): gözetimsiz iş (GHOST_OZERK=1) deploy/push/commit/silme/mail/dışarı yazan
+        HTTP/servis/GitHub yazma yapamaz — ön onay regex'i ne derse desin. Okuma ve hazırlık serbest."""
+        from unittest import mock
+        yasak = ("git push origin main", "cd ~/jarvis && git add -A && git commit -q -m x",
+                 "npx --yes wrangler@latest pages deploy dist --project-name=x", "cd ~/sahip-kim-site && ./deploy.sh --yayin",
+                 "python3 ops/gmail_gonder.py gonder --onay onay-0011223344556677", "rm -rf ~/appb",
+                 "systemctl --user restart ghost-api", "setsid nohup ~/jarvis/ops/self_restart.sh x",
+                 'curl -s -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/zones/z/dns_records/r',
+                 "curl -s https://hooks.example/x -d 'a=1'", "gh pr create --title x", "python3 -m ghost.masa sil 12",
+                 "sh -c 'git push'")
+        serbest = ("git status", "git log --oneline -5", "rm -rf /tmp/is_123", "python3 ops/gmail_gonder.py hazirla --kime a@b.co --konu K --govde G",
+                   'curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/zones',
+                   'curl -s -X POST "$POSTHOG_HOST/api/projects/$POSTHOG_PROJECT_ID/query/" -H "Authorization: Bearer $POSTHOG_API_KEY" -d @/tmp/q.json',
+                   'grep -rn "git push\\|deploy.sh" ops/', "python3 ops/karantina.py web https://example.com 'özet'",
+                   "python3 ops/send_telegram.py <<< 'rapor'", "grep -rn sitemap ~/sahip-kim-site/deploy.sh")
+        with mock.patch.dict(os.environ, {"GHOST_OZERK": "1"}):
+            for k in yasak:
+                self.assertIn("Özerk", g.karar_bash(k) or "", k)
+            for k in serbest:
+                self.assertIsNone(g.karar_bash(k), k)
+            self.assertIn("Özerk", g.karar({"tool_name": "mcp__github__push_files", "tool_input": {}}) or "")
+            self.assertIsNone(g.karar({"tool_name": "mcp__github__get_file_contents", "tool_input": {}}))
+        os.environ.pop("GHOST_OZERK", None)
+        for k in ("git push origin main", "cd ~/sahip-kim-site && ./deploy.sh --yayin"):   # sohbet (Sahip) etkilenmez
+            self.assertIsNone(g.karar_bash(k), k)
+
     def test_duz_deger_hicbir_aracta_gecmez(self):
         from unittest import mock
         import base64
