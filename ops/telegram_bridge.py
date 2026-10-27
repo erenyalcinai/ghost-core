@@ -1082,6 +1082,12 @@ class Manager:
             timeout=CHAT_TIMEOUT, on_usage=on_usage,
             on_event=akis.olay_kaydedici("sohbet"), kalici=self.kalici)
 
+        # 0) FREEZE — tur FREEZE ile kesildiyse (freeze_uygula oturumu kapattı) ne tekrar ne yedek motor:
+        # aksi hâlde kurtarma denemesi acil durdurmayı delip işi yeni oturumda sürdürürdü (2026-10-28).
+        if err and governance.is_frozen():
+            log("sohbet turu FREEZE ile kesildi — tekrar/failover yok")
+            return ("⛔ FREEZE: bu tur durduruldu, yeniden denenmedi. /unfreeze ile aç.", sid, err)
+
         # 1) ZAMAN AŞIMI — tekrar YOK, yedek motor YOK. İş yarım kaldı, söyle.
         if err and engines.is_timeout(res):
             log("sohbet turu zaman aşımına uğradı (%d sn) — tekrar/failover yok"
@@ -1350,6 +1356,8 @@ class Manager:
                        % res)
                 log("failover atlandı: zaman aşımı (iş #%d, %d sn)"
                     % (jid, CLAUDE_TIMEOUT))
+            elif err and (governance.is_frozen() or self.jobs.get(jid, {}).get("status") == "iptal"):
+                log("iş #%d FREEZE/iptal ile kesildi — yedek motora düşülmedi" % jid)
             elif err:
                 # Beyin (Claude) düştü → yedek motora düş (sohbet yolundaki gibi).
                 # Önceden iş yolu YEDEKSİZDİ: Claude auth/limit ölünce iş sessizce
@@ -2031,6 +2039,41 @@ def _istek_isle(mgr, req):
             send(mgr.chat_id, ann)
 
 
+_FREEZE_ONCEKI = [None]   # son görülen FREEZE durumu (kenar tetiği)
+
+
+def freeze_uygula(mgr):
+    """FREEZE kenarı (kapalı → açık) görülünce O AN çalışanı da durdur (2026-10-28, dış inceleme GPT:
+    '/freeze yeni işi durduruyor ama koşanı kesmiyor' — doğruydu). FREEZE hangi kapıdan gelirse gelsin
+    (Telegram /freeze, Kokpit, dosya) burada yakalanır: aktif işler iptal, kalıcı sohbet oturumu kapatılır
+    (tur ortasında kesilir), sahibine tek mesaj. Mac işçisi FREEZE'i kendi yoklar (ops/mac_worker.py).
+    Açılışta FREEZE zaten varsa da uygulanır (önceki süreçten kalan iş koşmasın)."""
+    simdi = governance.is_frozen()
+    once, _FREEZE_ONCEKI[0] = _FREEZE_ONCEKI[0], simdi
+    if not simdi or once:
+        return None
+    n = 0
+    try:
+        with mgr.lock:
+            n = sum(1 for j in mgr.jobs.values() if j.get("status") in AKTIF_DURUMLAR)
+        mgr.cancel("all")
+    except Exception as e:
+        log("freeze: iş iptali hata: %r" % e)
+    sohbet = False
+    try:
+        k = getattr(mgr, "kalici", None)
+        if k is not None and k.canli():
+            k.kapat("FREEZE")
+            sohbet = True
+    except Exception as e:
+        log("freeze: sohbet kapatma hata: %r" % e)
+    governance.audit("bridge", "freeze.uygula", governance.READ, "is=%d sohbet=%s" % (n, sohbet))
+    log("FREEZE uygulandı: %d iş iptal, sohbet oturumu %s" % (n, "kesildi" if sohbet else "boştaydı"))
+    send(mgr.chat_id, "⛔ FREEZE uygulandı: %d çalışan iş iptal edildi%s; Mac işçisi yeni iş almıyor ve "
+         "süren işini kesiyor. /unfreeze ile aç." % (n, ", süren sohbet turu kesildi" if sohbet else ""))
+    return n
+
+
 def check_requests(mgr):
     """Nöbetçi/cron isteklerini işe çevir. Faz 3: birincil kaynak olay veriyolu
     (type=request); ops/requests/*.json yalnız geriye dönük (eski üretici/yetim
@@ -2203,6 +2246,10 @@ def main():
         # Otomatik istekler (nöbetçi/cron) bayraktan BAĞIMSIZ işlenir —
         # baton Mac'teyken VPS'in olay müdahalesi/sentezi birikmesin.
         if mgr:
+            try:
+                freeze_uygula(mgr)
+            except Exception as e:
+                log("freeze uygulama hata: %r" % e)
             try:
                 mgr.gec_sonuclari_teslim()
             except Exception as e:

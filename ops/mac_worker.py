@@ -9,8 +9,10 @@ Mac uykudayken çalışmaz → işler VPS'te bekler, uyanınca akar.
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import uuid
@@ -167,8 +169,7 @@ def _claude_once(prompt, sid, resume):
         base += ["--mcp-config", MCP_MOBILE]
         log("iPhone işi: mobile-mcp yükleniyor")
     cmd = base + (["--resume", sid] if resume else ["--session-id", sid])
-    return subprocess.run(cmd, cwd=BASE, capture_output=True, text=True,
-                          timeout=1800, env=env)
+    return _kosu(cmd, 1800, cwd=BASE, env=env)
 
 
 def _parse_result(r, sid):
@@ -232,6 +233,68 @@ def jkey(p):
         return 0
 
 
+VPS_FREEZE = "/home/ghost/jarvis/ops/FREEZE"
+_FREEZE_ONBELLEK = [0.0, False]
+
+
+def _dondu(tazelik=8):
+    """VPS'te FREEZE var mı? (2026-10-28, acil durdurma Mac'e de uzanır.) Kısa önbellekli —
+    işçi her turda, koşan iş 10 sn'de bir sorar. VPS'e ulaşılamazsa bilinmez → False (zaten iş de alınamaz)."""
+    simdi = time.time()
+    if simdi - _FREEZE_ONBELLEK[0] < tazelik:
+        return _FREEZE_ONBELLEK[1]
+    try:
+        r = ssh("test -e %s && echo DONDU" % VPS_FREEZE, timeout=15)
+        dondu = "DONDU" in (r.stdout or "")
+    except Exception:
+        dondu = False
+    _FREEZE_ONBELLEK[:] = [simdi, dondu]
+    return dondu
+
+
+def _grubu_oldur(p):
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(p.pid), sig)
+        except Exception:
+            pass
+        try:
+            p.wait(timeout=8)
+            return
+        except Exception:
+            continue
+
+
+def _kosu(cmd, timeout, **kw):
+    """subprocess.run(capture_output=True, text=True) yerine: aynı CompletedProcess'i döndürür ama
+    süreç kendi grubunda koşar ve FREEZE gelince (10 sn içinde) grubuyla öldürülür."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True, **kw)
+    bitti, durduruldu = threading.Event(), [False]
+
+    def izle():
+        while not bitti.wait(10):
+            if p.poll() is not None:
+                return
+            if _dondu():
+                log("FREEZE: koşan Mac işi durduruluyor (pid %s)" % p.pid)
+                durduruldu[0] = True
+                _grubu_oldur(p)
+                return
+    threading.Thread(target=izle, daemon=True).start()
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _grubu_oldur(p)
+        out, err = p.communicate()
+        raise subprocess.TimeoutExpired(cmd, timeout, out, err)
+    finally:
+        bitti.set()
+    if durduruldu[0]:
+        err = (err or "") + "\n[FREEZE ile durduruldu]"
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
 def _kapi_kilitli():
     """YubiKey kapısı kilitliyse True; hal DEĞİŞİNCE tek satır log (30 sn'de bir
     koşan işçi her turda yazmasın). İş dosyalarına dokunulmaz — VPS kuyruğunda
@@ -251,6 +314,8 @@ def poll_once(quiet=False):
     """Bekleyen Mac işlerini işle. En az bir iş işlendiyse True döner.
     quiet=True: 'başladı' bildirimini atla (mac-modu akıcı olsun)."""
     if _kapi_kilitli():
+        return False
+    if _dondu():          # FREEZE: yeni iş ALINMAZ, kuyrukta bekler (/unfreeze ile akar)
         return False
     try:
         # Yalnız sayı-adlı iş dosyaları: claimed_*.json bu desene UYMAZ —
@@ -321,8 +386,7 @@ def _run_job(raw, path, claimed, name, quiet):
         to = int(job.get("timeout") or 120)
         t0 = time.time()
         try:
-            r = subprocess.run(["/bin/bash", "-lc", cmd], cwd=job.get("cwd") or BASE,
-                               capture_output=True, text=True, timeout=to)
+            r = _kosu(["/bin/bash", "-lc", cmd], to, cwd=job.get("cwd") or BASE)
             cikti = ((r.stdout or "") + (("\n[stderr]\n" + r.stderr) if r.stderr.strip() else "")).strip()
             rc = r.returncode
         except subprocess.TimeoutExpired:

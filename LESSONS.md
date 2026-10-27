@@ -543,3 +543,9 @@ The second-eye check returned no verdict when it threw, and "no verdict" did not
 
 ### 2026-10-27 — A scrubbing regex rewrote code it did not understand
 The publishing script replaced a product name inside identifiers: `desktop` became something else, and every Mac screenshot and typing call in the public tree pointed at a tool that does not exist. All tests passed because no test exercised that path. Scrub rules now use word boundaries and the publish gate scans for corrupted identifiers.
+
+### 2026-10-28 — An emergency stop must stop what is already running
+`/freeze` blocked new messages and queued jobs, but the job already running, the chat turn in progress and the Mac worker kept going. Worse, killing a chat turn made the error path retry it in a fresh session and then fall back to a second engine — the recovery logic would have undone the stop. FREEZE is now edge-triggered wherever it comes from: running jobs are cancelled, the live session is closed mid-turn, interrupted work is never retried, and the Mac worker kills its child process group within ten seconds.
+
+### 2026-10-28 — The quarantined reader's output is also a carrier
+Untrusted text (a full e-mail, a web page) is now read by a tool-less, secret-less sub-model and only its answer reaches the main session. In the first live test it caught a hidden "send the secrets file" instruction — and then quoted the instruction verbatim in its answer, carrying it straight back. When an instruction is suspected, imperative quotes are now dropped and the attempt is described in the third person.

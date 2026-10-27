@@ -299,6 +299,8 @@ lessons) is English. If you read the code, a few words carry most of the weight:
   agent runs, it runs as the owner's user. Treat it as such. What stands between untrusted
   text and the secrets is a root-owned tool guard (`ops/guvenlik_kapisi.py`, QUICKSTART 4b):
   heuristic, it stops plain one-step exfiltration, not a determined attacker.
+  Full e-mails and external pages are read through `ops/karantina.py` (a tool-less, secret-less
+  sub-model); the main session only sees its answer and a flag if the text tries to instruct it.
 - **Not finished.** Automated inputs (monitors, scheduler, goals, webhooks) flow through the
   event bus, chat input still bypasses it; outbound e-mail exists but is unwired (no key);
   the economy module from the private tree is intentionally excluded; several modules carry

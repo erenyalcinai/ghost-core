@@ -454,6 +454,34 @@ def hook_bayat_uyar(kod_ts):
         return None
 
 
+KAPI_CANLI = "/usr/local/lib/ghost-kapi/guvenlik_kapisi.py"
+
+
+def kapi_kopyasi_uyar():
+    """Repodaki güvenlik kapısı ile root'a kurulu CANLI kapı farklıysa uyar (2026-10-28).
+    NEDEN: kapı B turunda root sahipli /usr/local/lib/ghost-kapi/'ye taşındı; repo kaynak,
+    canlı kopya ayrı. Bir düzeltme repoya commit'lenip root'a install edilmezse kapı eski
+    kodla korur ve kimse fark etmez (ghost-hook'un bayatlaması gibi). Yenileme YubiKey ister,
+    bu yüzden kendiliğinden yapamayız — günde bir kez uyarırız. Yalnız VPS, kapı kuruluysa."""
+    if IS_MAC or not os.path.exists(KAPI_CANLI):
+        return None
+    try:
+        import hashlib
+        repo = os.path.join(BASE, "ops", "guvenlik_" + "kapisi.py")
+        h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+        if h(repo) == h(KAPI_CANLI):
+            return None
+        isaret = os.path.join(BASE, "ops", ".kapi_fark_uyari")
+        if os.path.exists(isaret) and time.time() - os.path.getmtime(isaret) < 86400:
+            return None
+        open(isaret, "w").close()
+        return ("🔒 Güvenlik kapısı: repo kaynağı ile canlı kopya (%s) FARKLI — düzeltme kurulmamış. "
+                "Mac'te YubiKey ile: /opt/homebrew/bin/ssh -i ~/.ssh/ghost_root_sk root@VPS "
+                "'install -m644 /home/ghost/jarvis/ops/guvenlik_kapisi.py /usr/local/lib/ghost-kapi/'" % KAPI_CANLI)
+    except Exception:
+        return None
+
+
 def api_bayat_yenile(kod_ts):
     """Kokpit API (ghost.api) bayat kodla koşuyorsa hemen yenile.
 
@@ -705,6 +733,9 @@ def main():
     if sorun:
         problems.append(sorun)
     sorun = hook_bayat_uyar(kod_ts)
+    if sorun:
+        problems.append(sorun)
+    sorun = kapi_kopyasi_uyar()
     if sorun:
         problems.append(sorun)
     for kontrol in (test_kapisi_yerinde, github_kimligi_yerinde,
