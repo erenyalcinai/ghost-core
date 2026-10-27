@@ -166,6 +166,18 @@ class Kapi(unittest.TestCase):
         self.assertIsNotNone(g.karar_bash("python3 - <<'EOF'\nimport os\nprint(os.environ)\nEOF"))
         self.assertIsNotNone(g.karar_bash("python3 - <<'EOF'\nprint(open('/proc/1/environ').read())\nEOF"))
 
+    def test_onay_kapida_ghost_kodu_alinmadan_tuketilir(self):
+        """Kapı onay kaydını kendi okur/tüketir (root sahipli kopya ghost/ kodunu içe almaz); biçim sahne.py ile ortak."""
+        from ghost import sahne
+        eid = sahne.sahip_onayi_kaydet("[Sahne eylem: onay-00112233445566ab] onayla", "test")
+        self.assertEqual(eid, "onay-00112233445566ab")
+        g._TUKETILEN.clear()
+        self.assertEqual(g._onay_gecerli("cp a b ; : onay-00112233445566ab"), eid)
+        self.assertFalse(sahne.onay_gecerli(eid))                    # tek kullanımlık
+        g._TUKETILEN.clear()
+        self.assertIsNone(g._onay_gecerli(": onay-00112233445566ab"))
+        self.assertIsNone(g._onay_gecerli(": onay-ffffffffffffffff"))
+
     def test_duz_deger_hicbir_aracta_gecmez(self):
         from unittest import mock
         import base64

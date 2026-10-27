@@ -20,7 +20,7 @@ Clone into `~/jarvis`: the launchd/systemd units and a few scripts assume that c
 
 ```bash
 git clone https://github.com/erenyalcinai/ghost-core ~/jarvis && cd ~/jarvis
-python3 -m unittest discover -s tests      # 572 tests, ~20 s, no network, no secrets
+python3 -m unittest discover -s tests      # ~580 tests, ~20 s, no network, no secrets
 ```
 
 If this is green, the core is intact on your machine.
@@ -74,6 +74,39 @@ Add `ops/selfcheck.py` on a 15-minute timer; it revives the bridge, renews it wh
 on disk is newer *and the bridge is idle*, and warns about stuck jobs, stale CLI and a broken
 profile. **Never restart the bridge synchronously from inside a chat turn** — the session is a
 child of the bridge and the answer dies with it. Use `ops/self_restart.sh`, which waits for idle.
+
+The bridge runs Claude Code headless, so it needs a permission mode to use tools at all. The live
+system sets `JARVIS_CLAUDE_ARGS=--dangerously-skip-permissions` in `.env` — which means the tool
+guard below is the only filter between untrusted text (mail, web pages, documents) and your
+secrets. Do not run that mode without step 4b.
+
+## 4b. Security: git hooks and the tool guard
+
+```bash
+git config core.hooksPath ops/githooks     # pre-push: tests; pre-commit: no secret values in commits
+```
+
+`ops/guvenlik_kapisi.py` is a Claude Code `PreToolUse` hook. It blocks reading secret files, dumping
+the environment, sending a secret variable or personal data to a host outside an allow-list, the
+literal value of any secret (raw, base64, hex, URL-encoded) in **any** tool input including MCP
+tools and WebFetch, git hook bypasses, and edits to itself without an owner approval. It is
+heuristic: it stops the plain one-step injection, not a determined attacker.
+
+Install it **owned by root**, so the agent cannot edit or disable it (a hook the agent's own user
+can write is a suggestion, not a boundary):
+
+```bash
+sudo install -d -m 755 /usr/local/lib/ghost-kapi /etc/claude-code
+sudo install -m 644 ops/guvenlik_kapisi.py /usr/local/lib/ghost-kapi/
+sudo install -m 644 ops/root/managed-settings.json /etc/claude-code/managed-settings.json
+```
+
+Claude Code's managed settings apply in every session, in bypass mode too, and a user-level
+`disableAllHooks` does not turn them off (tested). The copy in the repository is the source;
+updating the live guard is a root action. If an SSH key on another machine gives root to this
+server, restrict it with `command="/usr/local/sbin/ghost-root-kapi",restrict` in
+`authorized_keys` (`ops/root/ghost-root-kapi`: reboot and `ghost-*` services only) and keep full
+root behind a hardware key (`ssh-keygen -t ed25519-sk`).
 
 ## 5. What you have now
 

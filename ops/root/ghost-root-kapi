@@ -1,0 +1,23 @@
+#!/bin/sh
+# Ghost root kapısı — Mac'teki ghost_vps anahtarının (authorized_keys command=) yapabildiği TEK şeyler.
+# 2026-10-27 (Sahip onayı, güvenlik B): VPS oturumu Mac'e komut gönderebildiği için bu anahtar tam root
+# veriyordu; artık yalnız reboot ve ghost-* servislerinin durumu/yeniden başlatılması. Tam root =
+# YubiKey'e dokunuş (ghost_root_sk). Kaynak: jarvis ops/root/ghost-root-kapi.
+K="$SSH_ORIGINAL_COMMAND"
+izin() { logger -t ghost-root-kapi "izin: $K"; }
+if [ "$K" = "systemctl reboot" ]; then
+    izin; exec /usr/bin/systemctl reboot
+fi
+if printf '%s' "$K" | grep -Eqx 'systemctl (restart|status|is-active) ghost-[a-z0-9-]+(\.service|\.timer)?( --no-pager)?'; then
+    izin
+    # shellcheck disable=SC2086
+    exec /usr/bin/systemctl $(printf '%s' "$K" | cut -d' ' -f2-)
+fi
+if printf '%s' "$K" | grep -Eqx 'journalctl -u ghost-[a-z0-9-]+ -n [0-9]{1,4} --no-pager'; then
+    izin
+    # shellcheck disable=SC2086
+    exec /usr/bin/journalctl $(printf '%s' "$K" | cut -d' ' -f2-)
+fi
+logger -t ghost-root-kapi "RED: $K"
+echo "ghost-root-kapi: bu anahtar yalnız 'systemctl reboot', 'systemctl restart|status|is-active ghost-*' ve 'journalctl -u ghost-* -n N --no-pager' yapabilir. Tam root: YubiKey (ghost_root_sk)." >&2
+exit 1

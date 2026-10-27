@@ -25,7 +25,7 @@ here and probably the most useful.
 | Core Python (`ghost/`) | ~10,800 lines, 46 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
 | Organs (`ops/`) | ~9,600 lines: bridge, sentinels, Mac and iPhone limbs |
 | Cockpit app (`kokpit/ios`) | ~7,800 lines Swift, iOS + macOS targets, one source |
-| Tests | 572, run in ~20 s with `python -m unittest`, no network, CI on every push |
+| Tests | ~580, run in ~20 s with `python -m unittest`, no network, CI on every push |
 | Scheduling units | 8 launchd agents (Mac) + 3 systemd units (VPS) in this tree; the bridge and self-check units themselves live in the private deploy |
 | Lessons | 170 operational lessons, auto-extracted from commit messages, curated in [LESSONS.md](LESSONS.md) |
 | History | Started 11 August 2026; this open-core snapshot is from day 78 (880+ commits in the private tree, most authored by the agent under the owner's direction) |
@@ -226,7 +226,7 @@ weekly transparency report turns the audit log into "what I did on my own, what 
 what you refused". Continuity hooks flag a session that is about to end without writing anything
 down; idle time goes to standing goals.
 
-**It is tested like it will be run.** 572 tests in 20 s with every path redirected and the
+**It is tested like it will be run.** ~580 tests in 20 s with every path redirected and the
 network cut (`tests/common.py`, after a test once leaked into production), a pre-push gate that
 runs them, and CI that runs the same command on the same file set.
 
@@ -273,7 +273,7 @@ but optional; they need your own hardware and Apple developer setup.
 
 ```bash
 git clone https://github.com/erenyalcinai/ghost-core && cd ghost-core
-python3 -m unittest discover -s tests        # 572 tests, ~20 s, no network
+python3 -m unittest discover -s tests        # ~580 tests, ~20 s, no network
 cp ops/sahip.example.json ops/sahip.json     # owner profile: sites, products, root cards
 printf 'TELEGRAM_BOT_TOKEN=...\nTELEGRAM_OWNER_ID=...\nCLAUDE_BIN=/path/to/claude\n' > .env
 python3 ops/telegram_bridge.py
@@ -296,7 +296,9 @@ lessons) is English. If you read the code, a few words carry most of the weight:
   people is a rewrite, not a config change.
 - **Not sandboxed for untrusted code.** `ghost/sandbox.py` limits time and process group
   and scrubs the environment, but there is no filesystem or network jail. Everything the
-  agent runs, it runs as the owner's user. Treat it as such.
+  agent runs, it runs as the owner's user. Treat it as such. What stands between untrusted
+  text and the secrets is a root-owned tool guard (`ops/guvenlik_kapisi.py`, QUICKSTART 4b):
+  heuristic, it stops plain one-step exfiltration, not a determined attacker.
 - **Not finished.** Automated inputs (monitors, scheduler, goals, webhooks) flow through the
   event bus, chat input still bypasses it; outbound e-mail exists but is unwired (no key);
   the economy module from the private tree is intentionally excluded; several modules carry

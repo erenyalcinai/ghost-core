@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Grep|Glob|Edit|Write|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 -I /usr/local/lib/ghost-kapi/guvenlik_kapisi.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

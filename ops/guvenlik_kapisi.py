@@ -337,15 +337,41 @@ def _onay_gecerli(metin):
         if eid in _TUKETILEN:
             return eid
         try:
-            sys.path.insert(0, KOK)
-            from ghost import sahne
-            if sahne.onay_gecerli(eid):
-                sahne.onay_tuket(eid)
+            if _onay_tuket_kendi(eid):
                 _TUKETILEN.add(eid)
                 return eid
         except Exception:
             return None
     return None
+
+
+def _onay_tuket_kendi(eid, omur_sn=24 * 3600):
+    """ghost/sahne.py onay_gecerli + onay_tuket'in AYNISI, ama oturumun değiştirebildiği ghost/ kodunu
+    İÇE ALMADAN (2026-10-27 B: kapı root sahipli kopyadan koşar; ghost/config.py'yi değiştiren bir
+    oturum kapının içinde kod koşturamasın). Kayıt biçimi sahne.py ile ortak: {eid: {ts, tuketildi}}."""
+    import fcntl
+    import tempfile
+    ops = os.environ.get("GHOST_OPS") or os.path.join(KOK, "ops")
+    yol = os.path.join(ops, "sahne_onaylar.json")
+    with open(yol + ".kilit", "a") as k:
+        fcntl.flock(k, fcntl.LOCK_EX)
+        try:
+            try:
+                with open(yol, encoding="utf-8") as f:
+                    d = json.load(f)
+            except (OSError, ValueError):
+                return False
+            v = d.get(eid) if isinstance(d, dict) else None
+            if not v or v.get("tuketildi") or time.time() - float(v.get("ts") or 0) >= omur_sn:
+                return False
+            v["tuketildi"], v["tuketim_ts"] = True, time.time()
+            fd, tmp = tempfile.mkstemp(prefix=".sahne_onaylar.", dir=ops)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False)
+            os.replace(tmp, yol)
+            return True
+        finally:
+            fcntl.flock(k, fcntl.LOCK_UN)
 
 
 def _yol_korunan(yol):

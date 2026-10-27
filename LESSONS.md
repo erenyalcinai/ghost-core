@@ -531,3 +531,15 @@ The morning brief read web pages while allowed to Read and Write files; the mail
 
 ### 2026-10-27 — Replay real history before installing a security hook
 A PreToolUse hook that blocks reading secret files, dumping the environment and sending secrets or personal data to unknown hosts first blocked about 10% of three weeks of real tool calls (ssh -i key paths, sourcing the env file, URLs inside request bodies). Three narrowing passes brought it to about 1%, almost all genuine "print the secret" commands. The hook protects its own file and settings, so later changes go through the owner's approval card; re-test that write path after every narrowing.
+
+### 2026-10-27 — A guard the agent's own user can write is a suggestion
+The tool guard, its settings file and the approval record all belonged to the same Unix user as the agent. An independent review got 14 of 18 crafted commands past it, including rewriting the settings file with an obfuscated path so later sessions would start without the hook. Rules about the guard inside the guard cannot fix that. It now lives in root-owned managed settings, runs under `python -I` so a planted `usercustomize` cannot load, and checks approvals without importing any module the agent can edit. A user-level `disableAllHooks` was tested against it and did not turn it off.
+
+### 2026-10-27 — One step from root is root
+The VPS user had a single sudo line, but the agent could run commands on the Mac, and the Mac held an unrestricted root key for the VPS. The boundary was on the wrong machine. The key is now pinned with `command=` to reboot and service restarts; full root needs a hardware key and a physical touch.
+
+### 2026-10-27 — If the verifier crashes, the job is unverified, not done
+The second-eye check returned no verdict when it threw, and "no verdict" did not block the green tick. A crashed verifier now yields "unverified", which blocks permanent and spending work and is stored in memory under a separate kind, so later sessions do not read it as fact.
+
+### 2026-10-27 — A scrubbing regex rewrote code it did not understand
+The publishing script replaced a product name inside identifiers: `desktop` became something else, and every Mac screenshot and typing call in the public tree pointed at a tool that does not exist. All tests passed because no test exercised that path. Scrub rules now use word boundaries and the publish gate scans for corrupted identifiers.
