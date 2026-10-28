@@ -113,11 +113,26 @@ def _telegram(token, chat_id, metin):
         return False
 
 
+# 6. tur (2026-10-29): FREEZE ortak konumu — köprü bayrak durumunu /run/ghost-freeze/durum'a (1/0) aynalar (ghost/governance.py).
+# FREEZE'de onay kaydı/tüketimi/kart açma/tetik imzası durur: gerçek acil durdurmada onaylı iş de yürümez, mail gitmez.
+FREEZE_YOL = "/run/ghost-freeze/durum"      # içerik "1" = durdurma aktif
+FREEZE_KAPALI = frozenset({"sahip_onayi", "tuket", "komut_tuket", "karar_tuket", "kart_ac", "tetik_imzala"})
+
+
+def _dondu(yol):
+    try:
+        with open(yol, encoding="utf-8") as f:
+            return f.read(1) == "1"
+    except OSError:
+        return False
+
+
 class Onay:
     """Durum + kurallar. Soketten bağımsız (testler doğrudan isle() çağırır)."""
 
-    def __init__(self, dizin, kopru_pid=None, telegram=None):
+    def __init__(self, dizin, kopru_pid=None, telegram=None, freeze_yol=None):
         self.dizin = dizin
+        self.freeze_yol = freeze_yol or FREEZE_YOL
         self.kilit = threading.Lock()
         self.db = sqlite3.connect(os.path.join(dizin, "onay.db"), timeout=10, check_same_thread=False)
         self.db.executescript(SCHEMA)
@@ -176,6 +191,8 @@ class Onay:
         fn = getattr(self, "op_" + op, None) if re.fullmatch(r"[a-z_]{2,30}", op) else None
         if not fn:
             return {"ok": False, "hata": "bilinmeyen op"}
+        if op in FREEZE_KAPALI and _dondu(self.freeze_yol):
+            return {"ok": False, "hata": "FREEZE: onay işlemleri durdu (/unfreeze ile aç)", "tuketildi": False, "eid": None}
         with self.kilit:
             try:
                 r = fn(istek, peer)
@@ -549,8 +566,9 @@ class Onay:
         return {"ok": True, "id": self.ayar.get("sahip_id")}
 
     def op_durum(self, i, peer):
+        # 6. tur: FREEZE görünür olsun
         say = lambda q: self.db.execute(q).fetchone()[0]  # noqa: E731
-        return {"ok": True, "surum": SURUM,
+        return {"ok": True, "surum": SURUM, "freeze": _dondu(self.freeze_yol),
                 "aktif_cihaz": say("SELECT COUNT(*) FROM cihazlar WHERE durum='aktif'"),
                 "acik_kart": say("SELECT COUNT(*) FROM onaylar WHERE acik=1 AND ts IS NULL"),
                 "gecerli_onay": say("SELECT COUNT(*) FROM onaylar WHERE ts IS NOT NULL AND tuketildi=0"),

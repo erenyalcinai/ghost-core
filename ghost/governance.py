@@ -85,8 +85,34 @@ def audit(actor, action, cls=READ, detail="", decision=None):
     return rec
 
 
+# 6. tur (2026-10-29): acil durdurma bayrağının ORTAK konumu. Vekil ve onay servisi ayrı kullanıcıda, ProtectHome ile
+# /home'u göremez; köprü (ghost) her is_frozen() çağrısında (döngü başına) durumu /run/ghost-freeze/durum dosyasına
+# "1"/"0" olarak aynalar (dizin tmpfiles.d ile root kurar: ops/vekil/kur.sh; yoksa sessizce atlanır).
+# Tek kaynak ops altındaki bayrak dosyası kalır; ayna salt-okunur kopyadır, kaldırma/açma bu dosyaya bakmaz.
+AYNA_DOSYA = os.environ.get("GHOST_FREEZE_AYNA") or "/run/ghost-freeze/durum"
+
+
+def _ayna(dondu):
+    try:
+        if not os.path.isdir(os.path.dirname(AYNA_DOSYA)):
+            return
+        yeni = "1" if dondu else "0"
+        try:
+            with open(AYNA_DOSYA, encoding="utf-8") as f:
+                if f.read(1) == yeni:
+                    return
+        except OSError:
+            pass
+        with open(AYNA_DOSYA, "w", encoding="utf-8") as f:
+            f.write(yeni + "\n")
+    except OSError:
+        pass
+
+
 def is_frozen():
-    return os.path.exists(config.FREEZE_FILE)
+    d = os.path.exists(config.FREEZE_FILE)
+    _ayna(d)
+    return d
 
 
 def freeze(reason=""):

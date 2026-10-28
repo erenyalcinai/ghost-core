@@ -8,13 +8,118 @@
 # 1. aşama: Cloudflare, PostHog, GitHub REST, Telegram. 2. aşama: ElevenLabs, Sentry, ASC (JWT), APNs JWT, GitHub MCP.
 # 3. aşama: Gmail SMTP (onay kapılı) + IMAP, Higgsfield, Wikidata, git (github-git). Anahtarlar ghost'ta DA kalır (4. aşamada silinir).
 # Faz 2 devamı: izin listesi (hedef = kendi hesaplarımız) + ghost-kimlik (özerk oturum → yalnız okuma).
+# 6. tur (2026-10-29): PostHog MCP anahtarı (POSTHOG_MCP_KEY, mcp-posthog.json başlığından), FREEZE ortak dizini
+#   (/run/ghost-freeze, tmpfiles.d; köprü 1/0 yazar, vekil+onay okur), DON=1 anahtar yenileme kipi:
+#   Mac'ten: ssh -i ~/.ssh/ghost_root_sk root@VPS "DON=1 sh /home/ghost/jarvis/ops/vekil/kur.sh"  → AD=DEĞER satırlarını
+#   yapıştır, Ctrl-D. Değer ekrana basılmaz, kabuk geçmişine girmez; yalnız ANAHTARLAR'daki adlar; TELEGRAM_BOT_TOKEN onay
+#   servisinin ayar.json'una, SENTRY_ACCESS_TOKEN ghost'un mcp-sentry.json'una da yazılır; servisler yeniden başlar,
+#   her yenilenen servis vekilden sınanır (tokens/verify, getMe, /user, …).
+#   Root yedek (R4): Mac'te `bash ops/vekil/mac_root_yedek.sh` — /var/lib/ghost-onay + ghost-vekil tar akışı Mac'te
+#   Keychain parolasıyla gpg'lenir, diske düz metin düşmez.
 set -eu
 J=/home/ghost/jarvis
 SRC=$J/ops/vekil
 DURUM=/var/lib/ghost-vekil
 LIB=/usr/local/lib/ghost-vekil
-ANAHTARLAR="CLOUDFLARE_API_TOKEN POSTHOG_API_KEY POSTHOG_HOST GHOST_GITHUB_TOKEN TELEGRAM_BOT_TOKEN ELEVENLABS_API_KEY SENTRY_ACCESS_TOKEN ASC_ISSUER_ID ASC_KEY_ID APNS_TEAM_ID APNS_KEY_ID GITHUB_MCP_TOKEN GITHUB_MCP_YAZ_TOKEN GMAIL_ADDRESS GMAIL_APP_PASSWORD HF_API_KEY_ID HF_API_KEY_SECRET WIKIDATA_BOT_PASS TELEGRAM_OWNER_ID CLOUDFLARE_ACCOUNT_ID POSTHOG_PROJECT_ID"
+ANAHTARLAR="CLOUDFLARE_API_TOKEN POSTHOG_API_KEY POSTHOG_HOST GHOST_GITHUB_TOKEN TELEGRAM_BOT_TOKEN ELEVENLABS_API_KEY SENTRY_ACCESS_TOKEN ASC_ISSUER_ID ASC_KEY_ID APNS_TEAM_ID APNS_KEY_ID GITHUB_MCP_TOKEN GITHUB_MCP_YAZ_TOKEN POSTHOG_MCP_KEY GMAIL_ADDRESS GMAIL_APP_PASSWORD HF_API_KEY_ID HF_API_KEY_SECRET WIKIDATA_BOT_PASS TELEGRAM_OWNER_ID CLOUDFLARE_ACCOUNT_ID POSTHOG_PROJECT_ID"
 [ "$(id -u)" = 0 ] || { echo "root gerekir" >&2; exit 1; }
+
+# ---------------------------------------------------------------- DON=1: anahtar yenileme (stdin)
+if [ "${DON:-}" = 1 ]; then
+    [ -s "$DURUM/sirlar.env" ] || { echo "sirlar.env yok — önce kurulum" >&2; exit 1; }
+    echo "== anahtar yenileme: AD=DEĞER satırlarını yapıştır, bitince Ctrl-D (değer ekrana basılmaz)"
+    SONUC="$(ANAHTARLAR="$ANAHTARLAR" /usr/bin/python3 -I - "$DURUM/sirlar.env" "$J/mcp-sentry.json" /var/lib/ghost-onay/ayar.json <<'EOF'
+import json, os, re, sys
+hedef, sentry_mcp, onay_ayar = sys.argv[1:4]
+izinli = set(os.environ["ANAHTARLAR"].split())
+yeni = {}
+for satir in sys.stdin:
+    satir = satir.strip()
+    if not satir or satir.startswith("#"):
+        continue
+    m = re.match(r"(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$", satir)
+    if not m:
+        print("atlandı (AD=DEĞER değil): %s…" % satir[:12])
+        continue
+    k, v = m.group(1), m.group(2).strip().strip('"').strip("'")
+    if k not in izinli:
+        print("atlandı (vekil anahtarı değil): %s" % k)
+        continue
+    if v:
+        yeni[k] = v
+if not yeni:
+    sys.exit("yeni değer yok")
+mevcut, sira = {}, []
+for satir in open(hedef, encoding="utf-8"):
+    m = re.match(r"([A-Z_][A-Z0-9_]*)=(.*)$", satir.rstrip("\n"))
+    if m:
+        mevcut[m.group(1)] = m.group(2); sira.append(m.group(1))
+degisen = sorted(k for k in yeni if mevcut.get(k) != yeni[k])
+mevcut.update(yeni)
+sira += [k for k in yeni if k not in sira]
+fd = os.open(hedef + ".yeni", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    for k in sira:
+        f.write("%s=%s\n" % (k, mevcut[k]))
+os.replace(hedef + ".yeni", hedef)
+def json_yaz(yol, d):
+    st = os.stat(yol)
+    fd = os.open(yol + ".yeni", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+    os.chown(yol + ".yeni", st.st_uid, st.st_gid); os.chmod(yol + ".yeni", st.st_mode & 0o777)
+    os.replace(yol + ".yeni", yol)
+yan = []
+if "TELEGRAM_BOT_TOKEN" in degisen and os.path.exists(onay_ayar):
+    d = json.load(open(onay_ayar, encoding="utf-8")); d["telegram_token"] = yeni["TELEGRAM_BOT_TOKEN"]; json_yaz(onay_ayar, d); yan.append("onay-ayar")
+if "SENTRY_ACCESS_TOKEN" in degisen and os.path.exists(sentry_mcp):
+    cfg = json.load(open(sentry_mcp, encoding="utf-8"))
+    for srv in cfg.get("mcpServers", {}).values():
+        if isinstance(srv.get("env"), dict) and "SENTRY_ACCESS_TOKEN" in srv["env"]:
+            srv["env"]["SENTRY_ACCESS_TOKEN"] = yeni["SENTRY_ACCESS_TOKEN"]
+    json_yaz(sentry_mcp, cfg); yan.append("mcp-sentry")
+print("DEGISEN=%s" % ",".join(degisen))
+print("YAN=%s" % ",".join(yan))
+print("yenilenen %d anahtar: %s (değişmeyen %d)" % (len(degisen), ", ".join(degisen) or "yok", len(yeni) - len(degisen)))
+EOF
+)"
+    echo "$SONUC" | grep -v '^\(DEGISEN\|YAN\)='
+    DEGISEN="$(echo "$SONUC" | sed -n 's/^DEGISEN=//p')"
+    chown ghost-vekil:ghost-vekil "$DURUM/sirlar.env"
+    systemctl restart ghost-vekil
+    echo "$SONUC" | grep -q '^YAN=.*onay-ayar' && systemctl restart ghost-onay
+    i=0; until runuser -u ghost -- /usr/bin/python3 -I -c "import socket; socket.create_connection(('127.0.0.1', 8797), 1)" 2>/dev/null || [ $i -ge 50 ]; do sleep 0.1; i=$((i+1)); done
+    echo "== sınama (vekilden, ghost olarak):"
+    DEGISEN="$DEGISEN" runuser -u ghost -- /usr/bin/python3 -I - <<'EOF'
+import json, os, urllib.request
+T = "http://127.0.0.1:8797"
+SINAMA = {"CLOUDFLARE_API_TOKEN": ("/cloudflare/client/v4/user/tokens/verify", '"success":true'),
+          "TELEGRAM_BOT_TOKEN": ("/telegram/getMe", '"ok":true'),
+          "GHOST_GITHUB_TOKEN": ("/github/user", '"login"'),
+          "POSTHOG_API_KEY": ("/posthog/api/projects/@current/", '"id"'),
+          "ELEVENLABS_API_KEY": ("/elevenlabs/v1/user", '"subscription"'),
+          "SENTRY_ACCESS_TOKEN": ("/sentry/api/0/organizations/", '"slug"'),
+          "GITHUB_MCP_TOKEN": ("/github-mcp/mcp/readonly", None),
+          "POSTHOG_MCP_KEY": ("/posthog-mcp/mcp", None)}
+d = json.loads(urllib.request.urlopen(T + "/_durum", timeout=5).read())
+print("vekil: ok=%s eksik=%s" % (d.get("ok"), d.get("eksik")))
+for ad in [a for a in os.environ.get("DEGISEN", "").split(",") if a]:
+    yol, bekle = SINAMA.get(ad, (None, None))
+    if not yol:
+        print("  %s: elle sına (otomatik sınama yok)" % ad); continue
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(T + yol, headers={"Authorization": "Bearer vekil", "Accept": "application/json, text/event-stream"}), timeout=20)
+        g = r.read(4000).decode("utf-8", "replace")
+        ok = (bekle in g) if bekle else (r.status < 400)
+    except Exception as e:
+        kod = getattr(e, "code", None)
+        ok = bekle is None and kod in (405, 406)      # MCP uçları GET'e 405/406 döner ama kimlik 401 dönerdi
+        g = "%s %s" % (type(e).__name__, kod or e)
+    print("  %s: %s" % (ad, "TAMAM" if ok else "HATA %s" % g[:80].replace("\n", " ")))
+EOF
+    echo "== eski anahtarları panelden İPTAL et (yeni çalışıyorsa). Tamam."
+    exit 0
+fi
 
 echo "== kaynak özetleri:"
 sha256sum "$SRC/vekil_servisi.py" "$SRC/ghost-vekil.service" "$SRC/kimlik_servisi.py" "$SRC/ghost-kimlik.service"
@@ -51,7 +156,8 @@ d = {}
 J = os.path.dirname(kaynaklar[0])
 for dosya, ad, yol in (("mcp-github.json", "GITHUB_MCP_TOKEN", ("headers", "Authorization")),
                        ("mcp-github-yaz.json", "GITHUB_MCP_YAZ_TOKEN", ("headers", "Authorization")),
-                       ("mcp-sentry.json", "SENTRY_ACCESS_TOKEN", ("env", "SENTRY_ACCESS_TOKEN"))):
+                       ("mcp-sentry.json", "SENTRY_ACCESS_TOKEN", ("env", "SENTRY_ACCESS_TOKEN")),
+                       ("mcp-posthog.json", "POSTHOG_MCP_KEY", ("headers", "Authorization"))):
     try:
         v = list(json.load(open(os.path.join(J, dosya), encoding="utf-8"))["mcpServers"].values())[0]
         for k in yol:
@@ -124,6 +230,12 @@ if u not in d.get("izinli_uid", []):
 EOF
     systemctl restart ghost-onay
 fi
+
+# 6. tur: FREEZE ortak dizini — köprü (ghost) 1/0 yazar, vekil + onay (ProtectHome) /run'dan okur
+printf 'd /run/ghost-freeze 0755 ghost ghost -\n' > /etc/tmpfiles.d/ghost-freeze.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/ghost-freeze.conf
+runuser -u ghost -- sh -c '[ -f /run/ghost-freeze/durum ] || printf "0\n" > /run/ghost-freeze/durum'
+echo "== freeze dizini: $(ls -ld /run/ghost-freeze | cut -c1-30) durum=$(cat /run/ghost-freeze/durum)"
 
 systemctl daemon-reload
 systemctl enable ghost-kimlik ghost-vekil >/dev/null 2>&1

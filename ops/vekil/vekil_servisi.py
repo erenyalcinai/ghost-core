@@ -35,6 +35,18 @@ TAMPON_TAVAN = 5 * 1024 * 1024        # bundan büyük ya da boyutsuz cevap akar
 ZAMAN_ASIMI = 300
 OKUMA_ZAMAN_ASIMI = 60                # S9 (Codex, 2026-10-28): istemciden okuma (başlık/gövde) zaman aşımı
 ES_ZAMANLI_TAVAN = 48                 # S9: aynı anda işlenen bağlantı tavanı; üstü 503 (yerel istemci yeniden dener)
+# 6. tur (2026-10-29): FREEZE ortak konumu — köprü bayrak durumunu /run/ghost-freeze/durum'a (1/0) aynalar (ghost/governance.py);
+# vekil ProtectHome ile /home'u göremez, /run'ı görür. FREEZE'de yazma sınıfı uçlar 403 (Telegram hariç: sahibe haber
+# ve /unfreeze'in geldiği getUpdates akmalı). SMTP aktarıcısı da FREEZE'de mail göndermez.
+FREEZE_YOL = "/run/ghost-freeze/durum"      # içerik "1" = durdurma aktif
+
+
+def dondu(yol=None):
+    try:
+        with open(yol or FREEZE_YOL, encoding="utf-8") as f:
+            return f.read(1) == "1"
+    except OSError:
+        return False
 YER_TUTUCU = {"", "vekil", "bearer vekil", "token vekil"}   # istemcinin "kimliği vekil eklesin" işareti
 
 # servis → sabit host + kimlik. {AD} = sirlar.env'deki değişken. jwt: vekil imzalar.
@@ -51,6 +63,8 @@ SERVISLER = {
     "asc": {"host": "api.appstoreconnect.apple.com", "jwt": "asc"},
     "github-mcp": {"host": "api.githubcopilot.com", "baslik": {"Authorization": "Bearer {GITHUB_MCP_TOKEN}"}},
     "github-mcp-yaz": {"host": "api.githubcopilot.com", "baslik": {"Authorization": "Bearer {GITHUB_MCP_YAZ_TOKEN}"}},
+    # 6. tur: PostHog MCP (http) — anahtar artık ghost'ta değil; vekil readonly=1'i zorlar (hedef()), cli kipi tek exec aracı
+    "posthog-mcp": {"host": "mcp.posthog.com", "baslik": {"Authorization": "Bearer {POSTHOG_MCP_KEY}"}},
     # 3. aşama
     "higgsfield": {"host": "api.higgsfield.ai", "baslik": {"Authorization": "Key {HF_API_KEY_ID}:{HF_API_KEY_SECRET}"}},
     "wikidata": {"host": "www.wikidata.org", "govde": {"__WIKIDATA_BOT_PASS__": "WIKIDATA_BOT_PASS"}},
@@ -95,6 +109,29 @@ _GH_YASAK_ALT = re.compile(r"^/repos/[^/]+/[^/]+/(hooks|keys|transfer|actions/se
 _MCP_OKUMA_ARAC = re.compile(r"^(get_|list_|search_|download_|read_|me$)|_read$|^(dependabot_alerts|"
                              r"code_scanning_alert|secret_scanning_alert|notifications|discussions?|"
                              r"issue_read|pull_request_read)\b")
+# 6. tur (5. denetim: "önek tabanlı"): önce TAM AD — GitHub MCP salt-okunur ucunun bilinen okuma araçları; listede olmayan
+# ad önek kuralına düşer ama adında yazma fiili (create/update/delete/merge/push/run/dismiss/…) geçiyorsa YAZMA sayılır.
+_MCP_OKUMA_ADLAR = frozenset("""
+get_me get_commit get_file_contents get_label get_latest_release get_release_by_tag get_tag get_team_members get_teams
+issue_read pull_request_read list_branches list_commits list_issue_fields list_issue_types list_issues list_pull_requests
+list_releases list_repository_collaborators list_tags search_code search_commits search_issues search_pull_requests
+search_repositories search_users list_notifications get_notification_details list_discussions get_discussion
+get_discussion_comments list_discussion_categories list_dependabot_alerts get_dependabot_alert list_code_scanning_alerts
+get_code_scanning_alert list_secret_scanning_alerts get_secret_scanning_alert list_global_security_advisories
+get_global_security_advisory list_repository_security_advisories list_org_repository_security_advisories list_workflows
+list_workflow_runs get_workflow_run list_workflow_jobs get_job_logs list_workflow_run_artifacts download_workflow_run_artifact
+get_workflow_run_usage list_starred_repositories get_issue_comments list_sub_issues get_pull_request get_pull_request_diff
+get_pull_request_files get_pull_request_reviews get_pull_request_comments get_pull_request_status get_issue
+""".split())
+_MCP_YAZMA_FIIL = re.compile(r"(^|_)(create|update|delete|remove|merge|push|write|run|rerun|cancel|dismiss|trigger|add|"
+                             r"assign|fork|star|unstar|submit|mark|manage|request|transfer|set|enable|disable|archive|"
+                             r"rename|close|reopen|lock|unlock|approve|reject|publish|upload|edit|patch|post|put)(_|$)")
+
+
+def _mcp_okuma_mi(ad):
+    if ad in _MCP_OKUMA_ADLAR:
+        return True
+    return bool(_MCP_OKUMA_ARAC.match(ad)) and not _MCP_YAZMA_FIIL.search(ad)
 _D1_OKUMA = re.compile(r"^\s*(select|with|explain|pragma\s+table_info)\b", re.I)
 
 
@@ -260,7 +297,7 @@ def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
             ad, arg = str(p.get("name") or ""), p.get("arguments") or {}
             if "gist" in ad:
                 return "red", "gist kapalı (vekil izin listesi)"
-            if ad and not _MCP_OKUMA_ARAC.match(ad):      # beyaz liste dışı HER araç yazmadır (kara liste kaçıyordu)
+            if ad and not _mcp_okuma_mi(ad):              # beyaz liste dışı HER araç yazmadır (kara liste kaçıyordu)
                 sahip = str(arg.get("owner") or arg.get("organization") or "").lower()
                 if ad.startswith("fork_"):
                     sahip = str(arg.get("organization") or "ghost-bot").lower()
@@ -310,6 +347,12 @@ def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
             if parca and all(_D1_OKUMA.match(p) and not yazan.search(p) for p in parca):
                 return "okuma", ""
         return "yazma", ""
+    if servis == "posthog-mcp":
+        if oku:
+            return "okuma", ""
+        if not re.search(r"(^|&)readonly=1(&|$)", sorgu or ""):
+            return "yazma", ""        # hedef() readonly=1'i ekler; buraya düşen çıplak istek yazma sınıfı
+        return "okuma", ""
     if servis == "posthog":
         proje = str(sirlar.get("POSTHOG_PROJECT_ID") or "")
         m = re.match(r"^/api/(?:projects|environments)/([^/]+)", yol_)
@@ -389,8 +432,9 @@ def _hata(durum, metin):
 class Vekil:
     """Yönlendirme + kimlik ekleme + maskeleme. Ağdan bağımsız test edilebilir (gonder enjekte edilir)."""
 
-    def __init__(self, sirlar, gonder=None, dizin=DURUM_DIZIN):
+    def __init__(self, sirlar, gonder=None, dizin=DURUM_DIZIN, freeze_yol=None):
         self.sirlar = sirlar
+        self.freeze_yol = freeze_yol or FREEZE_YOL
         # S6 (Codex, 2026-10-28): akan cevapta parça sınırına düşen sır kaçıyordu — en uzun sır eksi bir bayt
         # bir sonraki parçayla birlikte taranır (bkz. _akis_maskele).
         self._kuyruk_boyu = max([len(v.encode()) - 1 for a, v in sirlar.items()
@@ -438,6 +482,9 @@ class Vekil:
         s = SERVISLER.get(servis)
         if not s:
             raise LookupError(servis)
+        if servis == "posthog-mcp" and not re.search(r"(^|&)readonly=1(&|$)", sorgu):
+            sorgu = (sorgu + "&" if sorgu else "") + "readonly=1"
+            kalan = "/" + (parca[1] if len(parca) > 1 else "") + "?" + sorgu
         host = s["host"]
         if s.get("host_degisken") and self.sirlar.get(s["host_degisken"]):
             host = re.sub(r"^https?://", "", self.sirlar[s["host_degisken"]]).split("/")[0]
@@ -531,6 +578,9 @@ class Vekil:
         if sinif == "red":
             self._gunluk_yaz("RED %s %s %s: %s" % (servis, yontem, yol.split("?")[0][:120], neden))
             return _hata(403, "izin listesi: %s" % neden)
+        if sinif == "yazma" and servis not in ("telegram",) and dondu(self.freeze_yol):
+            self._gunluk_yaz("RED-FREEZE %s %s %s" % (servis, yontem, yol.split("?")[0][:120]))
+            return _hata(403, "FREEZE: vekil yazma uçlarını geçirmiyor (/unfreeze ile aç)")
         if sinif == "yazma" and ozerk_mi is not None:
             oz = ozerk_mi()
             if oz is None:
@@ -594,7 +644,7 @@ class _Isleyici(http.server.BaseHTTPRequestHandler):
             return self._yaz(*_hata(403, "vekil yalnız ghost kullanıcısına"))
         if self.path == "/_durum":
             return self._yaz(200, [("Content-Type", "application/json")], json.dumps(
-                {"ok": True, "servisler": sorted(SERVISLER), "sayac": v.sayac,
+                {"ok": True, "servisler": sorted(SERVISLER), "sayac": v.sayac, "freeze": dondu(v.freeze_yol),
                  "eksik": sorted(s for s, t in SERVISLER.items() if not _var(t, v.sirlar, v.dizin))}).encode())
         if self.path.startswith("/_jwt/"):
             ad = self.path[6:].split("?")[0]
@@ -1016,6 +1066,8 @@ class _SmtpIsleyici(socketserver.BaseRequestHandler):
         ist = _Satirlar(self.request)
         if not (adres and sifre):
             return ist.yaz(b"421 ghost-vekil: Gmail kimligi yok\r\n")
+        if dondu(v.freeze_yol):
+            return ist.yaz(b"421 ghost-vekil: FREEZE - mail gonderimi durdu (/unfreeze)\r\n")
         try:
             ust = self.server.ust_ac()
         except Exception as e:

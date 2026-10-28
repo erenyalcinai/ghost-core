@@ -116,7 +116,7 @@ MCP_CONFIGS = {
 
 
 def _mcp_vekile_cevir():
-    """Sır vekili ayaktaysa (Faz 2/2. aşama) GitHub MCP ayarının SIRSIZ kopyası: adres vekil, token yer tutucu
+    """Sır vekili ayaktaysa (Faz 2/2. aşama) GitHub (6. tur: + PostHog) MCP ayarının SIRSIZ kopyası: adres vekil, token yer tutucu
     ("Bearer vekil" — vekil gerçeğini ekler). Kopya ops/mcp_vekil/ altında (gitignore). Vekil düşükse ya da
     kurulu değilse dokunulmaz, özgün dosya kullanılır. Hata köprüyü düşürmez."""
     try:
@@ -125,15 +125,15 @@ def _mcp_vekile_cevir():
             return
         d = os.path.join(OPS, "mcp_vekil")
         os.makedirs(d, exist_ok=True)
-        for ad, servis in (("github", "github-mcp"), ("github-yaz", "github-mcp-yaz")):
+        for ad, servis in (("github", "github-mcp"), ("github-yaz", "github-mcp-yaz"), ("posthog", "posthog-mcp")):
             kaynak = MCP_CONFIGS.get(ad)
             if not (kaynak and os.path.exists(kaynak)):
                 continue
             with open(kaynak, encoding="utf-8") as f:
                 cfg = json.load(f)
-            g = cfg["mcpServers"]["github"]
-            yol = urllib.parse.urlparse(g["url"]).path
-            g["url"] = "%s/%s%s" % (_v.TABAN, servis, yol)
+            g = next(iter(cfg["mcpServers"].values()))
+            u = urllib.parse.urlparse(g["url"])
+            g["url"] = "%s/%s%s%s" % (_v.TABAN, servis, u.path, "?" + u.query if u.query else "")   # posthog: ?readonly=1&mode=cli
             g.setdefault("headers", {})["Authorization"] = "Bearer vekil"
             hedef = os.path.join(d, os.path.basename(kaynak))
             with open(hedef, "w", encoding="utf-8") as f:

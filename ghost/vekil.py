@@ -30,6 +30,7 @@ _DOGRUDAN = {
     "asc": ("https://api.appstoreconnect.apple.com", "ASC_KEY_PATH", "Authorization", None),   # JWT
     "github-mcp": ("https://api.githubcopilot.com", "GITHUB_MCP_TOKEN", "Authorization", "Bearer %s"),
     "github-mcp-yaz": ("https://api.githubcopilot.com", "GITHUB_MCP_YAZ_TOKEN", "Authorization", "Bearer %s"),
+    "posthog-mcp": ("https://mcp.posthog.com", "POSTHOG_MCP_KEY", "Authorization", "Bearer %s"),   # 6. tur: http MCP, readonly zorlanır
     # 3. aşama
     "higgsfield": ("https://api.higgsfield.ai", "HF_API_KEY_SECRET", None, None),     # başlık: higgsfield.py kendisi
     "wikidata": ("https://www.wikidata.org", "WIKIDATA_BOT_PASS", None, None),         # parola gövdede yer tutucu
