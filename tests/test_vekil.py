@@ -129,6 +129,16 @@ def _ec_p8(yol):
     return k.public_key()
 
 
+def _jwt_kutuphanesi_var():
+    try:
+        import cryptography  # noqa: F401
+        import jwt  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+@unittest.skipUnless(_jwt_kutuphanesi_var(), "cryptography/PyJWT yok (CI) — vekil sunucusunda kurulu")
 class Asama2(unittest.TestCase):
     def setUp(self):
         import tempfile
