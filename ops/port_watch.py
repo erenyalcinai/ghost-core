@@ -59,7 +59,9 @@ with (open(os.path.join(BASE, ".env"), encoding="utf-8") if os.path.exists(os.pa
             k, v = line.split("=", 1)
             ENV[k] = v.strip()
 
-API = "https://api.telegram.org/bot" + ENV["TELEGRAM_BOT_TOKEN"]
+__import__("sys").path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ghost import vekil  # noqa: E402  sır vekili (Faz 2)
+API = vekil.url("telegram", "", ENV)
 
 
 def log(msg):

@@ -35,13 +35,12 @@ def telegram(text, env=None):
         kokpit.outbox_yaz(text, "ghost")
     except Exception:
         pass
-    token = env.get("TELEGRAM_BOT_TOKEN")
+    from ghost import vekil     # sır vekili kuruluysa anahtar bu süreçte yok (Faz 2)
     owner = env.get("TELEGRAM_OWNER_ID")
-    if token and owner:
+    if vekil.hazir("telegram", env) and owner:
         data = urllib.parse.urlencode({"chat_id": owner,
                                        "text": text[:4000]}).encode()
-        req = urllib.request.Request(
-            "https://api.telegram.org/bot%s/sendMessage" % token, data=data)
+        req = urllib.request.Request(vekil.url("telegram", "/sendMessage", env), data=data)
         if _test_kipi():          # kapı TAM burada: yapılandırma mantığı korunur,
             GONDERILENLER.append(("telegram", text))   # yalnız ağ kesilir
             return True

@@ -31,7 +31,15 @@ son_motor = None          # "elevenlabs" | "edge" | None — son tts() hangi mot
 _eleven_voice_cache = {}
 
 
+def _eleven_api():
+    from ghost import vekil     # sır vekili kuruluysa anahtarı vekil ekler (Faz 2)
+    return vekil.url("elevenlabs", "/v1") if vekil.aktif(None, "ELEVENLABS_API_KEY") else ELEVEN_API
+
+
 def _eleven_key(env):
+    from ghost import vekil
+    if vekil.aktif(env, "ELEVENLABS_API_KEY"):
+        return "vekil"          # yer tutucu: vekil gerçek anahtarı ekler
     return (env.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVENLABS_API_KEY") or "").strip()
 
 
@@ -42,7 +50,7 @@ def _eleven_voice_id(env, key):
         return vid
     if "id" in _eleven_voice_cache:
         return _eleven_voice_cache["id"]
-    req = urllib.request.Request(ELEVEN_API + "/voices", headers={"xi-api-key": key})
+    req = urllib.request.Request(_eleven_api() + "/voices", headers={"xi-api-key": key})
     try:
         js = json.loads(urllib.request.urlopen(req, timeout=20).read())
         sesler = js.get("voices") or []
@@ -65,7 +73,7 @@ def _tts_elevenlabs(speech, out, env, timeout=60):
     body = json.dumps({"text": speech, "model_id": model,
                        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}).encode()
     req = urllib.request.Request(
-        "%s/text-to-speech/%s?output_format=mp3_44100_128" % (ELEVEN_API, vid), data=body,
+        "%s/text-to-speech/%s?output_format=mp3_44100_128" % (_eleven_api(), vid), data=body,
         headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -131,8 +139,8 @@ def tts(text, voice=VOICE, timeout=60, motor=None):
 def send_voice(chat_id, mp3_path, caption="", env=None):
     """Telegram sendAudio (mp3). (ok döner; dosyayı temizler.)"""
     env = config.load_env() if env is None else env
-    token = env.get("TELEGRAM_BOT_TOKEN")
-    if not token or not mp3_path:
+    from ghost import vekil     # sır vekili (Faz 2)
+    if not vekil.hazir("telegram", env) or not mp3_path:
         return False
     try:  # kokpit dökümü: sesli yanıt uygulamada oynatılabilsin (dosya silinmeden önce kopyalanır)
         from ghost import kokpit
@@ -158,7 +166,7 @@ def send_voice(chat_id, mp3_path, caption="", env=None):
                      % (name, data)).encode()
     body += ("--%s--\r\n" % boundary).encode()
     req = urllib.request.Request(
-        "https://api.telegram.org/bot%s/sendAudio" % token, data=body,
+        vekil.url("telegram", "/sendAudio", env), data=body,
         headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
     try:
         resp = json.loads(urllib.request.urlopen(req, timeout=120).read())

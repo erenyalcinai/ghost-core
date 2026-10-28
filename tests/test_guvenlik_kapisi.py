@@ -11,6 +11,8 @@ from tests import common  # noqa: F401
 KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(KOK, "ops"))
 import guvenlik_kapisi as g  # noqa: E402
+if hasattr(g, "_degerli_adlar"):   # Faz 2: bu testler "sırrın değeri hâlâ ghost tarafında" senaryosunu sınar
+    g._degerli_adlar = lambda: set(g.VEKIL_ADLARI)
 
 ENGEL = [
     "cat secrets.env",

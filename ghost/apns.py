@@ -35,6 +35,9 @@ HOST = {"development": "https://api.sandbox.push.apple.com",
 
 
 def hazir():
+    from ghost import vekil     # sır vekili kuruluysa .p8 vekilde, JWT ondan (Faz 2)
+    if vekil.aktif(None, "APNS_KEY_PATH") and _ayar("APNS_KEY_ID") and _ayar("APNS_TEAM_ID"):
+        return True
     return bool(_ayar("APNS_KEY_ID") and _ayar("APNS_TEAM_ID")
                 and os.path.exists(_ayar("APNS_KEY_PATH")))
 
@@ -42,6 +45,11 @@ def hazir():
 def _jwt():
     if _jwt_cache["tok"] and time.time() - _jwt_cache["t"] < 50 * 60:
         return _jwt_cache["tok"]
+    from ghost import vekil
+    tok = vekil.apns_jwt()
+    if tok:
+        _jwt_cache.update(tok=tok, t=time.time())
+        return tok
     import jwt  # PyJWT
     with open(_ayar("APNS_KEY_PATH")) as f:
         key = f.read()

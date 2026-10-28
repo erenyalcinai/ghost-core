@@ -25,7 +25,8 @@ else:
     with open(os.path.join(BASE, "ops", "owner.json"), encoding="utf-8") as f:
         CHAT_ID = str(json.load(f)["id"])
 
-TOKEN = ENV["TELEGRAM_BOT_TOKEN"]
+sys.path.insert(0, BASE)
+from ghost import vekil  # noqa: E402  sır vekili kuruluysa anahtar bu süreçte yok (Faz 2)
 path = sys.argv[1]
 caption = sys.argv[2] if len(sys.argv) > 2 else ""
 
@@ -56,7 +57,7 @@ for name, filename, data in parts:
 body += ("--%s--\r\n" % boundary).encode()
 
 req = urllib.request.Request(
-    "https://api.telegram.org/bot%s/sendDocument" % TOKEN, data=body,
+    vekil.url("telegram", "/sendDocument", ENV), data=body,
     headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
 resp = json.loads(urllib.request.urlopen(req, timeout=60).read())
 print("gönderildi" if resp.get("ok") else "hata: %s" % resp)

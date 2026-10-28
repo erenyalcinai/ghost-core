@@ -44,7 +44,9 @@ if os.path.exists(_ENV_PATH):
                 k, v = line.split("=", 1)
                 ENV[k] = v.strip()
 
-API = "https://api.telegram.org/bot" + ENV.get("TELEGRAM_BOT_TOKEN", "")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ghost import vekil  # noqa: E402  sır vekili (Faz 2)
+API = vekil.url("telegram", "", ENV)
 
 
 def log(msg):
@@ -103,7 +105,7 @@ def check(url):
 
 
 def main():
-    if not ENV.get("TELEGRAM_BOT_TOKEN"):
+    if not vekil.hazir("telegram", ENV):
         raise SystemExit(
             "TELEGRAM_BOT_TOKEN yok — .env okunamadı ya da eksik. "
             "Sessizce devam etmek yerine duruyorum (mesajlar hiçbir yere gitmezdi).")

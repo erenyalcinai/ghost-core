@@ -1,0 +1,39 @@
+[Unit]
+Description=Ghost sir vekili (API anahtarlari ayri kullanicida, 127.0.0.1:8797)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ghost-vekil
+Group=ghost-vekil
+ExecStart=/usr/bin/python3 -I /usr/local/lib/ghost-vekil/vekil_servisi.py
+Restart=always
+RestartSec=2
+RuntimeDirectory=ghost-vekil
+RuntimeDirectoryMode=0755
+StateDirectory=ghost-vekil
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

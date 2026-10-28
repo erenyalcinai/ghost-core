@@ -33,8 +33,10 @@ SEED = [
      None, governance.REVERSIBLE),
     ("github_mcp", "mcp", "GitHub: repo/PR/issue/CI — claude_code üzerinden MCP", None, governance.REVERSIBLE),
     ("sentry_mcp", "mcp", "Sentry hata takibi — claude_code üzerinden MCP", None, governance.READ),
-    ("cloudflare_api", "api", "Cloudflare REST (DNS/Pages/Workers/analytics); env token",
-     "curl -s -H 'Authorization: Bearer $CLOUDFLARE_API_TOKEN' https://api.cloudflare.com/client/v4/{args}",
+    ("cloudflare_api", "api", "Cloudflare REST (DNS/Pages/Workers/analytics); sır vekili ya da env token",
+     ("curl -s %s/{args}" % __import__("ghost.vekil", fromlist=["x"]).url("cloudflare", "/client/v4")
+      if __import__("ghost.vekil", fromlist=["x"]).aktif() else
+      "curl -s -H 'Authorization: Bearer $CLOUDFLARE_API_TOKEN' https://api.cloudflare.com/client/v4/{args}"),
      governance.PERMANENT),
     ("posthog_api", "api", "PostHog salt-okunur analitik (HogQL)", None, governance.READ),
     ("send_telegram", "script", "Sahibe Telegram mesajı", "python3 ops/send_telegram.py", governance.REVERSIBLE),

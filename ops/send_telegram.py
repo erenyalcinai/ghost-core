@@ -22,7 +22,9 @@ else:
     with open(os.path.join(BASE, "ops", "owner.json"), encoding="utf-8") as f:
         CHAT_ID = json.load(f)["id"]
 
-API = "https://api.telegram.org/bot" + ENV["TELEGRAM_BOT_TOKEN"]
+sys.path.insert(0, BASE)
+from ghost import vekil  # noqa: E402  sır vekili kuruluysa anahtar bu süreçte yok (Faz 2)
+API = vekil.url("telegram", "", ENV)
 
 text = sys.stdin.read().strip() or "(boş)"
 try:  # alarm işaretli metin kokpit uygulamasına da push gider (ghost/apns.py)

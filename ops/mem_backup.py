@@ -76,8 +76,16 @@ def _gh_token():
     kalmasın — dolduğu gün yedek SESSİZCE durur, fark edilmesi aylar sürer."""
     _load_env()
     tok = os.environ.get("GHOST_GITHUB_TOKEN", "").strip()
-    if tok:
+    if tok and tok != "vekil":
         return tok
+    try:  # sır vekili (Faz 2): git ~/.gitconfig insteadOf ile vekilden geçer, kimliği vekil ekler
+        import sys as _sys
+        _sys.path.insert(0, BASE)
+        from ghost import vekil
+        if vekil.aktif(None, "GHOST_GITHUB_TOKEN"):
+            return None
+    except Exception:
+        pass
     with open(os.path.join(BASE, "mcp-github.json"), encoding="utf-8") as f:
         cfg = json.load(f)
     return cfg["mcpServers"]["github"]["headers"]["Authorization"].split()[1]

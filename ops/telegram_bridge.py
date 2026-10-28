@@ -113,6 +113,37 @@ MCP_CONFIGS = {
     "sosumi": os.path.join(BASE, "mcp-sosumi.json"),        # Apple doküman/HIG/WWDC, 4 araç, anahtarsız
     "posthog": os.path.join(BASE, "mcp-posthog.json"),      # salt-okunur, cli kipi (tek exec aracı)
 }
+
+
+def _mcp_vekile_cevir():
+    """Sır vekili ayaktaysa (Faz 2/2. aşama) GitHub MCP ayarının SIRSIZ kopyası: adres vekil, token yer tutucu
+    ("Bearer vekil" — vekil gerçeğini ekler). Kopya ops/mcp_vekil/ altında (gitignore). Vekil düşükse ya da
+    kurulu değilse dokunulmaz, özgün dosya kullanılır. Hata köprüyü düşürmez."""
+    try:
+        from ghost import vekil as _v
+        if not (_v.kurulu() and _v._erisilir()):
+            return
+        d = os.path.join(OPS, "mcp_vekil")
+        os.makedirs(d, exist_ok=True)
+        for ad, servis in (("github", "github-mcp"), ("github-yaz", "github-mcp-yaz")):
+            kaynak = MCP_CONFIGS.get(ad)
+            if not (kaynak and os.path.exists(kaynak)):
+                continue
+            with open(kaynak, encoding="utf-8") as f:
+                cfg = json.load(f)
+            g = cfg["mcpServers"]["github"]
+            yol = urllib.parse.urlparse(g["url"]).path
+            g["url"] = "%s/%s%s" % (_v.TABAN, servis, yol)
+            g.setdefault("headers", {})["Authorization"] = "Bearer vekil"
+            hedef = os.path.join(d, os.path.basename(kaynak))
+            with open(hedef, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            MCP_CONFIGS[ad] = hedef
+    except Exception as e:
+        print("mcp vekil kopyası kurulamadı: %r" % e, file=sys.stderr)
+
+
+_mcp_vekile_cevir()
 # Belirsiz mesajda yüklenen "güvenli" küme — posthog ve github-yaz yalnız anahtar kelimeyle.
 MCP_DEFAULT = ("github", "sentry", "playwright", "sosumi")
 UPTIME_STATE = os.path.join(OPS, "uptime_state.json")
@@ -137,8 +168,9 @@ if os.path.exists(_ENV_PATH):
                 ENV[k] = v.strip()
 
 TOKEN = ENV.get("TELEGRAM_BOT_TOKEN", "")
-API = "https://api.telegram.org/bot" + TOKEN
-FILE_API = "https://api.telegram.org/file/bot" + TOKEN
+from ghost import vekil  # noqa: E402  sır vekili kuruluysa anahtar bu süreçte yok, vekil ekler (Faz 2)
+API = vekil.url("telegram", "", ENV)
+FILE_API = vekil.url("telegram-dosya", "", ENV)
 CLAUDE = ENV.get("CLAUDE_BIN", "/usr/local/bin/claude")
 CLAUDE_ARGS = ENV.get("JARVIS_CLAUDE_ARGS", "").split()
 CLAUDE_TIMEOUT = int(ENV.get("JARVIS_TIMEOUT", "1800"))
@@ -2151,7 +2183,7 @@ def check_requests(mgr):
 
 
 def main():
-    if not ENV.get("TELEGRAM_BOT_TOKEN"):
+    if not vekil.hazir("telegram", ENV):
         raise SystemExit(
             "TELEGRAM_BOT_TOKEN yok — .env okunamadı ya da eksik. "
             "Sessizce devam etmek yerine duruyorum (mesajlar hiçbir yere gitmezdi).")

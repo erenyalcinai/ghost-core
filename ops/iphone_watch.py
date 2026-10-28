@@ -93,15 +93,19 @@ def asc_profil():
     except ImportError:
         return None, "PyJWT yok"
     try:
-        key = open(os.environ["ASC_KEY_PATH"], encoding="utf-8").read()
-        now = int(time.time())
-        tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": now,
-                          "exp": now + 600, "aud": "appstoreconnect-v1"},
-                         key, algorithm="ES256",
-                         headers={"kid": os.environ["ASC_KEY_ID"]})
-        req = urllib.request.Request(
-            "https://api.appstoreconnect.apple.com/v1/profiles?limit=200",
-            headers={"Authorization": "Bearer " + tok})
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from ghost import vekil     # sır vekili kuruluysa JWT'yi vekil imzalar (Faz 2)
+        if vekil.aktif(None, "ASC_KEY_PATH"):
+            hdr = {}
+        else:
+            key = open(os.environ["ASC_KEY_PATH"], encoding="utf-8").read()
+            now = int(time.time())
+            tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": now,
+                              "exp": now + 600, "aud": "appstoreconnect-v1"},
+                             key, algorithm="ES256",
+                             headers={"kid": os.environ["ASC_KEY_ID"]})
+            hdr = {"Authorization": "Bearer " + tok}
+        req = urllib.request.Request(vekil.url("asc", "/v1/profiles?limit=200"), headers=hdr)
         data = json.load(urllib.request.urlopen(req, timeout=30))
     except KeyError:
         return None, "ASC anahtarı tanımsız"

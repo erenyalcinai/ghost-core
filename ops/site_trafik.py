@@ -50,13 +50,14 @@ BOT_SEHIR = {"Council Bluffs", "Ashburn", "Eatonton", "North Charleston", "Board
 
 
 def sorgu(hogql):
-    host = os.environ["POSTHOG_HOST"].rstrip("/")
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from ghost import vekil     # sır vekili kuruluysa kimliği vekil ekler (Faz 2)
     pid = os.environ["POSTHOG_PROJECT_ID"]
     body = json.dumps({"query": {"kind": "HogQLQuery", "query": hogql}}).encode()
     req = urllib.request.Request(
-        "%s/api/projects/%s/query/" % (host, pid), data=body,
-        headers={"Authorization": "Bearer " + os.environ["POSTHOG_API_KEY"],
-                 "Content-Type": "application/json"})
+        vekil.url("posthog", "/api/projects/%s/query/" % pid), data=body,
+        headers=dict(vekil.basliklar("posthog"), **{"Content-Type": "application/json"}))
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r)["results"]
 

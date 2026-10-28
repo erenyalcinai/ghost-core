@@ -73,6 +73,9 @@ ILK_MESAJ = "Echo burada, dinliyorum."
 
 
 def _key():
+    from ghost import vekil     # sır vekili kuruluysa anahtarı vekil ekler (Faz 2)
+    if vekil.aktif(None, "ELEVENLABS_API_KEY"):
+        return "vekil"
     k = (config.load_env().get("ELEVENLABS_API_KEY") or "").strip()
     if not k:
         raise SystemExit("ELEVENLABS_API_KEY yok (secrets.env)")
@@ -81,7 +84,9 @@ def _key():
 
 def _call(method, path, body=None, timeout=60):
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(API + path, data=data, method=method, headers={
+    from ghost import vekil
+    taban = vekil.url("elevenlabs", "/v1") if vekil.aktif(None, "ELEVENLABS_API_KEY") else API
+    req = urllib.request.Request(taban + path, data=data, method=method, headers={
         "xi-api-key": _key(), "Content-Type": "application/json", "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:

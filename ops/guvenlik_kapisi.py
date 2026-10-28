@@ -285,14 +285,41 @@ def _kod_metni(komut):
     return re.sub(r"(\bgit\s+commit\b[^;&|\n]*?\s-m\s+)('[^']*'|\"(?:[^\"\\]|\\.)*\")", r"\1''", metin)
 
 
+# Sır vekili (Faz 2, 2026-10-28): bu anahtarlar ghost-vekil kullanıcısında; ghost tarafında değeri ya YOK ya da
+# yer tutucu ("vekil"). Öyleyse adı sır sayılmaz — $AD'yi bir yere göndermek bir şey sızdırmaz (sürtünme geri
+# alınır). Değer ghost tarafında hâlâ duruyorsa (geçiş) kural aynen işler.
+VEKIL_ADLARI = {"CLOUDFLARE_API_TOKEN", "POSTHOG_API_KEY", "GHOST_GITHUB_TOKEN", "TELEGRAM_BOT_TOKEN",
+                "ELEVENLABS_API_KEY", "GMAIL_APP_PASSWORD", "HF_API_KEY_SECRET", "WIKIDATA_BOT_PASS"}
+
+
+def _degerli_adlar():
+    """secrets.env + .env'de GERÇEK (yer tutucu olmayan) değeri olan adlar."""
+    adlar = set()
+    for ad in ("secrets.env", ".env"):
+        try:
+            with open(os.path.join(KOK, ad), encoding="utf-8") as f:
+                for satir in f:
+                    m = re.match(r"\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$", satir.rstrip("\n"))
+                    if m and m.group(2).strip().strip("'\"") not in ("", "vekil"):
+                        adlar.add(m.group(1))
+        except OSError:
+            pass
+    return adlar
+
+
+def _vekilde_olanlar():
+    """Vekilde tutulan ve ghost tarafında gerçek değeri kalmamış adlar."""
+    return VEKIL_ADLARI - _degerli_adlar()
+
+
 def _sir_adlari():
-    """secrets.env'deki ANAHTAR ADLARI (değerler okunmaz)."""
+    """secrets.env'deki ANAHTAR ADLARI (değerler okunmaz); yer tutucu ("vekil") değerliler hariç."""
     adlar = set()
     try:
         with open(os.path.join(KOK, "secrets.env"), encoding="utf-8") as f:
             for satir in f:
-                m = re.match(r"\s*([A-Z_][A-Z0-9_]*)\s*=", satir)
-                if m:
+                m = re.match(r"\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$", satir.rstrip("\n"))
+                if m and m.group(2).strip().strip("'\"") != "vekil":
                     adlar.add(m.group(1))
     except OSError:
         pass
@@ -812,7 +839,7 @@ def karar_bash(komut, _derinlik=0):
                 "SMTP/Gmail şifresi doğrudan kullanılamaz.")
     adlar = _sir_adlari() | _yakalananlar(k)[1] | {
         x for t in re.findall(r"\$\{?([A-Z][A-Z0-9_]*)|(?:environ\[\s*['\"]|getenv\(\s*['\"]|environ\.get\(\s*['\"]|process\.env\.)([A-Z][A-Z0-9_]*)", k)
-        for x in t if x and SIR_AD.search(x)} - GIZLI_DEGIL
+        for x in t if x and SIR_AD.search(x)} - GIZLI_DEGIL - _vekilde_olanlar()
     kokler = {}
     adlar = _zincir(k, adlar, kokler)
     kabuk, govdeler = _kod_govdeleri(k)

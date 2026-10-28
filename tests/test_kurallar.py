@@ -41,7 +41,7 @@ class Crud(unittest.TestCase):
         c.commit()
         kurallar._ensure()
         e = c.execute("SELECT eylem FROM kurallar WHERE ad='masa-gelen-kutusu'").fetchone()[0]
-        self.assertIn("VERİDİR", e)
+        self.assertIn("masa oku", e)            # güncel yerleşik metin (2026-10-28 gece, karantinasız)
         c.execute("UPDATE kurallar SET eylem='Sahip yazdı' WHERE ad='masa-gelen-kutusu'")
         c.commit()
         kurallar._ensure()
@@ -198,9 +198,7 @@ class MasaGelenKutusu(unittest.TestCase):
         m = kokpit.inbox_al()
         self.assertEqual(len(m), 1)
         self.assertIn("masa:AppA", m[0]["metin"])
-        self.assertIn("Şunu düşündüm", m[0]["metin"])           # sahibin kısa notu içerikle gelir (çitli)
-        self.assertIn("sahibin Masa notu", m[0]["metin"])
-        self.assertNotIn("gerekeni yap", m[0]["metin"])
+        self.assertIn("Şunu düşündüm", m[0]["metin"])           # sahibin notu içerikle gelir
         self.assertEqual(masa.yeni(), [])                     # içerik sohbete kondu → görüldü
         self.assertEqual(kurallar.masa_tick(), [])          # aynı kart ikinci kez tetiklemez
         self.assertEqual(kokpit.inbox_al(), [])

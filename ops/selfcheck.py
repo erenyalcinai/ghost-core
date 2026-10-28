@@ -53,7 +53,10 @@ if os.path.exists(_ENV_PATH):
                 k, v = line.split("=", 1)
                 ENV[k] = v.strip()
 
-API = "https://api.telegram.org/bot" + ENV.get("TELEGRAM_BOT_TOKEN", "")
+if BASE not in sys.path:
+    sys.path.insert(0, BASE)
+from ghost import vekil  # noqa: E402  sır vekili (Faz 2)
+API = vekil.url("telegram", "", ENV)
 _env = dict(os.environ)
 _env["PATH"] = _env.get("PATH", "") + ":/usr/local/bin:/opt/homebrew/bin:/usr/bin"
 # secrets.env de env'e (beyin probu CLAUDE_CODE_OAUTH_TOKEN'a muhtaç — yoksa
@@ -514,6 +517,36 @@ def onay_servisi_yerinde():
     return None
 
 
+def vekil_yerinde():
+    """Sır vekili (Faz 2, 2026-10-28) kuruluysa ayakta mı ve canlı kopya repo kaynağıyla aynı mı? Vekil düşükse git
+    push, Telegram (anahtar ortamda kaldıkça doğrudan yola düşer), Gmail ve App Store çağrıları etkilenir."""
+    if IS_MAC:
+        return None
+    try:
+        from ghost import vekil
+        if not vekil.kurulu():
+            return None
+        import urllib.request
+        try:
+            d = json.loads(urllib.request.urlopen(vekil.TABAN + "/_durum", timeout=5).read())
+        except Exception as e:
+            return ("🔐 Sır vekili CEVAP VERMİYOR (%s) — git push/Gmail/ASC etkilenir. "
+                    "Mac'ten: ssh ghost_vps 'systemctl restart ghost-vekil'" % type(e).__name__)
+        if d.get("eksik"):
+            return "🔐 Sır vekilinde eksik anahtar: %s" % ", ".join(d["eksik"])
+        import hashlib
+        canli, repo = "/usr/local/lib/ghost-vekil/vekil_servisi.py", os.path.join(BASE, "ops", "vekil", "vekil_servisi.py")
+        h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()  # noqa: E731
+        if os.path.exists(canli) and h(canli) != h(repo):
+            isaret = os.path.join(BASE, "ops", ".vekil_fark_uyari")
+            if not (os.path.exists(isaret) and time.time() - os.path.getmtime(isaret) < 86400):
+                open(isaret, "w").close()
+                return "🔐 Sır vekili: repo kaynağı ile canlı kopya FARKLI — kurulum için YubiKey ile ops/vekil/kur.sh"
+    except Exception as e:
+        log("vekil denetimi hata: %r" % e)
+    return None
+
+
 def api_bayat_yenile(kod_ts):
     """Kokpit API (ghost.api) bayat kodla koşuyorsa hemen yenile.
 
@@ -710,7 +743,7 @@ def sahip_profili_yerinde():
 
 
 def main():
-    if not ENV.get("TELEGRAM_BOT_TOKEN"):
+    if not vekil.hazir("telegram", ENV):
         raise SystemExit(
             "TELEGRAM_BOT_TOKEN yok — .env okunamadı ya da eksik. "
             "Sessizce devam etmek yerine duruyorum (mesajlar hiçbir yere gitmezdi).")
@@ -771,7 +804,7 @@ def main():
     if sorun:
         problems.append(sorun)
     for kontrol in (test_kapisi_yerinde, github_kimligi_yerinde,
-                    tunel_nobetcisi_yerinde, sahip_profili_yerinde, onay_servisi_yerinde):
+                    tunel_nobetcisi_yerinde, sahip_profili_yerinde, onay_servisi_yerinde, vekil_yerinde):
         sorun = kontrol()
         if sorun:
             problems.append(sorun)
