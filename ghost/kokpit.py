@@ -358,7 +358,13 @@ def bekleyen_kararlar():
 
 # ---------------------------------------------------------------- CİHAZLAR / KİMLİK
 def kod_uret(ad=None):
-    """Tek kullanımlık 6 haneli eşleme kodu (10 dk). Eski bekleyen kodlar silinir."""
+    """Tek kullanımlık 6 haneli eşleme kodu (10 dk). Eski bekleyen kodlar silinir.
+    Onay servisi kuruluysa (Faz 1) kod servis tarafından üretilir ve YALNIZ Telegram'dan sahibe
+    gider; burada None döner (kod dökümde/oturumda görünmez — model okuyup eşleyemesin)."""
+    from ghost import onay
+    if onay.servis_modu():
+        onay.kod_uret(ad)
+        return None
     kod = "%06d" % secrets.randbelow(10 ** 6)
     _hata_say(sifirla=True)
     c = _db()
@@ -419,6 +425,17 @@ def esle(kod, ad=None):
     kod = (kod or "").strip()
     if not kod:
         return None
+    from ghost import onay
+    if onay.servis_modu():
+        r = onay.esle(kod, ad)
+        if not r:
+            return None
+        c = _db()       # meta satır (APNs/Live Activity token'ları burada); anahtar ghost.db'ye YAZILMAZ
+        c.execute("INSERT OR REPLACE INTO kokpit_devices(id, ad, key_hex, durum, created, last_seen) "
+                  "VALUES(?,?,'','aktif',?,?)", (r["id"], r.get("ad") or ad or "", r.get("created") or _now(), _now()))
+        c.commit()
+        c.close()
+        return r["id"], r["key"]
     c = _db()
     row = c.execute("SELECT id, kod_son FROM kokpit_devices WHERE durum='bekliyor' AND kod=?",
                     (kod,)).fetchone()
@@ -440,11 +457,16 @@ def esle(kod, ad=None):
               (key, ad or "", _now(), row[0]))
     c.commit()
     c.close()
+    _uyar("📱 Kokpit'e yeni cihaz eşlendi: %s (%s). Sen değilsen hemen /freeze ve haber ver." % (ad or "?", row[0]))
     return row[0], key
 
 
 def cihaz_ekle(ad):
-    """Eşleme kodsuz doğrudan aktif cihaz (derleme zamanı anahtarı için)."""
+    """Eşleme kodsuz doğrudan aktif cihaz (derleme zamanı anahtarı için). Onay servisi kuruluysa
+    KAPALI: anahtar yalnız eşlemeyle, servis içinde doğar."""
+    from ghost import onay
+    if onay.servis_modu():
+        raise RuntimeError("onay servisi kurulu: cihaz yalnız /cihaz eşleme koduyla eklenir")
     key = secrets.token_hex(32)
     did = uuid.uuid4().hex[:12]
     c = _db()
@@ -452,10 +474,17 @@ def cihaz_ekle(ad):
               (did, ad, key, "aktif", _now()))
     c.commit()
     c.close()
+    _uyar("📱 Kokpit'e eşleme kodsuz cihaz eklendi: %s (%s). Sen değilsen hemen /freeze ve haber ver." % (ad, did))
     return did, key
 
 
 def cihazlar():
+    from ghost import onay
+    if onay.servis_modu():
+        try:
+            return onay.cihazlar()
+        except onay.ServisHatasi:
+            pass
     c = _db()
     rows = c.execute("SELECT id, ad, durum, created, last_seen FROM kokpit_devices").fetchall()
     c.close()
@@ -559,7 +588,10 @@ def apns_cihazlar():
 
 
 def iptal(device_id=None):
-    """Cihaz(lar)ı kapat. id yoksa HEPSİ — acil kapı."""
+    """Cihaz(lar)ı kapat. id yoksa HEPSİ — acil kapı. Servis kuruluysa anahtar orada da silinir."""
+    from ghost import onay
+    if onay.servis_modu():
+        onay.iptal(device_id)
     c = _db()
     if device_id:
         n = c.execute("UPDATE kokpit_devices SET durum='iptal', key_hex='', apns_token=NULL WHERE id=?",
@@ -590,6 +622,20 @@ def dogrula_neden(headers, method, path, body=b""):
     GERÇEK kimlik hatası olmalı (cihaz yok / imza tutmuyor). GET tekrarı idempotent →
     kabul edilir; POST tekrarı reddedilir ama 'tekrar' diye ayrışır. Saat penceresi de
     kimlik hatası değildir ('saat'). İmza doğrulanmadan saat/tekrar bilgisi verilmez."""
+    from ghost import onay
+    if onay.servis_modu():
+        # Faz 1 (2026-10-28): cihaz anahtarları onay servisinde (ghost-onay kullanıcısı). İmzayı servis
+        # doğrular; onay/karar yolundaysa (eylem, mesaj, kararlar) kaydı da imzayla aynı adımda yazar.
+        cihaz, neden = onay.kokpit_dogrula(headers, method, path, body)
+        if cihaz:
+            try:
+                c = _db()
+                c.execute("UPDATE kokpit_devices SET last_seen=? WHERE id=?", (_now(), cihaz["id"]))
+                c.commit()
+                c.close()
+            except Exception:
+                pass
+        return cihaz, neden
     g = lambda k: headers.get(k) or headers.get(k.lower()) or ""  # noqa: E731
     did, ts, nonce, sig = g("X-Ghost-Device"), g("X-Ghost-Ts"), g("X-Ghost-Nonce"), g("X-Ghost-Sig")
     if not (did and ts and nonce and sig):
@@ -636,11 +682,11 @@ def dogrula(headers, method, path, body=b""):
 # ---------------------------------------------------------------- CLI
 def main(argv):
     cmd = argv[0] if argv else "cihazlar"
-    if cmd == "kod":
-        print(kod_uret(argv[1] if len(argv) > 1 else None))
-    elif cmd == "ekle":
-        did, key = cihaz_ekle(argv[1] if len(argv) > 1 else "cihaz")
-        print(json.dumps({"device_id": did, "key": key}))
+    if cmd in ("kod", "ekle"):
+        # 2026-10-28 bağımsız denetim K2: oturum CLI'den aktif cihaz anahtarı (ya da eşleme kodu) üretip
+        # imzalı /v1/eylem ile kendi "gerçek onayını" yazabiliyordu. Eşleme yalnız sahibin /eslesme komutuyla.
+        print("kapalı: eşleme kodu yalnız sahibin Telegram/Kokpit /eslesme komutuyla üretilir.", file=sys.stderr)
+        return 2
     elif cmd == "cihazlar":
         for c in cihazlar():
             print(json.dumps(c, ensure_ascii=False))
@@ -652,7 +698,7 @@ def main(argv):
     elif cmd == "medya" and len(argv) > 1:
         print(outbox_yaz(argv[2] if len(argv) > 2 else "", "ghost", medya=argv[1]))
     else:
-        print("kullanım: kod [ad] | ekle <ad> | cihazlar | iptal [id] | outbox [since] | medya <dosya> [açıklama]")
+        print("kullanım: cihazlar | iptal [id] | outbox [since] | medya <dosya> [açıklama]")
         return 2
     return 0
 

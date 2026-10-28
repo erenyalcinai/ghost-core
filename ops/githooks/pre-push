@@ -1,6 +1,14 @@
 #!/bin/sh
-# Ghost test kapısı — kod bare repoya (dolayısıyla Mac işçisine) testler
-# geçmeden gidemez.
+# Ghost push kapısı — iki göz: (1) SIR TARAMASI push edilen her commit'te, (2) test kapısı.
+#
+# (1) SIR TARAMASI (2026-10-28, bağımsız denetim Y9, Faz 1 madde 14): sır kapısı yalnız
+# pre-commit'teydi; `core.hookspath` küçük harfle başka dizine çevrilince, plumbing commit'te
+# (commit-tree/update-ref) ya da Mac'ten gelen commit'te hiç koşmuyordu. Burada uzak..yerel
+# aralığındaki HER commit'in eklediği satırlar taranır (ara commit'te eklenip silinen sır da
+# yayına gider). Yeni dalda uzakta olmayan commit'ler (tavanlı). Tarama yapılamazsa push DURUR.
+# GHOST_SKIP_TESTS bunu ATLAMAZ; ayrı kaçış GHOST_SKIP_SIR=1 (ops/sir_tara.log'a yazılır).
+#
+# (2) TEST KAPISI — kod bare repoya (dolayısıyla Mac işçisine) testler geçmeden gidemez.
 #
 # NEDEN VAR (2026-08-21): deploy.sh testleri koşuyordu ama ops/ altındaki bir
 # değişikliği doğrudan commit+push etmek hiçbir kapıdan geçmiyordu — Mac o
@@ -14,10 +22,30 @@
 # akışını sessizce durdururdu. Aralık hesaplanamazsa GÜVENLİ tarafa düşülür:
 # testler koşar.
 #
-# Acil kaçış: GHOST_SKIP_TESTS=1 git push ...  (bilerek gürültülü)
+# Acil kaçış: GHOST_SKIP_TESTS=1 git push ...  (bilerek gürültülü; sır taraması yine koşar)
 
 BASE="$(git rev-parse --show-toplevel)" || exit 0
 SIFIR="0000000000000000000000000000000000000000"
+GIRDI="$(cat)"
+TARA="$(cd "$(dirname "$0")" && pwd)/sir_tara.py"
+
+if [ "${GHOST_SKIP_SIR:-0}" = "1" ]; then
+    echo "⚠️  SIR TARAMASI ATLANDI (GHOST_SKIP_SIR=1) — kayda geçti." >&2
+    printf '%s sır taraması atlandı (GHOST_SKIP_SIR=1) uzak=%s\n' "$(date '+%F %T')" "$1" \
+        >> "$BASE/ops/sir_tara.log" 2>/dev/null
+else
+    while read -r _yerel_ref yerel_sha _uzak_ref uzak_sha; do
+        [ -z "$yerel_sha" ] && continue
+        [ "$yerel_sha" = "$SIFIR" ] && continue      # dal silme: içerik gitmiyor
+        if [ "$uzak_sha" != "$SIFIR" ] && git cat-file -e "$uzak_sha^{commit}" 2>/dev/null; then
+            python3 "$TARA" --aralik "$uzak_sha..$yerel_sha" || exit 1
+        else                                          # yeni dal / uzak ucu yerelde yok
+            python3 "$TARA" --tip "$yerel_sha" --uzak "${1:-origin}" || exit 1
+        fi
+    done <<GIRDI_SONU
+$GIRDI
+GIRDI_SONU
+fi
 
 if [ "${GHOST_SKIP_TESTS:-0}" = "1" ]; then
     echo "⚠️  TEST KAPISI ATLANDI (GHOST_SKIP_TESTS=1) — bilerek yapıldıysa sorun yok."
@@ -38,7 +66,9 @@ while read -r _yerel_ref yerel_sha _uzak_ref uzak_sha; do
     if printf '%s\n' "$degisen" | grep -qE '^(ghost/|ops/|tests/)'; then
         kod=1; SHA="$yerel_sha"
     fi
-done
+done <<GIRDI_SONU
+$GIRDI
+GIRDI_SONU
 
 if [ "$kod" = "0" ]; then
     echo "→ test kapısı: kod değişmemiş (yalnız bilgi/doküman), atlandı."

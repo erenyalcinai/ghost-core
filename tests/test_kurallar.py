@@ -198,12 +198,12 @@ class MasaGelenKutusu(unittest.TestCase):
         m = kokpit.inbox_al()
         self.assertEqual(len(m), 1)
         self.assertIn("masa:AppA", m[0]["metin"])
-        self.assertIn("ghost.masa yeni --okundu", m[0]["metin"])
-        self.assertEqual(len(masa.yeni()), 1)                # gorulme'ye dokunulmadı
+        self.assertIn("Şunu düşündüm", m[0]["metin"])           # sahibin kısa notu içerikle gelir (çitli)
+        self.assertIn("sahibin Masa notu", m[0]["metin"])
+        self.assertNotIn("gerekeni yap", m[0]["metin"])
+        self.assertEqual(masa.yeni(), [])                     # içerik sohbete kondu → görüldü
         self.assertEqual(kurallar.masa_tick(), [])          # aynı kart ikinci kez tetiklemez
         self.assertEqual(kokpit.inbox_al(), [])
-        masa.yeni(okundu=True)
-        self.assertEqual(kurallar.masa_tick(), [])
         self.assertEqual(kurallar._durum_oku().get("masa_tetiklenen"), [])  # sonraki tick temizler
 
     def test_soguma_sirasinda_ikinci_kok_kaybolmaz(self):

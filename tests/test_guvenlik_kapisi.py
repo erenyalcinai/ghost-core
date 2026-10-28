@@ -167,7 +167,13 @@ class Kapi(unittest.TestCase):
         self.assertIsNotNone(g.karar_bash("python3 - <<'EOF'\nprint(open('/proc/1/environ').read())\nEOF"))
 
     def test_onay_kapida_ghost_kodu_alinmadan_tuketilir(self):
-        """Kapı onay kaydını kendi okur/tüketir (root sahipli kopya ghost/ kodunu içe almaz); biçim sahne.py ile ortak."""
+        """Kapı onay kaydını kendi okur/tüketir (root sahipli kopya ghost/ kodunu içe almaz); biçim sahne.py ile ortak.
+        Yerel (servissiz) yol: onay servisi bu makinede kuruluysa kapı ortamdan bağımsız servise sorar —
+        o yol tests/test_guvenlik_faz1.py'de; burada servis yok sayılır."""
+        from unittest import mock
+        p = mock.patch.object(g, "_onay_servisi_kurulu", lambda: False)
+        p.start()
+        self.addCleanup(p.stop)
         from ghost import sahne
         eid = sahne.sahip_onayi_kaydet("[Sahne eylem: onay-00112233445566ab] onayla", "test")
         self.assertEqual(eid, "onay-00112233445566ab")

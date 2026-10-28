@@ -182,6 +182,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(409, {"hata": "istek tekrarı", "neden": neden})
             elif neden == "saat":
                 self._json(400, {"hata": "saat penceresi dışı", "neden": neden})
+            elif neden == "servis":     # onay servisi düşük: kimlik hatası DEĞİL (401 eşleme ekranına atar)
+                self._json(503, {"hata": "onay servisi cevap vermiyor", "neden": neden})
             else:
                 self._json(401, {"hata": "kimlik doğrulanamadı", "neden": neden})
             self.log_message("kimlik reddi %s cihaz=%s %s", neden,

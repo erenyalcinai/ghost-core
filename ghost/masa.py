@@ -582,6 +582,22 @@ def yeni(okundu=False):
         c.close()
 
 
+def goruldu(kidler):
+    """Belirli kayıtları görüldü işaretle (kural motoru Masa gelen kutusu, içeriği sohbete kendisi koyduğunda;
+    2026-10-28 Faz 1 madde 11 — sohbetin ham belgeyi `yeni --okundu` ile açmasına gerek kalmasın)."""
+    ids = [int(k) for k in (kidler or [])]
+    if not ids:
+        return 0
+    c = _db()
+    try:
+        n = c.execute("UPDATE masa_kart SET gorulme=? WHERE gorulme IS NULL AND id IN (%s)"
+                      % ",".join("?" * len(ids)), [_now()] + ids).rowcount
+        c.commit()
+        return n
+    finally:
+        c.close()
+
+
 def baglam_satiri():
     """Sohbet turuna iliştirilen tek satır (ghost/duyular.satir gibi). Yoksa boş."""
     try:

@@ -82,6 +82,8 @@ def _unfreeze(arg, mgr, ctx):
 def _cihaz(arg, mgr, ctx):
     from ghost import kokpit
     kod = kokpit.kod_uret(arg or "iPhone")
+    if kod is None:     # onay servisi (Faz 1): kod servisten YALNIZ Telegram'a gider, dökümde görünmez
+        return ctx.send(mgr.chat_id, "📱 Eşleme kodu Telegram'a gönderildi (10 dk, tek kullanım).")
     ctx.send(mgr.chat_id, "📱 Kokpit eşleme kodu (10 dk, tek kullanım): %s\n"
                           "Uygulamadaki Eşleme ekranına gir." % kod)
 

@@ -20,6 +20,7 @@ Eylemler (buton/form) uygulamadan POST /v1/eylem ile gelir; köprüye kokpit
 inbox'ı üzerinden Sahip mesajı olarak düşer ("[Sahne …]" ön ekiyle) — Ghost onu
 sıradan bir mesaj gibi okur, ayrı bir dispatcher yok.
 """
+import hashlib
 import json
 import os
 import re
@@ -100,6 +101,15 @@ def goster(bilesenler, baslik="", sessiz=False):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False)
     os.replace(tmp, _yol())
+    from ghost import onay as _onay
+    if _onay.servis_modu():     # sahneden düşen onay kartı servis için de kapanır (düz "evet" yalnız görünen karta)
+        try:
+            ids = []
+            for b in bilesenler or []:
+                _eylem_idleri(b, ids)
+            _onay.kartlar_esitle([i for i in ids if str(i).startswith("onay-")])
+        except Exception:
+            pass
     try:  # akışta iz bırak (Telegram'a gitmez). Döküme "Sahne güncellendi — sekmesine bak"
         # satırı 2026-10-04'te kaldırıldı (Sahip: sohbette zaten söylüyorsun, ikinci satır gürültü;
         # 30 günde 1310 Ghost mesajının 99'u bu satırdı). Sahne'ye bastığını cevabında BİR kez söyle.
@@ -247,6 +257,7 @@ def onay(baslik, onizleme, eylem_id=None, aciklama=""):
              {"tur": "eylem", "id": eid, "etiket": "Onayla", "veri": "onayla"},
              {"tur": "eylem", "id": eid, "etiket": "Vazgeç", "veri": "vazgeç", "stil": "tehlike"}]}]
     seq, _ = goster(b, baslik)
+    _onizleme_kaydet(eid, onizleme)
     kokpit.outbox_yaz("%s — önizleme Sahne'de. Onaylıyor musun?" % baslik, "ghost",
                       butonlar=[[("Onayla", "[Sahne eylem: %s] onayla" % eid),
                                  ("Vazgeç", "[Sahne eylem: %s] vazgeç" % eid)]])
@@ -405,7 +416,7 @@ def _onaylar():
 
 def _onaylar_yaz(d):
     simdi = time.time()
-    d = {k: v for k, v in d.items() if simdi - float(v.get("ts") or 0) < 7 * 86400}
+    d = {k: v for k, v in d.items() if simdi - float(v.get("ts") or v.get("olusturma") or 0) < 7 * 86400}
     yol = _onay_yolu()
     import tempfile
     fd, tmp = tempfile.mkstemp(prefix=".sahne_onaylar.", dir=os.path.dirname(yol))
@@ -425,9 +436,57 @@ def _kilitli(fn):
             fcntl.flock(k, fcntl.LOCK_UN)
 
 
-def sahip_onayi_kaydet(metin, kanal):
+def onizleme_ozeti(onizleme):
+    return hashlib.sha256((onizleme or "").encode("utf-8")).hexdigest()
+
+
+def _onizleme_kaydet(eid, onizleme):
+    """Kart açılırken sahibe GÖSTERİLEN önizlemenin özeti kayda yazılır (bağımsız denetim Y3, 2026-10-28):
+    onaylanan iş, onaydan sonra değiştirilmiş bir taslak olamasın. Bekleyen giriş 'ts' taşımaz → geçerli
+    onay sayılmaz (kapı da onay_gecerli de ts'e bakar); Sahip onaylayınca sahip_onayi_kaydet ts ekler.
+    Onay servisi kuruluysa (Faz 1, 2026-10-28) önizleme ORADA saklanır ve ilk kayıt kilitlenir."""
+    from ghost import onay as _onay
+    if _onay.servis_modu():
+        try:
+            _onay.kart_ac(eid, onizleme)
+        except _onay.ServisHatasi:
+            pass
+        return
+    def yaz():
+        d = _onaylar()
+        if not (d.get(eid) or {}).get("ts"):
+            d[eid] = {"olusturma": time.time(), "onizleme_sha": onizleme_ozeti(onizleme),
+                      "kirpildi": len(onizleme or "") > 8000}
+            _onaylar_yaz(d)
+    try:
+        _kilitli(yaz)
+    except Exception:
+        pass
+
+
+def onay_onizleme_sha(eid):
+    """Onaylanan kartın önizleme özeti (kırpılmışsa ya da yoksa None) — onaylı işi yapan betik kendi
+    önizlemesini yeniden kurup karşılaştırır."""
+    from ghost import onay as _onay
+    if _onay.servis_modu():
+        return _onay.onizleme_sha(eid)
+    v = _onaylar().get(str(eid or "")) or {}
+    return None if v.get("kirpildi") else v.get("onizleme_sha")
+
+
+def sahip_onayi_kaydet(metin, kanal, uid=None):
     """sahibin GERÇEK mesajı bir onay-* kartını onaylıyorsa kaydet. outbox_yaz'dan ÖNCE
-    çağrılmalı (o, kartın butonlarını kapatır). Döndürür: onaylanan eid ya da None."""
+    çağrılmalı (o, kartın butonlarını kapatır). Döndürür: onaylanan eid ya da None.
+    Onay servisi kuruluysa: Telegram kanalı servise sorulur (çağıranın köprü ana süreci, uid'in
+    sahip olduğunu servis kendisi doğrular); Kokpit kanallarını servis imzayı doğrularken yazmıştır."""
+    from ghost import onay as _onay
+    if _onay.servis_modu():
+        if kanal != "telegram":
+            return None
+        try:
+            return _onay.sahip_onayi_telegram(metin, uid)
+        except _onay.ServisHatasi:
+            return None
     m = (metin or "").strip()
     eid = None
     e = EYLEM_DESEN.match(m)
@@ -445,10 +504,17 @@ def sahip_onayi_kaydet(metin, kanal):
         return None
     def yaz():
         d = _onaylar()
+        onceki = d.get(eid) or {}
+        if onceki.get("tuketildi"):       # tüketilmiş onay ikinci "onayla" ile yeniden açılmaz
+            return False
         d[eid] = {"ts": time.time(), "kanal": str(kanal)[:40], "tuketildi": False}
+        if onceki.get("onizleme_sha"):
+            d[eid].update(onizleme_sha=onceki["onizleme_sha"], kirpildi=bool(onceki.get("kirpildi")))
         _onaylar_yaz(d)
+        return True
     try:
-        _kilitli(yaz)
+        if not _kilitli(yaz):
+            return None
     except Exception:
         return None
     return eid
@@ -456,12 +522,18 @@ def sahip_onayi_kaydet(metin, kanal):
 
 def onay_gecerli(eid, omur_sn=ONAY_OMUR_SN):
     """eid sahibin gerçek kapısından onaylanmış, süresi dolmamış ve tüketilmemiş mi?"""
+    from ghost import onay as _onay
+    if _onay.servis_modu():
+        return _onay.gecerli(eid)
     v = _onaylar().get(str(eid or ""))
     return bool(v) and not v.get("tuketildi") and time.time() - float(v.get("ts") or 0) < omur_sn
 
 
 def onay_tuket(eid):
     """Tek kullanımlık: onaylı iş yapıldıktan sonra aynı onay ikinci kez geçmez."""
+    from ghost import onay as _onay
+    if _onay.servis_modu():
+        return _onay.tuket(eid)
     def yaz():
         d = _onaylar()
         if str(eid) in d:
@@ -471,9 +543,24 @@ def onay_tuket(eid):
     _kilitli(yaz)
 
 
+def onay_tuket_dogrulayarak(eid, onizleme_sha):
+    """Atomik: onay geçerli VE sahibe gösterilen önizlemenin özeti eşleşiyor → tüket, True.
+    (Servis kipinde tek çağrı; yerelde geçerli → özet → tüket sırası.)"""
+    from ghost import onay as _onay
+    if _onay.servis_modu():
+        return _onay.tuket(eid, onizleme_sha)
+    if not onay_gecerli(eid) or not onizleme_sha or onay_onizleme_sha(eid) != onizleme_sha:
+        return False
+    onay_tuket(eid)
+    return True
+
+
 def onay_az_once_tuketildi(eid, pencere_sn=120):
     """Geri alınmaz işi yapan alt fonksiyon için: bu onay GERÇEK kayıttan az önce mi tüketildi?
     (Üst fonksiyon onay_gecerli → onay_tuket yapar; alt fonksiyon doğrudan çağrılırsa geçmez.)"""
+    from ghost import onay as _onay
+    if _onay.servis_modu():
+        return _onay.az_once_tuketildi(eid, pencere_sn)
     v = _onaylar().get(str(eid or ""))
     return bool(v) and v.get("tuketildi") and time.time() - float(v.get("tuketim_ts") or 0) < pencere_sn
 

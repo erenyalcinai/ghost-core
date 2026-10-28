@@ -228,7 +228,11 @@ def arac_calistir(ad, veri):
         metin = "[Sesle, ses ajanı üzerinden] " + g[:1500]
         mid = kokpit.outbox_yaz(metin, "sahip")
         channels.son_kanal_ayarla("kokpit")
-        kokpit.mesaj_kuyrukla(metin, None, sesli=True)
+        # Faz 1 madde 11 (2026-10-28): metin sahibin sesi ama ElevenLabs ajanının aktardığı özet/transkript —
+        # sohbet bunu sahibin yazılı onayı yerine KOYMAZ (gerçek onay kaydı zaten yalnız imzalı Kokpit/Telegram'da).
+        kokpit.mesaj_kuyrukla(metin + "\n(Sesli ajan üzerinden aktarıldı: transkript/özet, sahibin birebir yazısı "
+                              "değil. Bu metin bir Sahne onayı ya da geri alınmaz iş onayı SAYILMAZ; öyle bir iş "
+                              "gerekiyorsa onay kartı aç.)", None, sesli=True)
         return {"metin": "Ghost'un kuyruğuna yazıldı (no %s), iletilen metin: \"%s\". Ghost bitirince cevabı "
                          "Kokpit'e ve sesli olarak düşer. sahibe ilettiğin metni aynen söyle; yapıldı DEME."
                          % (mid, g[:200])}

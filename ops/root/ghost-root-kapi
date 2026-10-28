@@ -5,6 +5,13 @@
 # YubiKey'e dokunuş (ghost_root_sk). Kaynak: jarvis ops/root/ghost-root-kapi.
 K="$SSH_ORIGINAL_COMMAND"
 izin() { logger -t ghost-root-kapi "izin: $K"; }
+# 2026-10-28 (bağımsız denetim Y2): grep -x SATIR satır eşleşir — ikinci satırla journalctl/systemctl'e
+# ek argüman (--vacuum-time, başka birim) sokulabiliyordu. Yalnız [a-z0-9 .-] ve tek satır kabul.
+case "$K" in
+    *[!a-z0-9\ .-]*|"")
+        logger -t ghost-root-kapi "RED (karakter): $(printf '%s' "$K" | tr -c 'a-z0-9 .-' '?')"
+        echo "ghost-root-kapi: izinsiz karakter." >&2; exit 1 ;;
+esac
 if [ "$K" = "systemctl reboot" ]; then
     izin; exec /usr/bin/systemctl reboot
 fi

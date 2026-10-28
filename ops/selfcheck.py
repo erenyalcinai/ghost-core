@@ -482,6 +482,38 @@ def kapi_kopyasi_uyar():
         return None
 
 
+def onay_servisi_yerinde():
+    """Onay servisi (Faz 1, 2026-10-28) kuruluysa cevap veriyor mu ve canlı kopya repo kaynağıyla aynı mı?
+    Servis düşükse Kokpit 503 alır, onaylar kapalı düşer (mail gitmez, kapı onay istisnası açılmaz) —
+    sessiz kalmamalı. Kurulu değilse (Mac, açık çekirdek) None."""
+    if IS_MAC:
+        return None
+    try:
+        from ghost import onay
+        if not onay.servis_kurulu():
+            return None
+        try:
+            d = onay.durum()
+        except onay.ServisHatasi as e:
+            return ("🔐 Onay servisi CEVAP VERMİYOR (%s) — Kokpit 503, onaylar kapalı. "
+                    "Mac'ten: ssh ghost_vps 'systemctl restart ghost-onay'" % e)
+        if not d.get("sahip") or not d.get("telegram"):
+            return "🔐 Onay servisinin ayarı eksik (sahip/telegram) — eşleme kodu gönderilemez."
+        import hashlib
+        canli = "/usr/local/lib/ghost-onay/onay_servisi.py"
+        repo = os.path.join(BASE, "ops", "onay", "onay_servisi.py")
+        h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()  # noqa: E731
+        if os.path.exists(canli) and h(canli) != h(repo):
+            isaret = os.path.join(BASE, "ops", ".onay_fark_uyari")
+            if not (os.path.exists(isaret) and time.time() - os.path.getmtime(isaret) < 86400):
+                open(isaret, "w").close()
+                return ("🔐 Onay servisi: repo kaynağı ile canlı kopya FARKLI — kurulum için YubiKey ile "
+                        "ops/onay/kur.sh")
+    except Exception as e:
+        log("onay servisi denetimi hata: %r" % e)
+    return None
+
+
 def api_bayat_yenile(kod_ts):
     """Kokpit API (ghost.api) bayat kodla koşuyorsa hemen yenile.
 
@@ -739,7 +771,7 @@ def main():
     if sorun:
         problems.append(sorun)
     for kontrol in (test_kapisi_yerinde, github_kimligi_yerinde,
-                    tunel_nobetcisi_yerinde, sahip_profili_yerinde):
+                    tunel_nobetcisi_yerinde, sahip_profili_yerinde, onay_servisi_yerinde):
         sorun = kontrol()
         if sorun:
             problems.append(sorun)
