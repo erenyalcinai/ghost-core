@@ -31,6 +31,7 @@ hata ops/guvenlik_kapisi.log'a yazılır.
 
 Girdi: stdin JSON {tool_name, tool_input}. Çıktı: engelde permissionDecision=deny JSON.
 """
+import functools
 import json
 import os
 import re
@@ -48,8 +49,8 @@ LOG = os.path.join(os.environ.get("GHOST_OPS") or os.path.join(KOK, "ops"), "guv
 # engellenir. Serbest: dosyayı ortama yüklemek (. secrets.env / source — değerler zaten ortamda),
 # sona eklemek (>>), ssh/rsync/scp'ye kimlik olarak vermek (-i ~/.ssh/anahtar).
 SIR_DOSYA = re.compile(
-    r"(secrets\.env|(^|[\s/'\"=])\.env(?![\w.-])|\.secrets/|\.p8\b|\.ssh/(id_|ghost_)[\w.-]*|"
-    r"\.git-credentials|/\.netrc\b|"
+    r"(secrets\.env|(^|[\s/'\"=])\.env(?![\w.-])|\.secrets(?:/|\b)|\.p8\b|\.ssh/(id_|ghost_)[\w.-]*|"
+    r"\.git-credentials|/\.netrc\b|yedek-sir(?:/|\b)|"
     # joker/değişkenle kurulan ad: secret?.env, *.env, $S.env, ${S}.env, .s*crets/
     r"[\w.?*\[\]{}$-]*[?*\[$][\w.?*\[\]{}$-]*\.env(?![\w.-])|\.[\w?*\[\]]*[?*\[][\w?*\[\]]*crets/)", re.I)
 OKUYAN = re.compile(
@@ -114,9 +115,20 @@ def _yalniz_anahtar_adi(parca):
     return s_ and d_ and f_ and dosya > 0
 
 
+SIR_DIZIN = re.compile(r"\bcd\s+['\"]?(?:~|\$HOME|/home/ghost|/root)?/?\.(?:secrets|ssh)\b")
+ARSIV = re.compile(r"\b(tar|zip|7z|7za|gzip|bzip2|xz|cpio|zstd?)\b")
+
+
 def _sir_okuma(komut):
     komut, _ = _yakalananlar(komut)
     if PY_OKUMA.search(komut):
+        return True
+    # cd ~/.secrets && tar/cat/curl … : dizine girip içeriği arşivleme/okuma/sızdırma (2. tur bulgu 4)
+    m = SIR_DIZIN.search(komut)
+    if m and (ARSIV.search(komut) or AG_ARACI.search(komut) or ("secrets" in m.group(0) and OKUYAN.search(komut))):
+        return True
+    # tar/zip -C <ev> .secrets  ya da  tar cz <...>/.secrets : arşiv hedefi sır dizini
+    if ARSIV.search(komut) and re.search(r"(?:-C\s+\S+\s+|[\s'\"/])\.(?:secrets|ssh)(?=$|[\s'\";&|)])", komut):
         return True
     for parca in PARCA.split(komut):
         parca = re.sub(r"^(\w+=\S*\s+)+", "", parca.strip())       # VAR=x komut
@@ -145,7 +157,9 @@ def _sir_okuma(komut):
 ORTAM_DOKUM = re.compile(
     r"(^|[;&|(`\n]\s*|\$\(\s*)(env|printenv|export\s+-p|declare\s+-[xp]|set)\s*($|[;&|)>`\n])|"
     r"(^|[;&|(`\n]\s*)printenv\s+\w|/proc/\S*environ|/proc/[^\s/]+/(?:e[\w?*\[\]]*|[?*\[][\w?*\[\]]*)(?![\w/])|"
-    r"(print|dumps|write|pprint|console\.log)\([^)\n]*\b(os\.environ|process\.env)\b(?!\s*[.\[])", re.M)
+    r"(print|dumps|write|pprint|console\.log|repr|str)\([^)\n]*\b(os\.environ|process\.env)\b(?!\s*[.\[])|"
+    r"(^|[;&|(`\n]\s*)ps\s+(?:-\S+\s+)*[a-zA-Z]*e[a-zA-Z]*(?=\s|$|[;&|)])", re.M)
+ORTAM_PROC = re.compile(r"/proc/\S*environ|/proc/[^\s/]+/(?:e[\w?*\[\]]*|[?*\[][\w?*\[\]]*)(?![\w/])")
 
 # --- 3. sır değişkeni + izinsiz adres ------------------------------------------------
 IZINLI_ALAN = (
@@ -260,16 +274,26 @@ KORUNAN = (
     os.path.join(KOK, "ghost", "onay.py"),
     os.path.join(KOK, "ghost", "__init__.py"),
     os.path.join(KOK, "ops", "owner.json"),
+    # Faz 2 devamı (2. tur bulgu 5): güven noktaları — bunları değiştiren bir oturum sahte onay/kimlik
+    # üretebilir ya da inbox'ı 'Sahip mesajı' diye enjekte edebilir. Düzenleme onay ister (.faz*/ → test →
+    # onay-komut → cp). selfcheck/köprü bu kodu KENDİ yükler; denetimsiz değişiklik koşmasın.
+    os.path.join(KOK, "ops", "telegram_bridge.py"),
+    os.path.join(KOK, "ghost", "api.py"),
+    os.path.join(KOK, "ghost", "kokpit.py"),
+    os.path.join(KOK, "ghost", "kurallar.py"),
+    os.path.join(KOK, "ghost", "bus.py"),
+    os.path.join(KOK, "ghost", "onay.py"),
 )
 KORUNAN_DIZIN = (os.path.join(KOK, "ops", "gmail_taslak"), os.path.join(KOK, "ops", "githooks"),
-                 os.path.join(KOK, "ops", "onay"))
-KORUNAN_AD = re.compile(r"(\.claude/settings(\.local)?\.json|guvenlik_kapisi\.py)")
-_P = (r"(?:\.claude/settings(?:\.local)?\.json|guvenlik_kapisi\.py|sahne_onaylar\.json|ghost/sahne\.py|"
-      r"gmail_gonder\.py|gmail_taslak/|ops/githooks/|ghost/onay\.py|ghost/__init__\.py|ops/owner\.json|ops/onay/)")
+                 os.path.join(KOK, "ops", "onay"), os.path.join(KOK, "ops", "vekil"))
+KORUNAN_AD = re.compile(r"(\.claude/settings(\.local)?\.json|(?<!test_)guvenlik_kapisi\.py)")
+_P = (r"(?<!agac/)(?:\.claude/settings(?:\.local)?\.json|(?<!test_)guvenlik_kapisi\.py|sahne_onaylar\.json|ghost/sahne\.py|"
+      r"gmail_gonder\.py|gmail_taslak/|ops/githooks/|ghost/onay\.py|ghost/__init__\.py|ops/owner\.json|ops/onay/|"
+      r"ops/vekil/|ops/telegram_bridge\.py|ghost/api\.py|ghost/kokpit\.py|ghost/kurallar\.py|ghost/bus\.py)")
 DEGISTIRME = re.compile(
     r"(?<![0-9&])>{1,2}\s*['\"]?\S*" + _P + "|"
     r"\b(?:sed\s+-i|perl\s+-[a-z]*i|mv|rm|ln|truncate|chmod|tee|git\s+(?:checkout|restore|apply))\b[^;&|\n]*" + _P + "|"
-    r"\b(?:cp|install|rsync|dd)\b[^;&|\n#]*\s['\"]?\S*" + _P + r"['\"]?\s*(?:$|[;&|\n#])|"
+    r"\b(?:cp|install|rsync|dd)\b[^;&|\n#]*\s['\"]?\S*" + _P + r"\S*['\"]?\s*(?:$|[;&|\n#])|"
     r"open\([^)\n]*" + _P + r"[^)\n]*,\s*['\"][wax+]|" + _P + r"[^\n]{0,40}\)\.write_(?:text|bytes)|"
     r"disableAllHooks|"
     # onay kaydını yazan/tüketen ve SMTP alt fonksiyonunu doğrudan çağırmak (yalnız kendi kapıları çağırır)
@@ -288,6 +312,7 @@ SIR_AD = re.compile(r"(TOKEN|SECRET|PASSWORD|PASS$|API_KEY|PRIVATE|CREDENTIAL)")
 HOST_DEGISKEN = {"POSTHOG_HOST": "eu.posthog.com"}
 
 
+@functools.lru_cache(maxsize=16)
 def _yurutulen(komut):
     """Dosyaya YAZILAN heredoc gövdelerini (cat > f <<'EOF' … EOF) çıkar — yazılan metin koşmaz."""
     satirlar, out, bitis = komut.split("\n"), [], None
@@ -307,6 +332,7 @@ def _yurutulen(komut):
 YORUMLAYICI = re.compile(r"\b(python3?|node|bash|sh|zsh|perl|ruby|osascript)\b")
 
 
+@functools.lru_cache(maxsize=16)
 def _kod_metni(komut):
     """Koşacak kod: yorumlayıcıya gitmeyen heredoc gövdeleri ve git commit -m metni çıkarılır."""
     satirlar, out, bitis = komut.split("\n"), [], None
@@ -467,21 +493,41 @@ _TUKETILEN = set()   # bu karar sürecinde tüketilen onaylar (kanca her araç �
 _ICERIK_TARAMA = [False]   # dosyaya yazılan metin taranırken onay TÜKETİLMEZ ve geçerli sayılmaz
 
 
+def _komut_ozeti(komut):
+    """ghost/sahne.py komut_ozeti ile AYNI: onay kimliği + ayıracı çıkar, boşluk sadeleştir, sha256[:16].
+    Kapı istisnasını KOMUTUN KENDİSİNE bağlar (2. tur bulgu 1): bir komut için verilen onay, başka bir
+    komutta geçmez. Birden çok onay-id varsa hepsi çıkarılır (onay zinciri kaçışı olmasın)."""
+    k = re.sub(r"\s*(?:;\s*:|&&\s*:|#)?\s*\bonay-[0-9a-f]{16}\b", "", komut or "")
+    k = re.sub(r"\s+", " ", k).strip().rstrip(";").strip()
+    import hashlib as _h
+    return _h.sha256(k.encode("utf-8")).hexdigest()[:16]
+
+
 def _onay_gecerli(metin):
-    """Komutta sahibin gerçek kapısından kaydedilmiş, kullanılmamış onay var mı? Varsa tüket.
-    Aynı komut birden çok kurala takılırsa (ör. root anahtarı + korunan dosya) tek onay yeter."""
+    """Komutta sahibin gerçek kapısından, BU KOMUT için kaydedilmiş, kullanılmamış onay var mı? Varsa tüket.
+    (2. tur bulgu 1) Onay kartı tür 'kapi' ve bağlamı (komut özeti) komutla eşleşmeli — keyfi bir karta
+    verilen onay başka komutta kullanılamaz. Aynı komut birden çok kurala takılırsa tek onay yeter."""
     if _ICERIK_TARAMA[0]:
         return None
+    ozet = _komut_ozeti(metin)
     for eid in ONAY.findall(metin or ""):
-        if eid in _TUKETILEN:
+        if (eid, ozet) in _TUKETILEN:
             return eid
         try:
-            if _onay_tuket_kendi(eid):
-                _TUKETILEN.add(eid)
+            if _onay_komut_tuket(eid, ozet):
+                _TUKETILEN.add((eid, ozet))
                 return eid
         except Exception:
             return None
     return None
+
+
+def _onay_komut_tuket(eid, ozet):
+    """Onay 'kapi' türünde ve bağlamı ozet mi? Servis kipinde atomik; yerelde json (tür+bağlam saklı)."""
+    if _onay_servisi_kurulu():
+        cevap = _onay_soket_cagir("komut_tuket", eid, baglam=ozet)
+        return bool(cevap and cevap.get("tuketildi"))
+    return _onay_tuket_kendi(eid, baglam=ozet)
 
 
 # Faz 1 madde 10 (bağımsız denetim K1): onay kaydı ayrı `ghost-onay` kullanıcısına taşındıysa dosya YOK;
@@ -501,14 +547,14 @@ def _onay_servisi_kurulu():
         return False
 
 
-def _onay_soket_cagir(op, eid, zaman_asimi=2):
+def _onay_soket_cagir(op, eid, zaman_asimi=2, **kw):
     """Onay soketine tek satır JSON gönder, tek satır JSON cevabı döndür (dict) ya da None (fail-closed)."""
     import socket
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(zaman_asimi)
             s.connect(ONAY_SOKET)
-            s.sendall((json.dumps({"op": op, "eid": str(eid or "")}) + "\n").encode("utf-8"))
+            s.sendall((json.dumps(dict(kw, op=op, eid=str(eid or ""))) + "\n").encode("utf-8"))
             parca = []
             while True:
                 b = s.recv(65536)
@@ -521,13 +567,13 @@ def _onay_soket_cagir(op, eid, zaman_asimi=2):
         return None
 
 
-def _onay_tuket_kendi(eid, omur_sn=24 * 3600):
+def _onay_tuket_kendi(eid, omur_sn=24 * 3600, baglam=None):
     """ghost/sahne.py onay_gecerli + onay_tuket'in AYNISI, ama oturumun değiştirebildiği ghost/ kodunu
     İÇE ALMADAN (2026-10-27 B: kapı root sahipli kopyadan koşar; ghost/config.py'yi değiştiren bir
     oturum kapının içinde kod koşturamasın). Kayıt biçimi sahne.py ile ortak: {eid: {ts, tuketildi}}.
     Onay servisi kuruluysa (Faz 1 madde 10) dosya HİÇ kullanılmaz: soketten atomik tüket (fail-closed)."""
     if _onay_servisi_kurulu():
-        cevap = _onay_soket_cagir("tuket", eid)
+        cevap = _onay_soket_cagir("komut_tuket" if baglam is not None else "tuket", eid, baglam=baglam)
         return bool(cevap and cevap.get("tuketildi"))
     import fcntl
     import tempfile
@@ -551,6 +597,8 @@ def _onay_tuket_kendi(eid, omur_sn=24 * 3600):
                 return False
             v = d.get(eid) if isinstance(d, dict) else None
             if not v or v.get("tuketildi") or time.time() - float(v.get("ts") or 0) >= omur_sn:
+                return False
+            if baglam is not None and (v.get("tur") != "kapi" or v.get("baglam") != baglam):
                 return False
             v["tuketildi"], v["tuketim_ts"] = True, time.time()
             fd, tmp = tempfile.mkstemp(prefix=".sahne_onaylar.", dir=ops)
@@ -588,6 +636,9 @@ KALICILIK = re.compile(
     r"\.config/systemd/|\.config/autostart/|\.ssh/authorized_keys|\.ssh/config|\.gitconfig|\.npmrc|\.pypirc)")
 KALICI_YOL = re.compile(r"(?:^|/)(?:\.bashrc|\.bash_profile|\.profile|\.zshrc|\.bash_logout|\.gitconfig|\.npmrc|"
                         r"\.pypirc|\.ssh/authorized_keys|\.ssh/config)$|/\.config/(?:systemd|autostart)/")
+KALICI_KOD = re.compile(r"(?:open\([^)\n]*|write_(?:text|bytes)\(|Path\([^)\n]*)(?:authorized_keys|\.ssh/config|\.bashrc|"
+                        r"\.bash_profile|\.profile|\.zshrc|\.gitconfig|\.npmrc|\.pypirc|\.config/systemd/|\.config/autostart/)"
+                        r"[^)\n]*(?:,\s*['\"][wax]|\)\.(?:write_text|write_bytes|open\(['\"][wax]))")
 FREEZE_SILME = re.compile(r"\b(?:rm|mv|unlink|truncate)\b[^;&|\n]*\bFREEZE\b|(?:remove|unlink|rename|replace)\([^)\n]*FREEZE")
 # Mac'e / uzak kabuğa giden komut: iç metin de aynı kurallardan geçer.
 IC_KOMUT = re.compile(r"\b(?:ops/mac\.py\s+komut|ops/mac_cmd\.py|ssh\s+(?:-\S+\s+(?:\S+\s+)?)*[\w.@-]+)\s+(?:--\s+)?('([^']*)'|\"((?:[^\"\\]|\\.)*)\")")
@@ -617,6 +668,7 @@ KOD_AG = re.compile(r"\b(urllib|requests|http\.client|httpx|aiohttp|socket|webso
 KOD_C = re.compile(r"\b(?:python3?|node)\s+(?:-[A-Za-z]+\s+)*?-[ce]\s+('([^']*)'|\"((?:[^\"\\]|\\.)*)\")", re.S)
 
 
+@functools.lru_cache(maxsize=16)
 def _kod_govdeleri(k):
     """Kabuk metni ile yorumlayıcıya giden kod gövdelerini ayır: (kabuk, [(çağıran satır, gövde)]).
     Gövde (python heredoc'u, python -c / node -e) TEK birim olarak denetlenir — ortamdan okunan sır
@@ -716,8 +768,9 @@ def _ham_dis_metin(k):
 # mail gönderme, dışarıya yazan HTTP, servis/yeniden başlatma, GitHub yazma. Sınıflandırıcı ne derse desin geçmez.
 # Okuma/araştırma/taslak/öneri serbest; iş gerçekten eylem istiyorsa sonuç sahibe öneri olarak döner.
 OZERK_YASAK = [
-    (r"\bgit\s+(?:-[cC]\s+\S+\s+|--[\w-]+(?:=\S+)?\s+)*(push|commit|commit-tree|update-ref|reset\s+--hard|rebase|tag|merge|am|cherry-pick)\b",
-     "git yazma (commit = yayın)"),
+    (r"\bgit\s+(?:-[cC]\s+\S+\s+|--[\w-]+(?:=\S+)?\s+)*(push|commit|commit-tree|update-ref|reset\s+--hard|rebase|am|cherry-pick|"
+     r"merge(?!-base|-tree|-file)\b|tag\s+(?:-[dsaeuFm]\b|--(?:delete|sign|annotate)\b|(?:-[a-z]+\s+)*[^\s-]))",
+     "git yazma (commit = yayın; tag -l / merge-base okuma serbest)"),
     # betik dolaylaması (denetim Y5): içeriği kapıdan geçmemiş dosyayı koşturmak
     (r"(?:^|[;&|(]\s*|\s)(?:bash|sh|zsh|python3?|node|perl|ruby|source|\.)\s+(?:-\S+\s+)*['\"]?(?:/tmp/|/var/tmp/|/dev/shm/)",
      "geçici/yerel betik koşturma (içeriği kapıdan geçmedi)"),
@@ -732,12 +785,19 @@ OZERK_YASAK = [
      "servis durdurma/yeniden başlatma"),
     (r"\bghost\.masa\s+(sil|tasi|adlandir|geri)\b|\bghost\.kurallar\s+(ekle|sil|kapat|ac)\b", "Masa/kural değişikliği"),
     (r"\bASC_READ_ONLY=0\b|\basc\b[^;&|\n]*\b(submit|upload|create|update|delete|publish)\b", "App Store Connect yazma"),
+    # 4. tur Y2: Mac'e yazma/GUI fiili özerkte kapalı — Mac'ten vekile giden POST kapının 127.0.0.1 istisnasından
+    # kaçıyordu; GUI fiilleri (yaz/tus/tikla/cua) sahibin Mac hesabında eylem demek. Okuma (durum/ekran/pencereler/anahtar) serbest.
+    (r"\bops/mac\.py\s+(?:komut|cua|yaz|tus|tikla|kaydir|ac)\b|\bops/mac_cmd\.py\b",
+     "Mac'te komut/GUI eylemi (özerkte yalnız durum/ekran/pencereler/anahtar)"),
+    (r"(?:>|>>|\btee\b|\bcp\b[^;&|\n]*|\bmv\b[^;&|\n]*|\binstall\b[^;&|\n]*)\s*['\"]?\S*ops/kokpit_(?:inbox|kararlar)/|"
+     r"\bopen\([^)\n]*ops/kokpit_(?:inbox|kararlar)/[^)\n]*,\s*['\"][wax]|kokpit\.(?:mesaj_kuyrukla|karar_kuyrukla)\s*\(",
+     "özerk işte Kokpit gelen kutusuna/karar kuyruğuna yazmak (sahte 'Sahip mesajı')"),
 ]
 # Dışarıya YAZAN HTTP: veri gövdesi ya da yazma yöntemi; okuma amaçlı POST uçları istisna.
 OZERK_HTTP_YAZ = re.compile(r"\bcurl\b[^;&|\n]*(\s-X\s*(POST|PUT|PATCH|DELETE)|--request\s+(POST|PUT|PATCH|DELETE)|"
                             r"\s-d\s|\s--data(-\w+)?\s|\s-F\s|\s--form\s|\s--json\s|\s-T\s|--upload-file)", re.I)
 OZERK_OKUMA_POST = re.compile(r"posthog\.com[^\s'\"]*/query|\$\{?POSTHOG_HOST\}?[^\s'\"]*/query|"
-                              r"api\.cloudflare\.com/client/v4/graphql|api\.telegram\.org/bot|127\.0\.0\.1|localhost")
+                              r"api\.cloudflare\.com/client/v4/graphql|api\.telegram\.org/bot|(?:127\.0\.0\.1|localhost):(?:8797|8081)\b")
 OZERK_MCP_YAZ = re.compile(r"^mcp__github[\w-]*__(create_|push_files|merge_|delete_|update_|add_|fork_|issue_write|"
                            r"sub_issue_write|pull_request_review_write|request_copilot)|^mcp__playwright__browser_"
                            r"(fill_form|type|file_upload|run_code_unsafe|evaluate)$|^(Monitor|CronCreate|RemoteTrigger)$")
@@ -792,6 +852,9 @@ def _ozerk_yazma_engel(yol):
         return ("Özerk (gözetimsiz) işte köprü/selfcheck'in otomatik yüklediği çalışır koda (jarvis/ghost, "
                 "jarvis/ops altındaki betikler) yazılamaz — denetimsiz kod koşabilir. Rapor/araştırma/not "
                 "(dossier, intel, memory, docs, /tmp) serbest; kod değişikliğini sahibe öner.")
+    if re.search(r"ops/kokpit_(?:inbox|kararlar)(?:/|$)|(?:^|/)FREEZE$", gercek):
+        return ("Özerk işte Kokpit gelen kutusuna/karar kuyruğuna ya da FREEZE dosyasına yazılamaz — bu, "
+                "sahte bir 'Sahip mesajı'/komut enjekte etmek olur. Eylemi sahibe öner.")
     return None
 
 
@@ -816,8 +879,16 @@ def _ozerk_engel(k):
     return None
 
 
+# Kart açmak komutu KOŞTURMAZ: `ghost.sahne onay-komut '<başlık>' '<komut>'` yalnız sahibe gösterilecek metni kaydeder.
+# Argümanların hepsi tek tırnaklıysa kabuk hiçbirini genişletmez → içindeki korunan yol / ağ aracı komut değildir
+# (2026-10-28 sürtünme: korunan dosyaya dokunan işin kartı açılamıyordu). Çift tırnak, $(), ; | & → normal tarama.
+ONAY_KOMUT_KART = re.compile(r"\s*(?:cd\s+[\w~/.-]+\s*&&\s*)?python3?\s+-m\s+ghost\.sahne\s+onay-komut(?:\s+'[^']*')+\s*")
+
+
 def karar_bash(komut, _derinlik=0):
     """Engel sebebi (str) ya da None."""
+    if not _derinlik and ONAY_KOMUT_KART.fullmatch(komut or ""):
+        return None
     k = re.sub(r"\\[ \t]*\n", " ", _yurutulen(komut or ""))     # satır devamı (\) tek komut
     if _derinlik < 2:
         for m in IC_KOMUT.finditer(k):
@@ -851,7 +922,9 @@ def karar_bash(komut, _derinlik=0):
         return ("GitHub'da yalnız ornek-org/ghost-bot reposuna yazılır; başka sahibin reposuna push ya da "
                 "gist (herkese açık kanal) Sahip onayı ister.")
     kabuk_kal = re.sub(r"'[^']*'|\"[^\"$]*\"", "''", _kod_govdeleri(kod_disi)[0])   # echo "== crontab ==" metindir
-    if KALICILIK.search(kabuk_kal) and not _onay_gecerli(k):
+    # 4. tur Y1: kalıcı dosyaya KOD gövdesinden yazmak (open(…authorized_keys…, 'a'), Path.write_text) de onay ister
+    kod_kalici = any(KALICI_KOD.search(g) for _, g in _kod_govdeleri(kod_disi)[1])
+    if (KALICILIK.search(kabuk_kal) or kod_kalici) and not _onay_gecerli(k):
         return ("Kalıcı kod bırakmak (crontab, at, systemd-run, ~/.bashrc/.profile, ~/.ssh, ~/.config/systemd) "
                 "güvenlik kancasından geçmeden sonra koşar — Sahip onayı (onay kartı + komutta onay kimliği) ister.")
     if FREEZE_SILME.search(kod_disi) and not _onay_gecerli(k):
@@ -864,12 +937,13 @@ def karar_bash(komut, _derinlik=0):
         return "Sır dosyası git'e eklenemez (main 15 dk'da bir GitHub'a gider)."
     if _sir_okuma(k):
         return ("Sır dosyası okunamaz/kopyalanamaz (secrets.env, .env, ~/.secrets, *.p8, ssh anahtarı). "
-                "Anahtarı kullanmak için ortamdaki $DEGISKEN'i komutta doğrudan kullan; değeri ekrana basma.")
+                "Anahtarı kullanmak için ortamdaki $DEGISKEN'i komutta doğrudan kullan; değeri ekrana basma. "
+                "Yalnız anahtar ADLARI: cut -s -d= -f1 <dosya>.")
     # Kabuk komutu (env/printenv/set) yalnız kabuk metninde aranır — python kodundaki '|env|' metni
     # komut değildir; kodun ortamı basması (print(os.environ)) ve /proc/*/environ her yerde aranır.
     kabuk_metni, govdeler_ = _kod_govdeleri(k)
-    if ORTAM_DOKUM.search(kabuk_metni) or any(ORTAM_DOKUM.search(re.sub(r"(?m)^.*$", lambda m: m.group(0) if re.search(
-            r"environ|process\.env", m.group(0)) else "", g)) for _, g in govdeler_):
+    if ORTAM_DOKUM.search(re.sub(r"'[^']*'|\"[^\"$`]*\"", "''", kabuk_metni)) or ORTAM_PROC.search(kabuk_metni) or any(ORTAM_DOKUM.search("\n".join(
+            x for x in g.split("\n") if "environ" in x or "process.env" in x)) for _, g in govdeler_):
         return "Ortam topluca dökülemez (env/printenv/export -p/environ). Gereken tek değişkeni $AD ile kullan."
     tek_cli = re.fullmatch(r"\s*(cd\s+\S+\s*&&\s*)?python3?\s+(\S*/)?ops/gmail_gonder\.py\b[^;&|\n`$]*", k)
     if SMTP_KULLANIM.search(k) and not tek_cli:
@@ -979,6 +1053,8 @@ def karar(girdi):
         if SIR_DOSYA.search(yol) or SIR_DOSYA.search(gercek) or (
                 arac in ("Grep", "Glob") and SIR_DOSYA.search(str(gi.get("glob") or ("" if arac == "Grep" else desen)))):
             return "Sır dosyası okunamaz. Anahtarı kullanmak için ortamdaki $DEGISKEN'i kullan."
+        if ORTAM_PROC.search(yol) or ORTAM_PROC.search(gercek):
+            return "Süreç ortamı (/proc/*/environ) okunamaz. Gereken tek değişkeni $AD ile kullan."
         if arac in ("Read", "Grep") and ("email_spool" in yol or "email_spool" in gercek):
             return KARANTINA_MESAJ
         if arac == "Grep" and not yol and SIR_DOSYA.search(desen):

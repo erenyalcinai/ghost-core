@@ -335,21 +335,28 @@ def _masa_icerik(kayitlar):
 
 
 def _sohbete_dus(metin):
-    from ghost import channels, kokpit
-    kokpit.mesaj_kuyrukla(metin, None)
+    """Köprü/hook içinden koşar → onay servisi imzalar; imzasız inbox kaydı köprüde sohbete değil özerk işe gider
+    (4. tur Y3: özerk oturum gelen kutusu yoluyla tam yetkiye kaçamasın)."""
+    from ghost import channels, kokpit, onay as _onay
+    kokpit.mesaj_kuyrukla(metin, None, imza=_onay.tetik_imzala(metin))
     try:
         channels.son_kanal_ayarla("kokpit")
     except Exception:
         pass
 
 
-def _masa_sohbet(etiket, eylem, payload):
-    """Masa tetiği: içerik (karantina dahil) kurulur, sohbete düşer, kayıtlar görüldü işaretlenir."""
-    from ghost import masa
+def _masa_ozerk(etiket, eylem, payload):
+    """Masa tetiği (2. tur bulgu 10): içerik ÖZERK alt oturuma gider, tam yetkili sohbete DEĞİL. Masa'ya yalnız
+    Sahip yazar (karantinasız, ham içerik), ama sahibin bıraktığı 3. kişi belgesindeki talimat gözetimsiz turda
+    geri alınmaz iş YAPAMASIN diye iş GHOST_OZERK=1 ile koşar (köprü AUTONOMOUS_GUARD + kapı). Kayıt görüldü
+    işaretlenir; sınıflandırma güvenilir kural metnine bakar (ham Masa içeriği işi yanlışlıkla SPEND'e sokmasın)."""
+    from ghost import bus, masa
     govde, gorulen = _masa_icerik(payload.get("kayitlar") or [])
     fazla = int(payload.get("adet") or 0) - len(payload.get("kayitlar") or [])
-    _sohbete_dus("%s %s\n\n%s%s" % (etiket, eylem, govde,
-                                      ("\n\n(+%d kayıt daha: `python3 -m ghost.masa yeni`)" % fazla) if fazla > 0 else ""))
+    prompt = "%s %s\n\n%s%s" % (etiket, eylem, govde,
+                                 ("\n\n(+%d kayıt daha: `python3 -m ghost.masa yeni`)" % fazla) if fazla > 0 else "")
+    bus.istek(prompt, "masa", "kurallar", classify=eylem, gate=False,
+              announce="⚙️ Sahip Masa'ya kayıt ekledi — özerk iş olarak bakıyorum (sonuç iş kartında).")
     try:
         masa.goruldu(gorulen)
     except Exception:
@@ -362,10 +369,7 @@ def _kos(kural, tur, ad, payload):
     try:
         if kural["eylem_tur"] == "sohbet":
             if tur == "masa" and isinstance(payload, dict) and payload.get("kayitlar"):
-                if _ESZAMANLI:
-                    _masa_sohbet(etiket, kural["eylem"], payload)
-                else:
-                    _masa_sohbet(etiket, kural["eylem"], payload)
+                _masa_ozerk(etiket, kural["eylem"], payload)
             elif _serbest_metin_mi(payload):
                 from ghost import bus
                 bus.istek("%s %s\n\n%s" % (etiket, kural["eylem"], _yuk_citi(payload, "%s:%s" % (tur, ad))),

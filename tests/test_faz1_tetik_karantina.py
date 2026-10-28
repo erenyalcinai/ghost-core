@@ -213,7 +213,9 @@ class OtomatikTetik(unittest.TestCase):
             self._eski(kid)
         with mock.patch.object(kurallar, "_karantina", side_effect=AssertionError("karantina çağrıldı")):
             self.assertEqual(len(kurallar.masa_tick()), 1)
-        m = kokpit.inbox_al()[0]["metin"]
+        from ghost import bus                      # 2. tur bulgu 10: Masa turu özerk iş (sohbet değil)
+        self.assertEqual(kokpit.inbox_al(), [])
+        m = bus.bekleyen_istekler()[-1]["payload"]["prompt"]
         self.assertIn("dışarıdan paylaşılan metin", m)
         self.assertIn("https://ornek.com/x", m)
         self.assertIn("masa oku %s" % b, m)

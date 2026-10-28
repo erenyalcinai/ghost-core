@@ -54,7 +54,8 @@ SIR_KOMUT = _re.compile(
     r"\bsecurity\s+(find-(generic|internet)-password\b(?![^;&|\n]*Claude Code-credentials)[^;&|\n]*\s-[a-z]*[wg]|"
     r"dump-keychain|export)\b|"     # Claude girişi (kota göstergesi, ghost/kota.py) bilinçli serbest
     r"\.ssh/(ghost_[a-z_]+|id_[a-z0-9]+)(?!\.pub)\b(?![\w.-])|"
-    r"jarvis/(secrets\.env|\.env)\b(?!\S*\.example)")
+    r"jarvis/(secrets\.env|\.env)\b(?!\S*\.example)|"
+    r"\.ghost/yedek-sir(?:/|\b)")      # 4. tur K2: sır yedeği (düz Mac kopyası + gpg) hızlı hattan okunmaz
 
 
 def _cut_yalniz_ad(m):

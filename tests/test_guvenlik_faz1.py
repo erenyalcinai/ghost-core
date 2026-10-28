@@ -133,8 +133,8 @@ class Madde2Korunan(unittest.TestCase):
             self.assertTrue(s, yol)
 
     def test_korunan_bash_yazma(self):
-        self.assertTrue(g.karar_bash("echo x > %s/ops/owner.json" % KOK))
-        self.assertTrue(g.karar_bash("sed -i s/a/b/ %s/ghost/onay.py" % KOK))
+        self.assertTrue(g.karar_bash("echo x > ~/jarvis/ops/owner.json"))   # bash kuralı yol metnine bakar
+        self.assertTrue(g.karar_bash("sed -i s/a/b/ ~/jarvis/ghost/onay.py"))
 
 
 class Madde14SkipSir(unittest.TestCase):
@@ -181,11 +181,11 @@ class Madde10OnaySoketi(unittest.TestCase):
         cls.sunucu.shutdown()
         cls.sunucu.server_close()
 
-    def _seed(self, eid, ts=None, tuketildi=0):
+    def _seed(self, eid, ts=None, tuketildi=0, baglam="ozet-1"):
         self.o.db.execute("DELETE FROM onaylar WHERE eid=?", (eid,))
         self.o.db.execute(
-            "INSERT INTO onaylar(eid, olusturma, ts, acik, tuketildi) VALUES(?,?,?,?,?)",
-            (eid, time.time(), ts if ts is not None else time.time(), 1, tuketildi))
+            "INSERT INTO onaylar(eid, olusturma, ts, acik, tuketildi, tur, baglam) VALUES(?,?,?,?,?,?,?)",
+            (eid, time.time(), ts if ts is not None else time.time(), 1, tuketildi, "kapi", baglam))
         self.o.db.commit()
 
     def test_kurulu_degilse_dosya_yolu(self):
@@ -205,8 +205,9 @@ class Madde10OnaySoketi(unittest.TestCase):
         self._seed(eid)
         with mock.patch.object(g, "_onay_servisi_kurulu", lambda: True), \
                 mock.patch.object(g, "ONAY_SOKET", self.yol):
-            self.assertTrue(g._onay_tuket_kendi(eid))
-            self.assertFalse(g._onay_tuket_kendi(eid))   # tüketilmiş, ikinci kez geçmez
+            self.assertFalse(g._onay_tuket_kendi(eid, baglam="ozet-2"))   # başka komut
+            self.assertTrue(g._onay_tuket_kendi(eid, baglam="ozet-1"))
+            self.assertFalse(g._onay_tuket_kendi(eid, baglam="ozet-1"))   # tüketilmiş, ikinci kez geçmez
 
     def test_kurulu_ama_sunucu_yok_fail_closed(self):
         with mock.patch.object(g, "_onay_servisi_kurulu", lambda: True), \

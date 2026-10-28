@@ -180,10 +180,18 @@ class Kapi(unittest.TestCase):
         eid = sahne.sahip_onayi_kaydet("[Sahne eylem: onay-00112233445566ab] onayla", "test")
         self.assertEqual(eid, "onay-00112233445566ab")
         g._TUKETILEN.clear()
-        self.assertEqual(g._onay_gecerli("cp a b ; : onay-00112233445566ab"), eid)
-        self.assertFalse(sahne.onay_gecerli(eid))                    # tek kullanımlık
+        self.assertIsNone(g._onay_gecerli("cp a b ; : onay-00112233445566ab"))   # genel onay kapıyı açmaz
+        # 2. tur bulgu 1: kapı onayı KOMUTA bağlı — onay-komut kartı yalnız kendi komutunu açar
+        with mock.patch.object(sahne, "goster", lambda b, baslik="": (1, [])), \
+                mock.patch("ghost.kokpit.outbox_yaz", lambda *a, **k: 0):
+            kid = sahne.onay_komut("Kopyala", "cp a b")
+        self.assertEqual(sahne.sahip_onayi_kaydet("[Sahne eylem: %s] onayla" % kid, "test"), kid)
         g._TUKETILEN.clear()
-        self.assertIsNone(g._onay_gecerli(": onay-00112233445566ab"))
+        self.assertIsNone(g._onay_gecerli("cp a c ; : %s" % kid))                 # başka komut
+        self.assertEqual(g._onay_gecerli("cp  a b ; : %s" % kid), kid)            # aynı komut (boşluk serbest)
+        self.assertFalse(sahne.onay_gecerli(kid))                                  # tek kullanımlık
+        g._TUKETILEN.clear()
+        self.assertIsNone(g._onay_gecerli("cp a b ; : %s" % kid))
         self.assertIsNone(g._onay_gecerli(": onay-ffffffffffffffff"))
 
     def test_ghost_vps_kisitli_komutlar_onaysiz_digerleri_onayli(self):

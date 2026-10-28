@@ -195,13 +195,17 @@ class MasaGelenKutusu(unittest.TestCase):
         self._eski(n)
         kosan = kurallar.masa_tick()
         self.assertEqual([k["ad"] for k in kosan], ["masa-gelen-kutusu"])
-        m = kokpit.inbox_al()
+        from ghost import bus
+        m = bus.bekleyen_istekler()                            # artık ÖZERK iş (sohbet değil)
         self.assertEqual(len(m), 1)
-        self.assertIn("masa:AppA", m[0]["metin"])
-        self.assertIn("Şunu düşündüm", m[0]["metin"])           # sahibin notu içerikle gelir
-        self.assertEqual(masa.yeni(), [])                     # içerik sohbete kondu → görüldü
+        p = m[0]["payload"]
+        self.assertEqual(p.get("kind"), "masa")
+        self.assertNotIn("gate", p)                            # özerk: onay kapısı değil
+        self.assertIn("masa:AppA", p["prompt"])
+        self.assertIn("Şunu düşündüm", p["prompt"])            # sahibin notu ham içerikle gelir
+        self.assertEqual(kokpit.inbox_al(), [])               # tam yetkili sohbete DÜŞMEZ
+        self.assertEqual(masa.yeni(), [])                     # içerik işe kondu → görüldü
         self.assertEqual(kurallar.masa_tick(), [])          # aynı kart ikinci kez tetiklemez
-        self.assertEqual(kokpit.inbox_al(), [])
         self.assertEqual(kurallar._durum_oku().get("masa_tetiklenen"), [])  # sonraki tick temizler
 
     def test_soguma_sirasinda_ikinci_kok_kaybolmaz(self):
@@ -212,12 +216,13 @@ class MasaGelenKutusu(unittest.TestCase):
         self._eski(a)
         self._eski(b)
         t0 = time.time()
+        from ghost import bus
         self.assertEqual(len(kurallar.masa_tick(now=t0)), 1)
-        self.assertEqual(len(kokpit.inbox_al()), 1)
+        self.assertEqual(len(bus.bekleyen_istekler()), 1)
         self.assertEqual(len(kurallar._durum_oku().get("masa_tetiklenen")), 1)   # yalnız teslim edilen
         self.assertEqual(len(kurallar.masa_tick(now=t0 + 10)), 0)                 # hâlâ soğumada
         self.assertEqual(len(kurallar.masa_tick(now=t0 + 400)), 1)                # soğuma bitti → teslim
-        self.assertIn("masa:", kokpit.inbox_al()[0]["metin"])
+        self.assertIn("masa:", bus.bekleyen_istekler()[-1]["payload"]["prompt"])
 
     def test_ghost_kaydi_tetiklemez(self):
         v = masa.klasor_bul("AppA")

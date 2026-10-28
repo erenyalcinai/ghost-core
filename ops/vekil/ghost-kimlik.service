@@ -1,0 +1,32 @@
+[Unit]
+Description=Ghost oturum kimligi (vekile: bu baglanti ozerk oturumdan mi?)
+Before=ghost-vekil.service
+
+[Service]
+Type=simple
+User=ghost
+Group=ghost
+ExecStart=/usr/bin/python3 -I /usr/local/lib/ghost-vekil/kimlik_servisi.py
+Restart=always
+RestartSec=1
+RuntimeDirectory=ghost-kimlik
+RuntimeDirectoryMode=0755
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=no
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

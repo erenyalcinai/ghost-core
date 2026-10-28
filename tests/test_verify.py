@@ -101,9 +101,9 @@ class TestReview(unittest.TestCase):
     def _runner(self, cikti, hata=False):
         kayit = {}
 
-        def r(prompt, model, use_mcp=None, timeout=None):
+        def r(prompt, model, use_mcp=None, timeout=None, ozerk=False):
             kayit["prompt"], kayit["model"] = prompt, model
-            kayit["use_mcp"] = use_mcp
+            kayit["use_mcp"], kayit["ozerk"] = use_mcp, ozerk
             return (cikti, "sid", hata)
         return r, kayit
 
@@ -129,6 +129,9 @@ class TestReview(unittest.TestCase):
         r, kayit = self._runner("KARAR: geçti\nGEREKÇE: ok\nKONTROL: -")
         verify.review(EMIR, RAPOR, r, jid=9)
         self.assertEqual(kayit["use_mcp"], [])
+        self.assertFalse(kayit["ozerk"])
+        verify.review(EMIR, RAPOR, r, jid=9, ozerk=True)   # özerk iş → denetçi de özerk (2. tur bulgu 1)
+        self.assertTrue(kayit["ozerk"])
 
 
 if __name__ == "__main__":

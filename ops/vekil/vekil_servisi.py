@@ -60,6 +60,239 @@ JWTLER = {
     "asc": ("ASC_ISSUER_ID", "ASC_KEY_ID", "asc.p8", 1200, "appstoreconnect-v1"),
     "apns": ("APNS_TEAM_ID", "APNS_KEY_ID", "apns.p8", 3000, None),
 }
+# ---------------------------------------------------------------- izin listesi (Faz 2 devamı, 2026-10-28)
+# Vekil kimliği BİZİM: anahtar başka adrese gidemese de aynı servisin başka bir hesabına/sohbetine yazılabilirdi.
+# Süzgeç hedefi kendi hesaplarımıza sabitler. OKUMA her yerde serbest (okuma dışarı veri taşımaz); YAZMA yalnız
+# bizim hesaplarımızda. Gözetimsiz (özerk) süreçten gelen istek yalnız okuma sınıfına girer.
+BIZIM_GITHUB = {"ornek-org", "ghost-bot"}
+SENTRY_ORG = "example-org"
+WIKIDATA_OGELER = {"Q000000001"}            # bizim öğemiz (sahip.kim SEO)
+WIKIDATA_KULLANICI = "User:OrnekBot"
+TELEGRAM_SAHIPSIZ = {"getMe", "getUpdates", "getFile", "answerCallbackQuery", "setMyCommands", "getMyCommands",
+                     "getWebhookInfo"}
+TELEGRAM_BILDIRIM = re.compile(r"^(send[A-Z]\w*|edit[A-Z]\w*|answerCallbackQuery|getMe|getFile|getChat)$")
+_GH_OKUMA_POST = re.compile(r"^/(graphql|markdown(/raw)?)$")
+_GH_YASAK_ALT = re.compile(r"^/repos/[^/]+/[^/]+/(hooks|keys|transfer|actions/secrets|environments/[^/]+/secrets)(/|$)")
+# MCP: beyaz liste — yalnız bu önekler/kalıplar OKUMA; geri kalan HER araç yazma sayılır (kara liste
+# run_secret/actions_run_trigger/label_write/projects_write gibi araçları kaçırıyordu, 3. tur bulgu).
+_MCP_OKUMA_ARAC = re.compile(r"^(get_|list_|search_|download_|read_|me$)|_read$|^(dependabot_alerts|"
+                             r"code_scanning_alert|secret_scanning_alert|notifications|discussions?|"
+                             r"issue_read|pull_request_read)\b")
+_D1_OKUMA = re.compile(r"^\s*(select|with|explain|pragma\s+table_info)\b", re.I)
+
+
+def _form(govde, tur, sorgu):
+    """Sorgu dizesi + gövdedeki alanlar (form, JSON, multipart) → dict (ilk değer)."""
+    import urllib.parse
+    alan = {k: v[0] for k, v in urllib.parse.parse_qs(sorgu or "").items()}
+    if not govde:
+        return alan
+    tur = (tur or "").lower()
+    metin = govde[:2_000_000].decode("utf-8", "replace")
+    if "multipart/" in tur:
+        for m in re.finditer(r'name="([^"]+)"[^\r\n]*\r?\n(?:[^\r\n]+\r?\n)*\r?\n([^\r\n]{0,200})', metin):
+            alan.setdefault(m.group(1), m.group(2))
+        return alan
+    if metin.lstrip().startswith(("{", "[")):
+        try:
+            d = json.loads(metin)
+            if isinstance(d, dict):
+                for k, v in d.items():
+                    alan.setdefault(k, v)
+            elif isinstance(d, list):
+                alan["_liste"] = d
+        except ValueError:
+            pass
+        return alan
+    for k, v in urllib.parse.parse_qs(metin).items():
+        alan.setdefault(k, v[0])
+    return alan
+
+
+def _form_hepsi(govde, tur, sorgu, anahtarlar):
+    """Verilen anahtarların sorgu+gövdedeki TÜM değerleri (liste). chat_id iki yere konup biri sahip biri yabancı olmasın."""
+    import urllib.parse
+    out = []
+    for kaynak in (urllib.parse.parse_qs(sorgu or ""),):
+        for k in anahtarlar:
+            out += [str(x) for x in kaynak.get(k, [])]
+    if govde:
+        metin = govde[:2_000_000].decode("utf-8", "replace")
+        if "multipart/" in (tur or "").lower():
+            for m in re.finditer(r'name="([^"]+)"[^\r\n]*\r?\n(?:[^\r\n]+\r?\n)*\r?\n([^\r\n]{0,200})', metin):
+                if m.group(1) in anahtarlar:
+                    out.append(m.group(2))
+        elif (tur or "").lower().startswith("application/json") or metin.lstrip().startswith("{"):
+            try:
+                d = json.loads(metin)
+                if isinstance(d, dict):
+                    out += [str(d[k]) for k in anahtarlar if k in d and d[k] not in (None, "")]
+            except ValueError:
+                pass
+        else:
+            q = urllib.parse.parse_qs(metin)
+            for k in anahtarlar:
+                out += [str(x) for x in q.get(k, [])]
+    return [x for x in out if x not in ("", "None")]
+
+
+# Mutation/yazma: SQL/GraphQL metninde dize sabitleri ve yorumlar atıldıktan sonra yazma sözcüğü var mı?
+_DIZE = re.compile(r'"(?:[^"\\]|\\.)*"' + r"|'(?:[^'\\]|\\.)*'")
+_YORUM_GQL = re.compile(r"#[^\n]*")
+_YORUM_SQL = re.compile(r"--[^\n]*|/\*.*?\*/", re.S)
+
+
+def _dize_yorum_at(q, graphql=False):
+    q = _DIZE.sub(" ", q)
+    if graphql:
+        q = _YORUM_GQL.sub(" ", q)
+    q = _YORUM_SQL.sub(" ", q)
+    return q
+
+
+def _wikidata_bizim(h):
+    h = h.strip()
+    oge = re.split(r"[$-]", h, maxsplit=1)[0].upper()          # açıklama GUID'i: Q000000001$...
+    return oge in WIKIDATA_OGELER or h == WIKIDATA_KULLANICI or h.startswith(WIKIDATA_KULLANICI + "/")
+
+
+def _gh_repo(yol):
+    m = re.match(r"^/repos/([^/]+)/([^/?]+)", yol)
+    return (m.group(1).lower(), m.group(2)) if m else (None, None)
+
+
+def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
+    """→ (sınıf, neden). sınıf: 'okuma' | 'yazma' | 'red'. yol = vekil sonrası servis yolu ('/repos/...').
+    Tanınmayan servis yolu 'yazma' sayılır (o servisin hesabı zaten bizim); red yalnız başka hesaba giden yazma."""
+    sirlar = sirlar or {}
+    yontem = (yontem or "GET").upper()
+    yol_, _, sorgu = (yol or "/").partition("?")
+    yol_ = re.sub(r"/{2,}", "/", yol_)
+    if ".." in yol_.split("/"):
+        return "red", "yol '..' içeremez"
+    oku = yontem in ("GET", "HEAD", "OPTIONS")
+    if servis == "github":
+        if yol_.startswith("/gists"):
+            return "red", "gist kapalı (vekil izin listesi)"
+        if oku:
+            return "okuma", ""
+        if _GH_OKUMA_POST.match(yol_):
+            q = str(_form(govde, "application/json", "").get("query") or "")
+            if yol_ == "/graphql" and re.search(r"\bmutation\b", _dize_yorum_at(q, graphql=True)):
+                return "red", "GraphQL mutation kapalı; REST yazma uçlarını kullan"
+            return "okuma", ""
+        sahip, _ = _gh_repo(yol_)
+        if sahip:
+            if sahip not in BIZIM_GITHUB:
+                return "red", "GitHub yazma yalnız ornek-org/* ve ghost-bot/* repolarına"
+            if _GH_YASAK_ALT.match(yol_):
+                return "red", "repo hook/deploy key/transfer/secret yazma vekilden kapalı (panelden)"
+            m = re.match(r"^/repos/[^/]+/[^/]+/collaborators/([^/]+)", yol_)
+            if m and m.group(1).lower() not in BIZIM_GITHUB:
+                return "red", "repoya yalnız ornek-org/ghost-bot ortak eklenir"
+            if re.fullmatch(r"/repos/[^/]+/[^/]+", yol_) and yontem == "PATCH":
+                g = _form(govde, "application/json", "")
+                if g.get("private") is False or str(g.get("visibility") or "").lower() == "public":
+                    return "red", "repoyu herkese açmak vekilden kapalı (Sahip panelden yapar)"
+            return "yazma", ""
+        if re.fullmatch(r"/user(/repos|/repository_invitations(/\d+)?)?", yol_):
+            return "yazma", ""
+        return "red", "GitHub yazma yalnız kendi repolarımıza, /user ve davet kabulüne"
+    if servis in ("github-git", "github-git-sahip"):
+        m = re.match(r"^/([^/]+)/[^/]+?(?:\.git)?/(info/refs|git-upload-pack|git-receive-pack)$", yol_)
+        if not m:
+            return ("okuma", "") if oku else ("red", "git: tanınmayan yol")
+        alim = m.group(2) == "git-receive-pack" or "service=git-receive-pack" in sorgu
+        if not alim:
+            return "okuma", ""
+        if m.group(1).lower() not in BIZIM_GITHUB:
+            return "red", "git push yalnız ornek-org/* ve ghost-bot/* repolarına"
+        return "yazma", ""
+    if servis in ("github-mcp", "github-mcp-yaz"):
+        if oku:
+            return "okuma", ""
+        g = _form(govde, "application/json", "")
+        istekler = g.get("_liste") or [g]
+        sinif = "okuma"
+        for r in istekler:
+            if not isinstance(r, dict) or r.get("method") != "tools/call":
+                continue
+            p = r.get("params") or {}
+            ad, arg = str(p.get("name") or ""), p.get("arguments") or {}
+            if "gist" in ad:
+                return "red", "gist kapalı (vekil izin listesi)"
+            if ad and not _MCP_OKUMA_ARAC.match(ad):      # beyaz liste dışı HER araç yazmadır (kara liste kaçıyordu)
+                sahip = str(arg.get("owner") or arg.get("organization") or "").lower()
+                if ad.startswith("fork_"):
+                    sahip = str(arg.get("organization") or "ghost-bot").lower()
+                if ad == "create_repository" and not sahip:
+                    sahip = "ghost-bot"
+                if sahip not in BIZIM_GITHUB:
+                    return "red", "GitHub yazma yalnız ornek-org/* ve ghost-bot/* repolarına"
+                sinif = "yazma"
+        if sinif == "okuma" and servis == "github-mcp-yaz" and yol_.rstrip("/") != "/mcp":
+            sinif = "yazma"
+        return sinif, ""
+    if servis in ("telegram", "telegram-dosya"):
+        if servis == "telegram-dosya":
+            return ("okuma", "") if oku else ("red", "telegram dosya ucu yalnız indirme")
+        yontem_ad = yol_.strip("/").split("/")[-1]
+        sahip = str(sirlar.get("TELEGRAM_OWNER_ID") or "")
+        hedefler = _form_hepsi(govde, tur, sorgu, ("chat_id", "from_chat_id", "user_id"))
+        if hedefler:
+            if not sahip or any(h != sahip for h in hedefler):
+                return "red", "Telegram yalnız sahibin sohbetine"
+        elif yontem_ad and yontem_ad not in TELEGRAM_SAHIPSIZ:
+            return "red", "Telegram: chat_id'siz bu yöntem kapalı"
+        if yontem_ad == "getUpdates":
+            return "yazma", ""          # güncellemeyi tüketir (köprünün mesajını çalar) — özerkte kapalı
+        if TELEGRAM_BILDIRIM.match(yontem_ad):
+            return "okuma", ""          # sahibe bildirim: özerkte de serbest (kapıyla aynı)
+        return "yazma", ""
+    if servis == "cloudflare":
+        hesap = str(sirlar.get("CLOUDFLARE_ACCOUNT_ID") or "")
+        m = re.match(r"^/client/v4/accounts/([^/]+)", yol_)
+        if m and not oku and (not hesap or m.group(1) != hesap):
+            return "red", "Cloudflare yazma yalnız kendi hesabımıza"
+        if oku or yol_ in ("/client/v4/graphql", "/client/v4/user/tokens/verify"):
+            return "okuma", ""
+        if re.match(r"^/client/v4/accounts/[^/]+/d1/database/[^/]+/(query|raw)$", yol_):
+            g = _form(govde, "application/json", "")
+            sql = str(g.get("sql") or "")
+            temiz = _dize_yorum_at(sql)
+            parca = [p for p in temiz.split(";") if p.strip()]
+            yazan = re.compile(r"\b(insert|update|delete|replace|drop|alter|create|attach|detach|reindex|vacuum)\b", re.I)
+            if parca and all(_D1_OKUMA.match(p) and not yazan.search(p) for p in parca):
+                return "okuma", ""
+        return "yazma", ""
+    if servis == "posthog":
+        proje = str(sirlar.get("POSTHOG_PROJECT_ID") or "")
+        m = re.match(r"^/api/(?:projects|environments)/([^/]+)", yol_)
+        if m and m.group(1) not in ("@current",) and proje and m.group(1) != proje:
+            return "red", "PostHog yalnız kendi projemiz"
+        if oku or re.match(r"^/api/(?:projects|environments)/[^/]+/query/?$", yol_):
+            return "okuma", ""
+        return "yazma", ""
+    if servis == "sentry":
+        m = re.match(r"^/api/0/(?:organizations|projects|teams)/([^/]+)", yol_)
+        if m and m.group(1) != SENTRY_ORG:
+            return "red", "Sentry yalnız %s kuruluşu" % SENTRY_ORG
+        return ("okuma", "") if oku else ("yazma", "")
+    if servis == "wikidata":
+        a = _form(govde, tur, sorgu)
+        eylem = str(a.get("action") or "")
+        if oku or eylem in ("query", "wbgetentities", "wbsearchentities", "parse", "login", "clientlogin"):
+            return ("okuma", "") if eylem not in ("login", "clientlogin") else ("yazma", "")
+        if "__WIKIDATA_BOT_PASS__" in (govde or b"").decode("utf-8", "replace") and eylem not in ("login", "clientlogin"):
+            return "red", "Wikidata parolası yalnız giriş (login) isteğinde kullanılır"
+        hedef = [x for k in ("id", "entity", "title", "ids", "statement", "claim", "guid") if a.get(k)
+                 for x in str(a.get(k)).split("|")]
+        if not hedef or not all(_wikidata_bizim(h) for h in hedef):
+            return "red", "Wikidata yazma yalnız kendi öğemize (%s) ve kullanıcı sayfamıza" % ", ".join(sorted(WIKIDATA_OGELER))
+        return "yazma", ""
+    return ("okuma", "") if oku else ("yazma", "")    # elevenlabs, asc, higgsfield: anahtar zaten bizim hesap
+
+
 _ATLA = {"host", "accept-encoding", "connection", "keep-alive", "proxy-authorization", "proxy-connection",
          "te", "trailer", "transfer-encoding", "upgrade", "content-length"}
 _CEVAP_ATLA = {"connection", "keep-alive", "transfer-encoding", "content-length", "content-encoding"}
@@ -216,8 +449,9 @@ class Vekil:
         c.close()
         return r.status, r.getheaders(), veri
 
-    def isle(self, yontem, yol, gelen_basliklar, govde):
-        """→ (durum, başlık listesi, gövde: bytes ya da bytes parçası üreteci)."""
+    def isle(self, yontem, yol, gelen_basliklar, govde, ozerk_mi=None):
+        """→ (durum, başlık listesi, gövde: bytes ya da bytes parçası üreteci).
+        ozerk_mi: () → True/False/None — bu bağlantı gözetimsiz bir oturumdan mı (None = bilinemedi)."""
         try:
             servis, host, ust, ekle = self.hedef(yol)
         except KeyError as e:          # (LookupError'ın alt sınıfı — önce o)
@@ -227,6 +461,22 @@ class Vekil:
             return d, b, json.dumps({"vekil": "bilinmeyen servis %s" % e, "servisler": sorted(SERVISLER)}).encode()
         except ValueError as e:
             return _hata(400, "geçersiz %s" % e)
+        tur = next((v for k, v in gelen_basliklar if k.lower() == "content-type"), "")
+        sinif, neden = izin(servis, yontem, "/" + yol.split("/", 2)[2] if yol.count("/") >= 2 else "/",
+                            govde, tur, self.sirlar)
+        if sinif == "red":
+            self._gunluk_yaz("RED %s %s %s: %s" % (servis, yontem, yol.split("?")[0][:120], neden))
+            return _hata(403, "izin listesi: %s" % neden)
+        if sinif == "yazma" and ozerk_mi is not None:
+            oz = ozerk_mi()
+            if oz is None:
+                self._gunluk_yaz("RED %s %s kimlik bilinemedi" % (servis, yontem))
+                return _hata(503, "yazma için oturum kimliği doğrulanamadı (ghost-kimlik düşük mü? "
+                                  "systemctl restart ghost-kimlik)")
+            if oz:
+                self._gunluk_yaz("RED-OZERK %s %s %s" % (servis, yontem, yol.split("?")[0][:120]))
+                return _hata(403, "özerk (gözetimsiz) oturumda vekil yalnız okuma uçlarını geçirir; "
+                                  "eylemi sahibe öner")
         bas = {}
         for k, v in gelen_basliklar:
             kl = k.lower()
@@ -285,7 +535,8 @@ class _Isleyici(http.server.BaseHTTPRequestHandler):
                 return self._yaz(200, [("Content-Type", "text/plain")], v.jwt("apns").encode())
             except KeyError as e:
                 return self._yaz(*_hata(503, "sır eksik: %s" % e))
-        durum, bas, veri = v.isle(self.command, self.path, self.headers.items(), govde)
+        durum, bas, veri = v.isle(self.command, self.path, self.headers.items(), govde,
+                                  ozerk_mi=lambda: self.server.ozerk_mi_baglanti(self))
         self._yaz(durum, bas, veri)
 
     def _parcali_oku(self):
@@ -328,6 +579,9 @@ class _Isleyici(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):      # yol günlüğe girer; sorgu dizesi girmez
         sys.stderr.write("%s %s\n" % (time.strftime("%F %T"), (fmt % a).split("?")[0][:200]))
 
+    def address_string(self):            # Unix soketinde client_address '' — günlük satırı kırılmasın
+        return self.client_address[0] if self.client_address else "unix"
+
 
 def _var(tanim, sirlar, dizin):
     alanlar = re.findall(r"\{([A-Z_][A-Z0-9_]*)\}", json.dumps(tanim))
@@ -343,33 +597,248 @@ class Sunucu(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, adres, vekil):
+    def __init__(self, adres, vekil, kimlik=None):
         super().__init__(adres, _Isleyici)
         self.vekil = vekil
+        self.kimlik = kimlik or kimlik_sor
+
+    def ozerk_mi(self, port):
+        return self.kimlik(port, self.server_address[1])
+
+    def ozerk_mi_baglanti(self, isleyici):
+        return self.ozerk_mi(isleyici.client_address[1])
+
+
+# ---------------------------------------------------------------- Mac vekil tüneli (Unix soketi)
+# Mac'teki ai.jarvis.vekiltunel `ssh -L 127.0.0.1:8797:/run/ghost-vekil/mac.sock` ile buraya bağlanır. TCP'de
+# sshd-session süreci kendini dökülemez (non-dumpable) yaptığı için kimlik servisi bağlantının sahibini göremiyordu
+# (yazma 503). Unix sokette karşı ucun PID'i SO_PEERCRED ile doğrudan gelir ve ssh zinciri doğrulanır:
+#   P (ghost, sshd-session) → Q (root, sshd-session, ayrıcalık ayırma) → ssh.service dinleyicisi.
+# Bu zinciri ghost kullanıcısındaki bir süreç (model) taklit edemez: ebeveyni root bir sshd-session olamaz.
+# Zincir tutmazsa yazma reddedilir (okuma her zaman serbest) — fail-closed.
+MAC_SOKET = "/run/ghost-vekil/mac.sock"
+SSH_CGROUP = "/sys/fs/cgroup/system.slice/ssh.service/cgroup.procs"
+
+
+def _proc_bilgi(pid, proc="/proc"):
+    """→ (ppid, uid, comm) ya da None."""
+    try:
+        with open("%s/%d/stat" % (proc, pid), "rb") as f:
+            st = f.read()
+        ppid = int(st[st.rindex(b")") + 2:].split()[1])
+        with open("%s/%d/status" % (proc, pid), encoding="ascii", errors="replace") as f:
+            uid = next(int(x.split()[1]) for x in f if x.startswith("Uid:"))
+        with open("%s/%d/comm" % (proc, pid), encoding="utf-8", errors="replace") as f:
+            comm = f.read().strip()
+        return ppid, uid, comm
+    except (OSError, ValueError, StopIteration, IndexError):
+        return None
+
+
+def mac_ssh_mi(pid, proc="/proc", ssh_cgroup=SSH_CGROUP):
+    """Bağlantı Mac'in ssh oturumundan mı? → False (gözetimli, yazma serbest) ya da None (bilinemedi, yazma yok)."""
+    p = _proc_bilgi(pid, proc)
+    if not p or p[1] == 0 or p[2] not in ("sshd-session", "sshd"):
+        return None
+    q = _proc_bilgi(p[0], proc)
+    if not q or q[1] != 0 or q[2] not in ("sshd-session", "sshd"):
+        return None
+    try:
+        with open(ssh_cgroup, encoding="ascii") as f:
+            dinleyici = set(f.read().split())
+    except OSError:
+        return None
+    return False if str(q[0]) in dinleyici else None
+
+
+class UnixSunucu(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """Aynı HTTP işleyicisi; kimlik sorusu SO_PEERCRED + ssh zinciriyle (mac_ssh_mi) cevaplanır."""
+    daemon_threads = True
+
+    def __init__(self, yol, vekil, dogrula=None):
+        try:
+            os.unlink(yol)
+        except FileNotFoundError:
+            pass
+        super().__init__(yol, _Isleyici)
+        os.chmod(yol, 0o666)              # bağlanan herkes; yazma yetkisi PID zincirinden
+        self.vekil = vekil
+        self.dogrula = dogrula or mac_ssh_mi
+
+    def ozerk_mi_baglanti(self, isleyici):
+        import socket as _s
+        import struct as _st
+        try:
+            pid = _st.unpack("3i", isleyici.request.getsockopt(_s.SOL_SOCKET, _s.SO_PEERCRED,
+                                                               _st.calcsize("3i")))[0]
+        except OSError:
+            return None
+        return self.dogrula(pid)
+
+
+KIMLIK_SOKET = "/run/ghost-kimlik/kimlik.sock"
+KIMLIK_CGROUP = "/sys/fs/cgroup/system.slice/ghost-kimlik.service/cgroup.procs"
+
+
+def _kimlik_servisi_mi(pid):
+    """Karşı uç gerçekten ghost-kimlik.service mi? Sistem biriminin cgroup'u root'undur; ghost oraya süreç koyamaz."""
+    try:
+        with open(KIMLIK_CGROUP, encoding="ascii") as f:
+            return str(pid) in f.read().split()
+    except OSError:
+        return False
+
+
+def kimlik_sor(port, hedef=8797):
+    """ghost-kimlik'e sor: bu bağlantı özerk oturumdan mı? → True/False/None (bilinemedi = yazma reddedilir).
+    Soket ghost'un dizininde durduğu için karşı tarafın gerçekten servis olduğu SO_PEERCRED pid ile doğrulanır."""
+    import socket as _s
+    import struct as _st
+    try:
+        with _s.socket(_s.AF_UNIX, _s.SOCK_STREAM) as c:
+            c.settimeout(3)
+            c.connect(KIMLIK_SOKET)
+            pid = _st.unpack("3i", c.getsockopt(_s.SOL_SOCKET, _s.SO_PEERCRED, _st.calcsize("3i")))[0]
+            if not _kimlik_servisi_mi(pid):
+                return None
+            c.sendall((json.dumps({"port": port, "hedef": hedef}) + "\n").encode())
+            r = json.loads(c.makefile().readline() or "{}")
+            return r.get("ozerk") if r.get("ok") else None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- Gmail (3. aşama)
 # SMTP 127.0.0.1:8587 ve IMAP 127.0.0.1:8993 — düz metin YEREL bağlantı, vekil üst sunucuya TLS ile bağlanır
 # ve giriş satırına uygulama şifresini KENDİSİ koyar. SMTP'de girişin kullanıcı adı onay kimliğidir: vekil onay
-# servisine "bu onay az önce sahibin gerçek kapısından tüketildi mi?" diye sorar; değilse gönderim YOK (mail
-# kapısı kod satırı olmaktan çıkıp yapısal olur). 'test-kendine' yalnız kendi adresine, tek alıcı.
+# servisinden kartı alır, gelen maili kartla karşılaştırır ve onayı KENDİSİ tüketir (_SmtpIsleyici notu); değilse
+# gönderim YOK. 'test-kendine' yalnız kendi adresine, tek alıcı.
 SMTP_ADRES = ("127.0.0.1", 8587)
 IMAP_ADRES = ("127.0.0.1", 8993)
 ONAY_SOKET = "/run/ghost-onay/onay.sock"
 
 
-def onay_az_once(eid):
-    """Onay servisi: eid son 120 sn içinde gerçek kayıttan tüketildi mi? Ulaşılamazsa HAYIR."""
+def onay_cagir(op, **kw):
+    """Onay servisine tek satır istek. Ulaşılamazsa {} (fail-closed: onay yok sayılır)."""
     import socket as _s
     try:
         with _s.socket(_s.AF_UNIX, _s.SOCK_STREAM) as c:
             c.settimeout(3)
             c.connect(ONAY_SOKET)
-            c.sendall((json.dumps({"op": "az_once_tuketildi", "eid": eid}) + "\n").encode())
+            c.sendall((json.dumps(dict(kw, op=op)) + "\n").encode())
             r = json.loads(c.makefile().readline() or "{}")
-        return bool(r.get("evet"))
+        return r if isinstance(r, dict) else {}
     except Exception:
-        return False
+        return {}
+
+
+SMTP_GUNLUK_TAVAN = 5        # gmail_gonder GUNLUK_TAVAN ile aynı; burada atlanamaz
+SMTP_DATA_TAVAN = 35 * 1024 * 1024
+
+
+def mail_karti_coz(onizleme):
+    """gmail_gonder._onizleme biçimi → dict (kime, cc, konu, ekler[(ad, bayt, sha12)], govde) ya da None."""
+    m = re.match(r"Kime: ([^\n]*)\n(?:Cc: ([^\n]*)\n)?Konu: ([^\n]*)\nEkler:\n((?:  [^\n]*\n)*?)\n(.*)\Z",
+                 onizleme or "", re.S)
+    if not m:
+        return None
+    ekler = []
+    for satir in m.group(4).splitlines():
+        e = re.match(r"  • (.+) \((\d+) bayt, sha256 ([0-9a-f]{12})\)$", satir)
+        if e:
+            ekler.append((e.group(1), int(e.group(2)), e.group(3)))
+        elif satir.strip() != "(yok)":
+            return None
+    return {"kime": m.group(1).strip(), "cc": (m.group(2) or "").strip() or None, "konu": m.group(3),
+            "ekler": ekler, "govde": m.group(5)}
+
+
+def mail_kartla_eslesir(kart, ham, alicilar, gonderen):
+    """Gönderilmek üzere gelen mail sahibin onay kartında gördüğüyle AYNI mı? → (bool, neden)."""
+    import email
+    import email.policy
+    import hashlib
+    try:
+        msg = email.message_from_bytes(ham, policy=email.policy.default)
+    except Exception:
+        return False, "mail çözülemedi"
+    adr = lambda h: [a.addr_spec.lower() for a in (msg[h].addresses if msg[h] else ())]  # noqa: E731
+    if adr("To") != [kart["kime"].lower()] or adr("Cc") != ([kart["cc"].lower()] if kart["cc"] else []) or adr("Bcc"):
+        return False, "alıcı başlığı kartla aynı değil"
+    if sorted(alicilar) != sorted(x.lower() for x in [kart["kime"]] + ([kart["cc"]] if kart["cc"] else [])):
+        return False, "zarf alıcıları kartla aynı değil"
+    if adr("From") != [gonderen.lower()]:
+        return False, "gönderen sahibin adresi değil"
+    if str(msg["Subject"] or "") != kart["konu"]:
+        return False, "konu kartla aynı değil"
+    govde = msg.get_body(preferencelist=("plain",))
+    metin = govde.get_content() if govde is not None else ""
+    if metin.replace("\r\n", "\n").rstrip("\n") != kart["govde"].replace("\r\n", "\n").rstrip("\n"):
+        return False, "gövde kartla aynı değil"
+    ekler, ek_parcalar = [], []
+    for p in msg.iter_attachments():
+        veri = p.get_payload(decode=True) or b""
+        ekler.append((p.get_filename() or "", len(veri), hashlib.sha256(veri).hexdigest()[:12]))
+        ek_parcalar.append(p)
+    if ekler != kart["ekler"]:
+        return False, "ekler kartla aynı değil"
+    # 2./4. tur: gövde ve kartta sayılan ekler dışında HİÇBİR parça olmasın — dosya adı taşıyan ama ek kümesinde
+    # olmayan text/html (alternative içinde) dahil. Parça kimliğiyle (is) karşılaştırılır, dosya adıyla değil.
+    for p in msg.walk():
+        if p is msg or p.get_content_maintype() == "multipart" or p is govde:
+            continue
+        if any(p is e for e in ek_parcalar):
+            continue
+        return False, "kartta olmayan gövde parçası (ör. html alternatifi)"
+    # Tekil başlıklar: ikinci bir Subject/To/From başlığı alıcı tarafında farklı görünür.
+    for ad in ("From", "To", "Cc", "Subject", "Reply-To"):
+        if len(msg.get_all(ad, [])) > 1:
+            return False, "başlık birden çok: %s" % ad
+    # From görünen adı: yalnız sahibin adı ya da adsız (ör. "Apple Destek <adres>" taklidi olmasın)
+    gorunen = (msg["From"].addresses[0].display_name if msg["From"] and msg["From"].addresses else "").strip()
+    if gorunen not in ("", "Sahip"):
+        return False, "gönderen görünen adı kartla aynı değil"
+    # Başlıklar: yalnız bilinen küme. gmail_gonder._mesaj'ın ürettiği başlıklar + MIME zorunluları.
+    izinli_bas = {"from", "to", "cc", "subject", "reply-to", "mime-version", "content-type",
+                  "content-transfer-encoding", "content-disposition", "date", "message-id", "user-agent"}
+    for ad in msg.keys():
+        if ad.lower() not in izinli_bas:
+            return False, "kartta olmayan başlık: %s" % ad[:40]
+    if [h.strip().lower() for h in msg.get_all("Reply-To", [])] not in ([], ["sahip@example.com"]):
+        return False, "Reply-To kartla aynı değil"
+    return True, ""
+
+
+def _smtp_sayac(dizin, artir=False):
+    yol = os.path.join(dizin, "smtp_gunluk.json")
+    gun = time.strftime("%F")
+    try:
+        with open(yol, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {}
+    n = d.get("n", 0) if d.get("gun") == gun else 0
+    if artir:
+        n += 1
+        try:
+            with open(yol + ".yeni", "w", encoding="utf-8") as f:
+                json.dump({"gun": gun, "n": n}, f)
+            os.replace(yol + ".yeni", yol)
+        except OSError:
+            pass
+    return n
+
+
+def _sahibe_yaz(v, metin):
+    import urllib.parse
+    sahip = v.sirlar.get("TELEGRAM_OWNER_ID")
+    if not sahip:
+        return
+    try:
+        v.isle("POST", "/telegram/sendMessage", [("Content-Type", "application/x-www-form-urlencoded")],
+               urllib.parse.urlencode({"chat_id": sahip, "text": metin}).encode())
+    except Exception:
+        pass
 
 
 class _Satirlar:
@@ -394,6 +863,11 @@ def _smtp_cevap(ust):
 
 
 class _SmtpIsleyici(socketserver.BaseRequestHandler):
+    """Onay İŞE bağlı (2026-10-28, 2. tur bulgu 1): AUTH kullanıcı adı onay kimliğidir; vekil kartı onay servisinden
+    alır (tür 'mail', geçerli), gelen maili (zarf + başlık + gövde + ekler) sahibin kartta GÖRDÜĞÜ önizlemeyle
+    kendisi karşılaştırır, eşleşirse onayı KENDİSİ tüketir ve ancak o zaman üst sunucuya verir. Günlük tavan ve
+    "mail gitti" bildirimi de burada — istemci atlayamaz."""
+
     def handle(self):
         import base64
         v = self.server.vekil
@@ -406,7 +880,7 @@ class _SmtpIsleyici(socketserver.BaseRequestHandler):
         except Exception as e:
             return ist.yaz(("421 ghost-vekil: ust sunucu %s\r\n" % type(e).__name__).encode())
         ist.yaz(b"220 ghost-vekil ESMTP\r\n")
-        kip, alicilar, gonderildi = None, [], False
+        kip, eid, kart, alicilar, gonderildi = None, None, None, [], False
         try:
             while True:
                 satir = ist.oku()
@@ -425,18 +899,28 @@ class _SmtpIsleyici(socketserver.BaseRequestHandler):
                         continue
                     if kullanici == "test-kendine":
                         kip = "test"
-                    elif re.fullmatch(r"onay-[0-9a-f]{16}", kullanici) and self.server.onay_sor(kullanici):
-                        kip = "onay"
+                    elif re.fullmatch(r"onay-[0-9a-f]{16}", kullanici):
+                        r = self.server.onay("onizleme", eid=kullanici)
+                        kart = mail_karti_coz(r.get("onizleme")) if (
+                            r.get("gecerli") and r.get("tur") == "mail" and not r.get("kirpildi")) else None
+                        if not kart:
+                            v._gunluk_yaz("smtp RED %s (geçerli mail kartı yok)" % kullanici[:24])
+                            ist.yaz(b"535 ghost-vekil: gecerli mail onayi yok (sahibin onayi bu maile ait degil)\r\n")
+                            continue
+                        kip, eid, kart["sha"] = "onay", kullanici, r.get("sha")
                     else:
                         v._gunluk_yaz("smtp RED %s" % kullanici[:24])
-                        ist.yaz(b"535 ghost-vekil: onay yok (sahibin gercek onayi tuketilmemis)\r\n")
+                        ist.yaz(b"535 ghost-vekil: onay yok\r\n")
                         continue
                     yeni = base64.b64encode(b"\0" + adres.encode() + b"\0" + sifre.encode())
                     ust.yaz(b"AUTH PLAIN " + yeni + b"\r\n")
                     ist.yaz(v.maskele(_smtp_cevap(ust)))
                     continue
-                if k.startswith((b"MAIL", b"RCPT", b"DATA")) and not kip:
+                if k.startswith((b"MAIL", b"RCPT", b"DATA", b"BDAT")) and not kip:
                     ist.yaz(b"530 ghost-vekil: once AUTH\r\n")
+                    continue
+                if k.startswith(b"BDAT"):
+                    ist.yaz(b"502 ghost-vekil: BDAT yok, DATA kullan\r\n")
                     continue
                 if k.startswith(b"MAIL") and gonderildi:
                     ist.yaz(b"554 ghost-vekil: bir onay = bir mail\r\n")
@@ -449,21 +933,53 @@ class _SmtpIsleyici(socketserver.BaseRequestHandler):
                         continue
                     alicilar.append(alici)
                 if k == b"DATA":
-                    ust.yaz(satir)
-                    c = _smtp_cevap(ust)
-                    ist.yaz(c)
-                    if not c.startswith(b"354"):
-                        continue
+                    ist.yaz(b"354 ghost-vekil: govdeyi gonder, nokta ile bitir\r\n")
+                    parca, boy = [], 0
                     while True:
                         govde = ist.oku()
                         if not govde:
                             return
-                        ust.yaz(govde)
                         if govde in (b".\r\n", b".\n"):
                             break
+                        boy += len(govde)
+                        if boy > SMTP_DATA_TAVAN:
+                            ist.yaz(b"552 ghost-vekil: mail cok buyuk\r\n")
+                            return
+                        parca.append(govde)
+                    ham = b"".join(x[1:] if x.startswith(b"..") else x for x in parca)
+                    if kip == "onay":
+                        ok, neden = mail_kartla_eslesir(kart, ham, alicilar, adres)
+                        if not ok:
+                            v._gunluk_yaz("smtp RED %s: %s" % (eid, neden))
+                            ist.yaz(("554 ghost-vekil: %s - gonderilmedi\r\n" % neden).encode())
+                            continue
+                        if _smtp_sayac(v.dizin) >= SMTP_GUNLUK_TAVAN:
+                            _sahibe_yaz(v, "⚠️ Mail gönderimi DURDU: bugünkü tavan (%d) doldu. Alıcı: %s | Konu: %s"
+                                        % (SMTP_GUNLUK_TAVAN, kart["kime"], kart["konu"][:80]))
+                            ist.yaz(b"554 ghost-vekil: gunluk tavan doldu\r\n")
+                            continue
+                        r = self.server.onay("tuket", eid=eid, onizleme_sha=kart["sha"], tur="mail")
+                        if not r.get("tuketildi"):
+                            v._gunluk_yaz("smtp RED %s: tüketilemedi (%s)" % (eid, r.get("neden")))
+                            ist.yaz(b"554 ghost-vekil: onay tuketilemedi\r\n")
+                            continue
+                    ust.yaz(b"DATA\r\n")
+                    c = _smtp_cevap(ust)
+                    if not c.startswith(b"354"):
+                        ist.yaz(c)
+                        continue
+                    for x in parca:
+                        ust.yaz(x)
+                    ust.yaz(b".\r\n")
                     c = _smtp_cevap(ust)
                     gonderildi = c.startswith(b"250")
                     v._gunluk_yaz("smtp %s %s alici=%d" % (kip, "GITTI" if gonderildi else "red", len(alicilar)))
+                    if gonderildi and kip == "onay":
+                        _smtp_sayac(v.dizin, artir=True)
+                        _sahibe_yaz(v, "📧 Gmail'inden mail GİTTİ → %s%s | Konu: %s | ek: %d | onay: %s\n"
+                                       "Sen onaylamadıysan hemen söyle." % (
+                                           kart["kime"], (" (cc %s)" % kart["cc"]) if kart["cc"] else "",
+                                           kart["konu"][:80], len(kart["ekler"]), eid))
                     ist.yaz(c)
                     continue
                 ust.yaz(satir)
@@ -564,9 +1080,9 @@ class AkisSunucu(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, adres, isleyici, vekil, ust_ac, onay_sor=onay_az_once):
+    def __init__(self, adres, isleyici, vekil, ust_ac, onay=onay_cagir):
         super().__init__(adres, isleyici)
-        self.vekil, self.ust_ac, self.onay_sor = vekil, ust_ac, onay_sor
+        self.vekil, self.ust_ac, self.onay = vekil, ust_ac, onay
 
 
 def main(argv):
@@ -576,6 +1092,10 @@ def main(argv):
         for adres, isl, ac in ((SMTP_ADRES, _SmtpIsleyici, lambda: _tls_ac("smtp.gmail.com", 587, starttls=True)),
                                (IMAP_ADRES, _ImapIsleyici, lambda: _tls_ac("imap.gmail.com", 993))):
             threading.Thread(target=AkisSunucu(adres, isl, v, ac).serve_forever, daemon=True).start()
+    try:
+        threading.Thread(target=UnixSunucu(MAC_SOKET, v).serve_forever, daemon=True).start()
+    except OSError as e:
+        sys.stderr.write("mac soketi açılamadı: %s\n" % e)
     Sunucu(ADRES, v).serve_forever()
     return 0
 

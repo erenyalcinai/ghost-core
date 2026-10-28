@@ -177,7 +177,7 @@ def note(karar, gerekce="", kontrol=""):
     return "🔎 İkinci göz: %s — %s" % (karar.upper(), gerekce or "gerekçe verilmedi")
 
 
-def review(request, result, runner, kind="", jid=None, model=None, timeout=None):
+def review(request, result, runner, kind="", jid=None, model=None, timeout=None, ozerk=False):
     """Kör denetimi koştur, günlüğe yaz, (karar, not) döndür.
 
     runner: (prompt, model, ...) -> (metin, sid, hata) imzalı çağrılabilir —
@@ -186,8 +186,11 @@ def review(request, result, runner, kind="", jid=None, model=None, timeout=None)
     t0 = time.time()
     p = build_prompt(request, result)
     try:
+        # ozerk: denetçi de gözetimsiz işin parçası — kapı geri alınmaz eylemi onda da kessin
+        # (2. tur bulgu 1: denetçi tam yetkiyle koşup özerk sınırını deliyordu). Denetçi salt-okuma
+        # yapar, yetenek kaybı yok.
         out, _, err = runner(p, model or MODEL, use_mcp=[],
-                             timeout=timeout or TIMEOUT)
+                             timeout=timeout or TIMEOUT, ozerk=ozerk)
     except Exception as e:                      # denetçi asla işi düşürmesin
         out, err = "denetçi çalıştırılamadı: %r" % e, True
     if err:

@@ -40,7 +40,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-SURUM = 1
+SURUM = 2
 DURUM_DIZIN = "/var/lib/ghost-onay"
 SOKET = "/run/ghost-onay/onay.sock"
 ONAY_OMUR_SN = 24 * 3600
@@ -51,6 +51,7 @@ KOD_OMRU_SN = 600
 ESLESME_DENEME_TAVANI = 5
 ISTEK_TAVAN = 2 * 1024 * 1024
 KOPRU_BIRIMI = "ghost-bridge.service"
+INBOX_OMUR_SN = 600                       # imzalı inbox jetonu bu kadar geçerli (API yazar, köprü okur)
 
 EID_DESEN = re.compile(r"^onay-[A-Za-z0-9_-]{1,48}$")
 EYLEM_DESEN = re.compile(r"^\[Sahne eylem: ([^\]]+)\]\s*(.*)$", re.S)
@@ -70,7 +71,20 @@ CREATE TABLE IF NOT EXISTS cihazlar(
 CREATE TABLE IF NOT EXISTS nonces(nonce TEXT PRIMARY KEY, ts REAL);
 CREATE TABLE IF NOT EXISTS sayac(ad TEXT PRIMARY KEY, n INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS gunluk(ts REAL, op TEXT, pid INTEGER, uid INTEGER, ayrinti TEXT);
+CREATE TABLE IF NOT EXISTS inbox_tuketilen(imza TEXT PRIMARY KEY, ts REAL);
 """
+KART_TURLERI = ("genel", "mail", "kapi")
+HOOK_BIRIMI = "ghost-hook.service"       # kural tetiklerini sohbete düşüren ikinci güvenilir süreç (sistem birimi)
+
+
+def komut_ozeti(komut):
+    """ghost/sahne.py komut_ozeti ve kapı _komut_ozeti ile AYNI (repodan import yok)."""
+    k = re.sub(r"\s*(?:;\s*:|&&\s*:|#)?\s*\bonay-[0-9a-f]{16}\b", "", komut or "")
+    k = re.sub(r"\s+", " ", k).strip().rstrip(";").strip()
+    return hashlib.sha256(k.encode("utf-8")).hexdigest()[:16]
+
+
+_KART_KOMUT = re.compile(r"\AKomut:\n(.*?)\n\nKomut özeti: [0-9a-f]{16}\Z", re.S)
 
 
 def _now():
@@ -106,11 +120,36 @@ class Onay:
         self.kilit = threading.Lock()
         self.db = sqlite3.connect(os.path.join(dizin, "onay.db"), timeout=10, check_same_thread=False)
         self.db.executescript(SCHEMA)
+        var = {r[1] for r in self.db.execute("PRAGMA table_info(onaylar)")}
+        if "tur" not in var:
+            self.db.execute("ALTER TABLE onaylar ADD COLUMN tur TEXT")      # SURUM 2: kart türü
+        if "baglam" not in var:
+            self.db.execute("ALTER TABLE onaylar ADD COLUMN baglam TEXT")   # SURUM 2: kapı komut özeti
         self.db.commit()
         self.ayar = self._ayar_oku()
         self._kopru_pid = kopru_pid or (lambda: _systemd_mainpid(self.ayar.get("kopru_birimi") or KOPRU_BIRIMI))
         self._telegram = telegram or (lambda m: _telegram(self.ayar.get("telegram_token"),
                                                           self.ayar.get("sahip_id"), m))
+        self.inbox_key = self._inbox_key()
+
+    def _inbox_key(self):
+        """Kokpit inbox imza anahtarı — /var/lib/ghost-onay altında (ghost/model okuyamaz). İlk koşuda üretilir."""
+        yol = os.path.join(self.dizin, "inbox.key")
+        try:
+            with open(yol, "rb") as f:
+                k = f.read().strip()
+            if len(k) >= 32:
+                return k
+        except OSError:
+            pass
+        k = secrets.token_hex(32).encode()
+        try:
+            fd = os.open(yol, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(k)
+        except OSError:
+            pass
+        return k
 
     def _ayar_oku(self):
         try:
@@ -147,6 +186,30 @@ class Onay:
     def _kopruden_mi(self, peer):
         return peer[0] > 1 and peer[0] == self._kopru_pid()
 
+    def _inbox_imza(self, metin, ts):
+        msg = ("%s\n%d" % (hashlib.sha256((metin or "").encode("utf-8")).hexdigest(), int(ts))).encode()
+        return hmac.new(self.inbox_key, msg, hashlib.sha256).hexdigest()
+
+    def op_inbox_dogrula(self, i, peer):
+        """Köprü: bu inbox mesajı imzalı (device-authenticated API'den) mi? Yalnız köprü ana süreci sorar."""
+        if not self._kopruden_mi(peer):
+            return {"ok": False, "hata": "yalnız köprü ana süreci"}
+        try:
+            ts = int(i.get("ts") or 0)
+        except (TypeError, ValueError):
+            return {"ok": True, "gecerli": False}
+        imza = str(i.get("imza") or "")
+        ok = bool(imza and 0 < time.time() - ts < INBOX_OMUR_SN
+                  and hmac.compare_digest(imza, self._inbox_imza(str(i.get("metin") or ""), ts)))
+        if ok:
+            # Tek kullanımlık (2. tur bulgu 5): aynı imza 10 dk içinde ikinci kez geçmesin (/unfreeze tekrar oynatma).
+            self.db.execute("DELETE FROM inbox_tuketilen WHERE ts < ?", (time.time() - 2 * INBOX_OMUR_SN,))
+            try:
+                self.db.execute("INSERT INTO inbox_tuketilen(imza, ts) VALUES(?,?)", (imza, time.time()))
+            except sqlite3.IntegrityError:
+                return {"ok": True, "gecerli": False, "neden": "imza zaten tüketildi"}
+        return {"ok": True, "gecerli": ok}
+
     # ------------------------------------------------------------ onay kaydı
     def op_ping(self, i, peer):
         return {"ok": True, "surum": SURUM}
@@ -158,18 +221,53 @@ class Onay:
         if not EID_DESEN.match(eid):
             return {"ok": False, "hata": "eid biçimi"}
         onizleme = str(i.get("onizleme") or "")
+        tur = str(i.get("tur") or "genel")
+        baglam = None
+        if tur not in KART_TURLERI:
+            return {"ok": False, "hata": "kart türü: %s" % "|".join(KART_TURLERI)}
+        if tur == "kapi":
+            # 4. tur K1: bağlam ÇAĞIRANDAN alınmaz — sahibe gösterilen önizlemedeki "Komut:" bloğundan servis
+            # kendisi hesaplar. Önizleme ile koşacak komut ayrışamaz.
+            m = _KART_KOMUT.match(onizleme)
+            if not m:
+                return {"ok": False, "hata": "kapi kartı önizlemesi 'Komut:\\n…\\n\\nKomut özeti: …' biçiminde olmalı"}
+            baglam = komut_ozeti(m.group(1))
+            if i.get("baglam") and str(i["baglam"]) != baglam:
+                return {"ok": False, "hata": "bağlam önizlemedeki komutla uyuşmuyor"}
         if self.db.execute("SELECT 1 FROM onaylar WHERE eid=?", (eid,)).fetchone():
             return {"ok": False, "hata": "kart zaten açılmış"}
         self.db.execute("DELETE FROM onaylar WHERE olusturma < ?", (time.time() - KART_OMUR_SN,))
-        self.db.execute("INSERT INTO onaylar(eid, olusturma, onizleme_sha, onizleme, kirpildi, acik) "
-                        "VALUES(?,?,?,?,?,1)",
+        self.db.execute("INSERT INTO onaylar(eid, olusturma, onizleme_sha, onizleme, kirpildi, acik, tur, baglam) "
+                        "VALUES(?,?,?,?,?,1,?,?)",
                         (eid, time.time(), hashlib.sha256(onizleme.encode("utf-8")).hexdigest(),
-                         onizleme[:20000], 1 if len(onizleme) > 8000 else 0))
+                         onizleme[:20000], 1 if len(onizleme) > 8000 else 0, tur, baglam))
         return {"ok": True}
+
+    def _guvenilir_surec(self, peer):
+        """Köprü ana süreci ya da ghost-hook sistem birimi (cgroup root'un; ghost oraya süreç koyamaz)."""
+        if self._kopruden_mi(peer):
+            return True
+        try:
+            with open("/proc/%d/cgroup" % peer[0], encoding="ascii") as f:
+                return ("/" + HOOK_BIRIMI) in f.read()
+        except OSError:
+            return False
+
+    def op_tetik_imzala(self, i, peer):
+        """Kural tetiği sohbete düşerken köprü/hook imzalatır; imzasız inbox kaydı köprüde tam yetkili sohbete
+        girmez (özerk işe gider). Model (köprü çocuğu) bu imzayı alamaz."""
+        if not self._guvenilir_surec(peer):
+            self._gunluk("red-tetik-imza", peer)
+            return {"ok": False, "hata": "yalnız köprü/hook"}
+        ts = int(time.time())
+        return {"ok": True, "imza": self._inbox_imza(str(i.get("metin") or "").strip(), ts), "ts": ts}
 
     def op_kartlar_esitle(self, i, peer):
         """Sahnede artık görünmeyen açık kartlar kapanır (düz 'evet' yalnız GÖRÜNEN tek karta).
-        Yalnız kapatır, açmaz/onaylamaz."""
+        Yalnız kapatır, açmaz/onaylamaz. 4. tur K1: yalnız köprü ana süreci — model görünen kartı kapatıp
+        düz "evet"i gizli karta yönlendiremesin."""
+        if not self._kopruden_mi(peer):
+            return {"ok": False, "hata": "yalnız köprü ana süreci"}
         acik = {str(x) for x in (i.get("acik") or [])}
         rows = self.db.execute("SELECT eid FROM onaylar WHERE acik=1 AND ts IS NULL").fetchall()
         n = 0
@@ -180,6 +278,8 @@ class Onay:
         return {"ok": True, "kapanan": n}
 
     def op_kart_kapat(self, i, peer):
+        if not self._kopruden_mi(peer):
+            return {"ok": False, "hata": "yalnız köprü ana süreci"}
         self.db.execute("UPDATE onaylar SET acik=0 WHERE eid=? AND ts IS NULL", (str(i.get("eid") or ""),))
         return {"ok": True}
 
@@ -221,7 +321,7 @@ class Onay:
         return {"ok": True, "eid": self._metinden(str(i.get("metin") or ""), "telegram", peer)}
 
     def _gecerli_satir(self, eid):
-        return self.db.execute("SELECT ts, tuketildi, onizleme_sha, kirpildi FROM onaylar WHERE eid=?",
+        return self.db.execute("SELECT ts, tuketildi, onizleme_sha, kirpildi, tur FROM onaylar WHERE eid=?",
                                (str(eid or ""),)).fetchone()
 
     def op_gecerli(self, i, peer):
@@ -230,16 +330,37 @@ class Onay:
         return {"ok": True, "gecerli": ok}
 
     def op_tuket(self, i, peer):
-        """Geçerliyse tüket (atomik). onizleme_sha verilirse kart özetiyle eşleşmeli ve kırpılmamış olmalı."""
+        """Geçerliyse tüket (atomik). SURUM 2 (2026-10-28, 2. tur bulgu 1): onay İŞE bağlı — tüketen taraf kart
+        TÜRÜNÜ ve sahibe gösterilen önizlemenin ÖZETİNİ söylemek zorunda; ikisi de karttakiyle eşleşmeli ve
+        önizleme kırpılmamış olmalı. Tüketen (vekil SMTP, kapı) içeriği önizlemeyle kendisi karşılaştırır."""
         eid = str(i.get("eid") or "")
         r = self._gecerli_satir(eid)
         if not (r and r[0] and not r[1] and time.time() - r[0] < ONAY_OMUR_SN):
             return {"ok": True, "tuketildi": False, "neden": "onay yok"}
-        sha = i.get("onizleme_sha")
-        if sha is not None and (r[3] or not r[2] or not hmac.compare_digest(str(r[2]), str(sha))):
+        sha, tur = i.get("onizleme_sha"), i.get("tur")
+        if not sha or not tur:
+            return {"ok": True, "tuketildi": False, "neden": "tür ve önizleme özeti zorunlu"}
+        if (r[4] or "genel") != tur:
+            return {"ok": True, "tuketildi": False, "neden": "kart türü farklı (%s)" % (r[4] or "genel")}
+        if r[3] or not r[2] or not hmac.compare_digest(str(r[2]), str(sha)):
             return {"ok": True, "tuketildi": False, "neden": "önizleme eşleşmiyor"}
         self.db.execute("UPDATE onaylar SET tuketildi=1, tuketim_ts=? WHERE eid=?", (time.time(), eid))
         self._gunluk("tuket", peer, eid)
+        return {"ok": True, "tuketildi": True}
+
+    def op_komut_tuket(self, i, peer):
+        """Kapı istisnası (2. tur bulgu 1): onay 'kapi' türünde, bağlamı (komut özeti) eşleşen, geçerli ve
+        tüketilmemiş mi? Atomik tüket. Bir komut için verilen onay başka komutta geçmez."""
+        eid = str(i.get("eid") or "")
+        baglam = str(i.get("baglam") or "")
+        r = self.db.execute("SELECT ts, tuketildi, tur, baglam FROM onaylar WHERE eid=?", (eid,)).fetchone()
+        if not (r and r[0] and not r[1] and time.time() - r[0] < ONAY_OMUR_SN):
+            return {"ok": True, "tuketildi": False, "neden": "onay yok"}
+        if r[2] != "kapi" or not baglam or r[3] != baglam:
+            self._gunluk("komut-tuket-red", peer, "%s tur=%s" % (eid, r[2]))
+            return {"ok": True, "tuketildi": False, "neden": "komut bu onaya ait değil"}
+        self.db.execute("UPDATE onaylar SET tuketildi=1, tuketim_ts=? WHERE eid=?", (time.time(), eid))
+        self._gunluk("komut-tuket", peer, eid)
         return {"ok": True, "tuketildi": True}
 
     def op_az_once_tuketildi(self, i, peer):
@@ -249,10 +370,11 @@ class Onay:
         return {"ok": True, "evet": bool(r and r[0] and time.time() - float(r[1] or 0) < pencere)}
 
     def op_onizleme(self, i, peer):
-        r = self.db.execute("SELECT onizleme, onizleme_sha, kirpildi FROM onaylar WHERE eid=?",
+        r = self.db.execute("SELECT onizleme, onizleme_sha, kirpildi, tur, ts, tuketildi FROM onaylar WHERE eid=?",
                             (str(i.get("eid") or ""),)).fetchone()
         return {"ok": True, "onizleme": r[0] if r else None, "sha": r[1] if r else None,
-                "kirpildi": bool(r[2]) if r else None}
+                "kirpildi": bool(r[2]) if r else None, "tur": (r[3] or "genel") if r else None,
+                "gecerli": bool(r and r[4] and not r[5] and time.time() - r[4] < ONAY_OMUR_SN)}
 
     # ------------------------------------------------------------ Kokpit kimliği
     def op_kokpit(self, i, peer):
@@ -307,6 +429,11 @@ class Onay:
                         cevap["onay"] = self._onayla(eid, "kokpit-eylem", peer)
                 elif yol == "/v1/mesaj":
                     cevap["onay"] = self._metinden(str(veri.get("metin") or ""), "kokpit-mesaj", peer)
+                    # 2. tur bulgu 6: inbox imzası CİHAZ İMZASI doğrulandığı anda burada üretilir — çağıranın
+                    # kimliğine (ghost-api) güvenilmez; model geçerli cihaz imzası olmadan jeton alamaz.
+                    its = int(time.time())
+                    cevap["cihaz"].update(inbox_imza=self._inbox_imza(str(veri.get("metin") or "").strip(), its),
+                                          inbox_ts=its)
                 elif yol.startswith("/v1/kararlar/") and veri.get("karar") == "onay":
                     pid = yol.rsplit("/", 1)[1]
                     if 4 <= len(pid) <= 16:
@@ -377,6 +504,8 @@ class Onay:
         return {"ok": True, "cihaz": {"id": row[0], "key": key, "ad": r[0], "created": r[1]}}
 
     def op_iptal(self, i, peer):
+        if not self._kopruden_mi(peer):          # 4. tur: cihaz iptali (onay kanalını kesmek) yalnız köprüden (/cihaz_iptal)
+            return {"ok": False, "hata": "yalnız köprü ana süreci"}
         did = i.get("id")
         if did:
             n = self.db.execute("UPDATE cihazlar SET durum='iptal', key_hex='' WHERE id=?", (str(did),)).rowcount

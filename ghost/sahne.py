@@ -243,7 +243,41 @@ def sor(soru, secenekler, eylem_id=None, baslik="Soru"):
                                                       for i in range(0, len(secenekler), 2)]) or 0
 
 
-def onay(baslik, onizleme, eylem_id=None, aciklama=""):
+def servis_esitle():
+    """KÖPRÜ ana sürecinden çağrılır (servis başka süreci reddeder): sahnede görünmeyen açık kartlar serviste kapanır.
+    Model artık bunu yapamaz (4. tur K1); sahne.goster'deki çağrı modelde sessizce reddedilir, köprü tick'i tamamlar."""
+    from ghost import onay as _onay
+    if not _onay.servis_modu():
+        return
+    ids = []
+    for b in oku().get("bilesenler") or []:
+        _eylem_idleri(b, ids)
+    try:
+        _onay.kartlar_esitle([i for i in ids if str(i).startswith("onay-")])
+    except Exception:
+        pass
+
+
+def komut_ozeti(komut):
+    """Kapı istisnası için komutun parmak izi — onay kimliği ve ayıracı (; : / && : / #) çıkarılmış, boşluk
+    sadeleştirilmiş metnin sha256'sının ilk 16 hanesi. Kapıdaki _komut_ozeti ile AYNI olmalı."""
+    k = re.sub(r"\s*(?:;\s*:|&&\s*:|#)?\s*\bonay-[0-9a-f]{16}\b", "", komut or "")
+    k = re.sub(r"\s+", " ", k).strip().rstrip(";").strip()
+    return hashlib.sha256(k.encode("utf-8")).hexdigest()[:16]
+
+
+def onay_komut(baslik, komut, aciklama=""):
+    """Kapının onay istediği komut için kart (tür 'kapi'): Sahip komutun KENDİSİNİ görür; onay yalnız bu komuta
+    geçer. Kullanım: kart → Sahip onaylar → aynı komut + ' ; : onay-<id>'."""
+    eid = "onay-" + secrets.token_hex(8)
+    ozet = komut_ozeti(komut)
+    onizleme = "Komut:\n%s\n\nKomut özeti: %s" % (komut, ozet)
+    onay(baslik, onizleme, eylem_id=eid, aciklama=aciklama or "Bu komut koşsun mu? (Onay yalnız bu komuta, bir kez.)",
+         tur="kapi", baglam=ozet)
+    return eid
+
+
+def onay(baslik, onizleme, eylem_id=None, aciklama="", tur="genel", baglam=None):
     """Onay + önizleme: diff/özet sahnede, altında Onayla / Vazgeç. Cevap Ghost'a mesaj
     olarak gelir; Ghost 'Onayla' görmeden ilerlemez. (Köprünün pending.json'una dışarıdan
     yazılmaz — tek yazar köprüdür, yarış yok.)"""
@@ -257,7 +291,7 @@ def onay(baslik, onizleme, eylem_id=None, aciklama=""):
              {"tur": "eylem", "id": eid, "etiket": "Onayla", "veri": "onayla"},
              {"tur": "eylem", "id": eid, "etiket": "Vazgeç", "veri": "vazgeç", "stil": "tehlike"}]}]
     seq, _ = goster(b, baslik)
-    _onizleme_kaydet(eid, onizleme)
+    _onizleme_kaydet(eid, onizleme, tur, baglam)
     kokpit.outbox_yaz("%s — önizleme Sahne'de. Onaylıyor musun?" % baslik, "ghost",
                       butonlar=[[("Onayla", "[Sahne eylem: %s] onayla" % eid),
                                  ("Vazgeç", "[Sahne eylem: %s] vazgeç" % eid)]])
@@ -440,7 +474,7 @@ def onizleme_ozeti(onizleme):
     return hashlib.sha256((onizleme or "").encode("utf-8")).hexdigest()
 
 
-def _onizleme_kaydet(eid, onizleme):
+def _onizleme_kaydet(eid, onizleme, tur="genel", baglam=None):
     """Kart açılırken sahibe GÖSTERİLEN önizlemenin özeti kayda yazılır (bağımsız denetim Y3, 2026-10-28):
     onaylanan iş, onaydan sonra değiştirilmiş bir taslak olamasın. Bekleyen giriş 'ts' taşımaz → geçerli
     onay sayılmaz (kapı da onay_gecerli de ts'e bakar); Sahip onaylayınca sahip_onayi_kaydet ts ekler.
@@ -448,7 +482,7 @@ def _onizleme_kaydet(eid, onizleme):
     from ghost import onay as _onay
     if _onay.servis_modu():
         try:
-            _onay.kart_ac(eid, onizleme)
+            _onay.kart_ac(eid, onizleme, tur, baglam)
         except _onay.ServisHatasi:
             pass
         return
@@ -456,7 +490,7 @@ def _onizleme_kaydet(eid, onizleme):
         d = _onaylar()
         if not (d.get(eid) or {}).get("ts"):
             d[eid] = {"olusturma": time.time(), "onizleme_sha": onizleme_ozeti(onizleme),
-                      "kirpildi": len(onizleme or "") > 8000}
+                      "kirpildi": len(onizleme or "") > 8000, "tur": tur, "baglam": baglam}
             _onaylar_yaz(d)
     try:
         _kilitli(yaz)
@@ -510,6 +544,8 @@ def sahip_onayi_kaydet(metin, kanal, uid=None):
         d[eid] = {"ts": time.time(), "kanal": str(kanal)[:40], "tuketildi": False}
         if onceki.get("onizleme_sha"):
             d[eid].update(onizleme_sha=onceki["onizleme_sha"], kirpildi=bool(onceki.get("kirpildi")))
+        if onceki.get("tur"):            # kapı komut bağlamı onayla birlikte korunur (2. tur bulgu 1)
+            d[eid].update(tur=onceki["tur"], baglam=onceki.get("baglam"))
         _onaylar_yaz(d)
         return True
     try:
@@ -532,8 +568,8 @@ def onay_gecerli(eid, omur_sn=ONAY_OMUR_SN):
 def onay_tuket(eid):
     """Tek kullanımlık: onaylı iş yapıldıktan sonra aynı onay ikinci kez geçmez."""
     from ghost import onay as _onay
-    if _onay.servis_modu():
-        return _onay.tuket(eid)
+    if _onay.servis_modu():      # SURUM 2: özetsiz tüketim yok; işe bağlı yol onay_tuket_dogrulayarak
+        return False
     def yaz():
         d = _onaylar()
         if str(eid) in d:
@@ -543,12 +579,12 @@ def onay_tuket(eid):
     _kilitli(yaz)
 
 
-def onay_tuket_dogrulayarak(eid, onizleme_sha):
+def onay_tuket_dogrulayarak(eid, onizleme_sha, tur="genel"):
     """Atomik: onay geçerli VE sahibe gösterilen önizlemenin özeti eşleşiyor → tüket, True.
     (Servis kipinde tek çağrı; yerelde geçerli → özet → tüket sırası.)"""
     from ghost import onay as _onay
     if _onay.servis_modu():
-        return _onay.tuket(eid, onizleme_sha)
+        return _onay.tuket(eid, onizleme_sha, tur)
     if not onay_gecerli(eid) or not onizleme_sha or onay_onizleme_sha(eid) != onizleme_sha:
         return False
     onay_tuket(eid)
@@ -644,6 +680,15 @@ def main(argv):
         if on.startswith("@"):
             on = open(on[1:], encoding="utf-8").read()
         print("onay sahnesi seq=%d" % onay(argv[1], on, aciklama=argv[3] if len(argv) > 3 else ""))
+    elif cmd == "onay-komut":
+        if len(argv) < 3:
+            print("kullanım: onay-komut '<başlık>' '<komut>' [açıklama]  → Sahip onaylayınca: <komut> ; : onay-<id>")
+            return 2
+        komut = argv[2]
+        if komut.startswith("@"):          # @dosya: komut metni dosyadan (uzun/korunan yol içeren komutlar)
+            komut = open(komut[1:], encoding="utf-8").read().strip()
+        eid = onay_komut(argv[1], komut, aciklama=argv[3] if len(argv) > 3 else "")
+        print("onay kartı: %s — Sahip onaylayınca AYNI komutu sonuna ' ; : %s' ekleyerek koş" % (eid, eid))
     elif cmd == "metinden":
         # --kart <Kart>: aynı raporu Masa'ya da kalıcı yayınla (2026-10-04). Sahne anlık ekrandır,
         # Masa kalıcı: dosyaysa tam markdown (yayinla), değilse tablolar sahne kaydı olur.

@@ -14,7 +14,9 @@ from ghost import kokpit  # noqa: E402
 class SahteMgr:
     chat_id = 1
     def __init__(self, res=None):
-        self.res, self.cozulen, self.sohbet = res, [], []
+        self.res, self.cozulen, self.sohbet, self.isler = res, [], [], []
+    def enqueue_job(self, text, kind="iş", model=None):
+        self.isler.append((text, kind))
     def resolve_pending(self, pid, ok):
         self.cozulen.append((pid, ok))
         return self.res
@@ -64,6 +66,24 @@ class KopruRayi(unittest.TestCase):
         self.assertEqual(m.cozulen, [("p9", False)])
         self.assertEqual(yollar, [("sohbet", "merhaba ghost"), ("komut", "/jobs")])
         self.assertEqual(kokpit.inbox_al(), [])  # tüketildi
+
+    def test_imzasiz_inbox_slash_komut_kosturamaz_sohbet_sürer(self):
+        """2. tur bulgu 6: imzasız gelen kutusu kaydı (kural tetiği / sahte dosya) /unfreeze dahil komut
+        koşturamaz; doğal dil sohbete gider (kural çıktıları etkilenmez)."""
+        from unittest import mock
+        from ghost import onay
+        m = SahteMgr(res=None)
+        kokpit.mesaj_kuyrukla("/unfreeze", None)
+        kokpit.mesaj_kuyrukla("kural tetiği: bölgeye girildi", None)
+        yollar = []
+        with mock.patch.object(onay, "inbox_dogrula", lambda metin, imza, ts: bool(imza)), \
+                mock.patch.object(tb, "route_text", lambda t, mgr, spoken=False: yollar.append(("sohbet", t))), \
+                mock.patch.object(tb, "handle_command", lambda t, mgr: yollar.append(("komut", t))):
+            tb.check_kokpit(m)
+        # 4. tur Y3: imzasız düz metin tam yetkili sohbete DEĞİL özerk işe gider
+        self.assertEqual(yollar, [])
+        self.assertEqual([j[1] for j in m.isler], ["inbox-imzasiz"])
+        self.assertIn("kural tetiği: bölgeye girildi", m.isler[0][0])
 
     def test_check_kokpit_freeze_kapisi(self):
         m = SahteMgr()

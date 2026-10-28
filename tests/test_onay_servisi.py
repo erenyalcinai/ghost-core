@@ -83,7 +83,9 @@ class Cekirdek(unittest.TestCase):
         self.isle(op="kart_ac", eid="onay-bbbbbbbbbbbbbbbb", onizleme="b")
         r = self.isle(peer=KOPRU, op="sahip_onayi", metin="evet", uid=SAHIP)
         self.assertIsNone(r["eid"])                      # iki açık kart: düz evet hiçbirini onaylamaz
-        self.isle(op="kartlar_esitle", acik=["onay-bbbbbbbbbbbbbbbb"])
+        self.assertFalse(self.isle(op="kartlar_esitle", acik=["onay-bbbbbbbbbbbbbbbb"])["ok"])   # 4. tur K1: model kapatamaz
+        self.assertFalse(self.isle(op="kart_kapat", eid="onay-aaaaaaaaaaaaaaaa")["ok"])
+        self.isle(peer=KOPRU, op="kartlar_esitle", acik=["onay-bbbbbbbbbbbbbbbb"])              # yalnız köprü
         r = self.isle(peer=KOPRU, op="sahip_onayi", metin="evet", uid=SAHIP)
         self.assertEqual(r["eid"], "onay-bbbbbbbbbbbbbbbb")
         for m in ("tamam, bekle", "olur mu?", "devam etme"):
@@ -96,12 +98,44 @@ class Cekirdek(unittest.TestCase):
         self.isle(op="kart_ac", eid="onay-0011223344556677", onizleme="gösterilen")
         self.assertFalse(self.isle(op="kart_ac", eid="onay-0011223344556677", onizleme="başka")["ok"])  # ilk kayıt kilitli
         self.isle(peer=KOPRU, op="sahip_onayi", metin="[Sahne eylem: onay-0011223344556677] onayla", uid=SAHIP)
-        self.assertFalse(self.isle(op="tuket", eid="onay-0011223344556677", onizleme_sha="0" * 64)["tuketildi"])
-        self.assertTrue(self.isle(op="tuket", eid="onay-0011223344556677", onizleme_sha=sha)["tuketildi"])
+        self.assertFalse(self.isle(op="tuket", eid="onay-0011223344556677", onizleme_sha="0" * 64, tur="genel")["tuketildi"])
+        self.assertFalse(self.isle(op="tuket", eid="onay-0011223344556677", onizleme_sha=sha)["tuketildi"])   # tür zorunlu
+        self.assertFalse(self.isle(op="tuket", eid="onay-0011223344556677", tur="genel")["tuketildi"])        # özet zorunlu
+        self.assertFalse(self.isle(op="tuket", eid="onay-0011223344556677", onizleme_sha=sha, tur="mail")["tuketildi"])
+        self.assertTrue(self.isle(op="tuket", eid="onay-0011223344556677", onizleme_sha=sha, tur="genel")["tuketildi"])
         self.assertTrue(self.isle(op="az_once_tuketildi", eid="onay-0011223344556677")["evet"])
-        self.assertFalse(self.isle(op="tuket", eid="onay-0011223344556677")["tuketildi"])
+        self.assertFalse(self.isle(op="tuket", eid="onay-0011223344556677", onizleme_sha=sha, tur="genel")["tuketildi"])
         r = self.isle(peer=KOPRU, op="sahip_onayi", metin="[Sahne eylem: onay-0011223344556677] onayla", uid=SAHIP)
         self.assertIsNone(r["eid"])                      # tüketilmiş onay yeniden açılmaz
+
+    def test_kapi_onayi_yalniz_kendi_komutuna(self):
+        self.assertFalse(self.isle(op="kart_ac", eid="onay-00112233445566c0", onizleme="x", tur="kapi")["ok"])
+        on = "Komut:\ncp a b\n\nKomut özeti: 0000000000000000"
+        oz = srv.komut_ozeti("cp a b")
+        # 4. tur K1: bağlamı servis önizlemeden hesaplar; çağıranın farklı bağlamı reddedilir
+        self.assertFalse(self.isle(op="kart_ac", eid="onay-00112233445566c9", onizleme=on, tur="kapi", baglam="ozet-b")["ok"])
+        self.assertTrue(self.isle(op="kart_ac", eid="onay-00112233445566c1", onizleme=on, tur="kapi")["ok"])
+        self.isle(peer=KOPRU, op="sahip_onayi", metin="[Sahne eylem: onay-00112233445566c1] onayla", uid=SAHIP)
+        self.assertFalse(self.isle(op="komut_tuket", eid="onay-00112233445566c1", baglam="ozet-b")["tuketildi"])
+        self.assertTrue(self.isle(op="komut_tuket", eid="onay-00112233445566c1", baglam=oz)["tuketildi"])
+        self.assertFalse(self.isle(op="komut_tuket", eid="onay-00112233445566c1", baglam=oz)["tuketildi"])
+        self.isle(op="kart_ac", eid="onay-00112233445566c2", onizleme="özet")       # genel kart
+        self.isle(peer=KOPRU, op="sahip_onayi", metin="[Sahne eylem: onay-00112233445566c2] onayla", uid=SAHIP)
+        self.assertFalse(self.isle(op="komut_tuket", eid="onay-00112233445566c2", baglam="ozet-a")["tuketildi"])
+
+    def test_inbox_imzasi_yalniz_cihaz_imzali_mesajdan_dogrulama_yalniz_kopruden(self):
+        did, key = self._cihaz()
+        r = self._kokpit(did, key, "POST", "/v1/mesaj", json.dumps({"metin": " /unfreeze "}).encode())
+        imza, ts = r["cihaz"]["inbox_imza"], r["cihaz"]["inbox_ts"]
+        self.assertFalse(self.isle(op="inbox_dogrula", metin="/unfreeze", imza=imza, ts=ts)["ok"])   # köprü değil
+        self.assertTrue(self.isle(peer=KOPRU, op="inbox_dogrula", metin="/unfreeze", imza=imza, ts=ts)["gecerli"])
+        # 2. tur bulgu 5: tek kullanımlık — aynı imza ikinci kez geçmez (tekrar oynatma)
+        self.assertFalse(self.isle(peer=KOPRU, op="inbox_dogrula", metin="/unfreeze", imza=imza, ts=ts)["gecerli"])
+        self.assertFalse(self.isle(peer=KOPRU, op="inbox_dogrula", metin="/freeze", imza=imza, ts=ts)["gecerli"])
+        self.assertFalse(self.isle(peer=KOPRU, op="inbox_dogrula", metin="/unfreeze", imza="0" * 64, ts=ts)["gecerli"])
+        r = self._kokpit(did, "11" * 32, "POST", "/v1/mesaj", json.dumps({"metin": "/unfreeze"}).encode())
+        self.assertIsNone(r["cihaz"])                                   # yanlış cihaz anahtarı: jeton yok
+        self.assertFalse(self.isle(op="inbox_imzala", metin="/unfreeze")["ok"])   # ayrı imzalama ucu YOK
 
     def test_kirpilmis_onizleme_ozetle_tuketilemez(self):
         uzun = "x" * 9000
@@ -137,7 +171,8 @@ class Cekirdek(unittest.TestCase):
         did, key = self._cihaz()
         self.assertIn("yeni cihaz eşlendi", self.giden[-1])
         self.assertEqual(self._kokpit(did, key, "GET", "/v1/outbox")["neden"], "ok")
-        self.assertEqual(self.isle(op="iptal", id=did)["n"], 1)
+        self.assertFalse(self.isle(op="iptal", id=did)["ok"])                 # 4. tur: iptal yalnız köprüden
+        self.assertEqual(self.isle(peer=KOPRU, op="iptal", id=did)["n"], 1)
         self.assertEqual(self._kokpit(did, key, "GET", "/v1/outbox")["neden"], "cihaz")
         self.assertNotIn("key", json.dumps(self.isle(op="cihazlar")))
 
@@ -226,7 +261,7 @@ class Soket(unittest.TestCase):
     def test_servis_yoksa_kapali_duser(self):
         with mock.patch.object(onay, "SOKET", os.path.join(self.d, "yok.sock")):
             self.assertFalse(onay.gecerli("onay-0011223344556677"))
-            self.assertFalse(onay.tuket("onay-0011223344556677"))
+            self.assertFalse(onay.tuket("onay-0011223344556677", "0" * 64, "genel"))
             self.assertEqual(onay.kokpit_dogrula({}, "GET", "/v1/x"), (None, "servis"))
             self.assertFalse(sahne.onay_gecerli("onay-0011223344556677"))
 

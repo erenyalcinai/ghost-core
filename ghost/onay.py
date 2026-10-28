@@ -60,9 +60,37 @@ def _cagir(op, zaman_asimi=5, **kw):
     return cevap
 
 
+# ------------------------------------------------------------ Kokpit inbox imzası
+# İmzayı onay servisi, /v1/mesaj isteğinin cihaz imzasını doğrularken üretir (kokpit_dogrula → cihaz['inbox_imza']).
+def tetik_imzala(metin):
+    """Köprü/hook: kural tetiğini sohbete düşürmeden önce imzala → (imza, ts) ya da None (servis yoksa/yetkisizse)."""
+    if not servis_modu():
+        return None
+    try:
+        r = _cagir("tetik_imzala", metin=metin or "")
+        return (r.get("imza"), r.get("ts")) if r.get("ok") else None
+    except ServisHatasi:
+        return None
+
+
+def inbox_dogrula(metin, imza, ts):
+    """Köprü: bu inbox mesajı imzalı mı? Servis yoksa True (yerel/test — forgery tehdidi VPS'e özgü)."""
+    if not servis_modu():
+        return True
+    try:
+        return bool(_cagir("inbox_dogrula", metin=metin or "", imza=imza or "", ts=ts or 0).get("gecerli"))
+    except ServisHatasi:
+        return False
+
+
 # ------------------------------------------------------------ onay kaydı
-def kart_ac(eid, onizleme):
-    return _cagir("kart_ac", eid=eid, onizleme=onizleme or "").get("ok", False)
+def kart_ac(eid, onizleme, tur="genel", baglam=None):
+    """Kart türü (genel|mail|kapi) kayda girer; onayı yalnız aynı türden tüketen iş kullanabilir.
+    baglam (kapi kartlarında komut özeti): onay yalnız o komuta bağlanır."""
+    kw = {"eid": eid, "onizleme": onizleme or "", "tur": tur}
+    if baglam is not None:
+        kw["baglam"] = baglam
+    return _cagir("kart_ac", **kw).get("ok", False)
 
 
 def kartlar_esitle(acik_idler):
@@ -82,11 +110,9 @@ def gecerli(eid):
         return False
 
 
-def tuket(eid, onizleme_sha=None):
-    """Atomik geçerli-mi + tüket. onizleme_sha verilirse kartta sahibe gösterilenle eşleşmeli."""
-    kw = {"eid": str(eid or "")}
-    if onizleme_sha is not None:
-        kw["onizleme_sha"] = onizleme_sha
+def tuket(eid, onizleme_sha, tur="genel"):
+    """Atomik geçerli-mi + tüket. Servis SURUM 2: tür ve sahibe gösterilen önizlemenin özeti ZORUNLU."""
+    kw = {"eid": str(eid or ""), "onizleme_sha": onizleme_sha, "tur": tur}
     try:
         return bool(_cagir("tuket", **kw).get("tuketildi"))
     except ServisHatasi:

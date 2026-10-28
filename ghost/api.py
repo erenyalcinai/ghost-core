@@ -483,7 +483,9 @@ class H(BaseHTTPRequestHandler):
                     pass
                 mid = kokpit.outbox_yaz(metin, "sahip")
                 channels.son_kanal_ayarla("kokpit")      # cevap uygulamaya push olsun
-                kokpit.mesaj_kuyrukla(metin, cihaz["id"], sesli=bool(veri.get("sesli")))
+                kokpit.mesaj_kuyrukla(metin, cihaz["id"], sesli=bool(veri.get("sesli")),
+                                      imza=(cihaz.get("inbox_imza"), cihaz.get("inbox_ts"))
+                                      if cihaz.get("inbox_imza") else None)
                 return self._json(200, {"ok": True, "id": mid})
             if u.path == "/v1/duyular":
                 # Ana şalter kapalıysa 403: uygulama bunu görüp göndermeyi durdurur

@@ -302,12 +302,14 @@ def _al(dizin):
 
 
 def mesaj_kuyrukla(metin, cihaz=None, sesli=False, yol=None, tur=None, ad=None, not_=None,
-                   grup=None, sira=None, toplam=None):
+                   grup=None, sira=None, toplam=None, imza=None):
     """Uygulamadan gelen mesaj. sesli: mikrofonla söylendi (cevap da sesli olur — Telegram
     sesli mesajıyla aynı). yol/tur/ad/not_: paylaşılan görsel/belge (köprü Telegram
     foto/dosya yoluyla aynı istemi kurar). grup/sira/toplam: aynı gönderideki çoklu
     dosya (2026-09-04) — köprü grubu TEK sohbet turu olarak işler, N ayrı tur değil."""
     v = {"metin": metin, "cihaz": cihaz, "ts": _now()}
+    if imza:       # onay servisinin cihaz imzasını doğrularken verdiği jeton (imza, ts) — köprü slash komutta arar
+        v["imza"], v["imza_ts"] = imza
     if sesli:
         v["sesli"] = True
     if yol:
