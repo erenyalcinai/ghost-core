@@ -41,6 +41,8 @@ KARARLAR = (GECTI, EKSIK, YANLIS, BELIRSIZ)
 ENGELLEYEN = (EKSIK, YANLIS)
 
 _MIN_UZUNLUK = 40
+# Denetçi aksansız yazarsa (gecti/yanlis/dogrulanamadi) aynı karar sayılır.
+_ASCII = {"gecti": GECTI, "yanlis": YANLIS, "dogrulanamadi": BELIRSIZ}
 
 
 def _norm(s):
@@ -129,13 +131,14 @@ def parse(out):
     m = re.search(r"KARAR\s*:\s*(.+)", txt, re.I)
     if m:
         ham = _norm(m.group(1).split("\n")[0])
-        for k in KARARLAR:
-            if _norm(k) in ham:
-                karar = k
-                break
-        else:
-            if "gecti" in ham or "geçti" in ham:
-                karar = GECTI
+        # 2026-10-28 (Codex S7): alt dize eşleşmesi "KARAR: geçti değil, yanlış"ı GEÇTİ sayıyordu (listede ilk
+        # gelen kazanıyordu). Kural: satırın İLK sözcüğü karar olmalı, satırda başka karar sözcüğü ya da
+        # olumsuzlama ("değil") olmamalı; noktalama/kalın yazı serbest, kalan açıklama serbest. Gerisi BELİRSİZ.
+        sozcukler = [_ASCII.get(t, t) for t in re.findall(r"\w+", ham)]
+        bulunan = [k for k in KARARLAR if _norm(k) in sozcukler]
+        if (sozcukler and len(bulunan) == 1 and sozcukler[0] == _norm(bulunan[0])
+                and not {"değil", "degil"} & set(sozcukler)):
+            karar = bulunan[0]
     def _al(alan):
         mm = re.search(alan + r"\s*:\s*(.+?)(?=\n[A-ZÇĞİÖŞÜ]{4,}\s*:|\Z)",
                        txt, re.I | re.S)

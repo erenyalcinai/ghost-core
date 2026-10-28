@@ -83,6 +83,18 @@ def inbox_dogrula(metin, imza, ts):
         return False
 
 
+def inbox_imzala(jeton, metin):
+    """Paylaşım/Masa-ilet metninin inbox imzası — kokpit_dogrula'nın verdiği tek kullanımlık jetonla
+    (cihaz['inbox_jeton']). → (imza, ts) | None. Servis yoksa None (köprü yerelde imza aramaz)."""
+    if not jeton or not servis_modu():
+        return None
+    try:
+        r = _cagir("inbox_imzala", jeton=str(jeton), metin=metin or "")
+    except ServisHatasi:
+        return None
+    return (r["imza"], r["ts"]) if r.get("ok") and r.get("imza") else None
+
+
 # ------------------------------------------------------------ onay kaydı
 def kart_ac(eid, onizleme, tur="genel", baglam=None):
     """Kart türü (genel|mail|kapi) kayda girer; onayı yalnız aynı türden tüketen iş kullanabilir.

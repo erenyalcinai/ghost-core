@@ -33,6 +33,8 @@ DURUM_DIZIN = "/var/lib/ghost-vekil"
 GOVDE_TAVAN = 200 * 1024 * 1024
 TAMPON_TAVAN = 5 * 1024 * 1024        # bundan büyük ya da boyutsuz cevap akarak taşınır
 ZAMAN_ASIMI = 300
+OKUMA_ZAMAN_ASIMI = 60                # S9 (Codex, 2026-10-28): istemciden okuma (başlık/gövde) zaman aşımı
+ES_ZAMANLI_TAVAN = 48                 # S9: aynı anda işlenen bağlantı tavanı; üstü 503 (yerel istemci yeniden dener)
 YER_TUTUCU = {"", "vekil", "bearer vekil", "token vekil"}   # istemcinin "kimliği vekil eklesin" işareti
 
 # servis → sabit host + kimlik. {AD} = sirlar.env'deki değişken. jwt: vekil imzalar.
@@ -71,6 +73,21 @@ WIKIDATA_KULLANICI = "User:OrnekBot"
 TELEGRAM_SAHIPSIZ = {"getMe", "getUpdates", "getFile", "answerCallbackQuery", "setMyCommands", "getMyCommands",
                      "getWebhookInfo"}
 TELEGRAM_BILDIRIM = re.compile(r"^(send[A-Z]\w*|edit[A-Z]\w*|answerCallbackQuery|getMe|getFile|getChat)$")
+# 5. tur (N3): chat_id'siz yönteme sahte chat_id=<sahip> eklenince geçiyordu → setWebhook (botun TÜM güncellemeleri dış
+# URL'e), logOut/close (botu düşürür). Yöntem BEYAZ listesi: Ghost'un kullandığı mesaj/komut/dosya uçları; kara liste kesin red.
+TELEGRAM_RED = re.compile(r"^(setWebhook|logOut|close|leaveChat|promoteChatMember|setChatAdministratorCustomTitle|"
+                          r"setMyDefaultAdministratorRights|createChatInviteLink|exportChatInviteLink|editChatInviteLink|"
+                          r"revokeChatInviteLink|setChatPermissions|banChatMember|restrictChatMember|setPassportDataErrors)$")
+TELEGRAM_IZINLI = re.compile(r"^(send[A-Z]\w*|edit[A-Z]\w*|delete(Message|Messages|Webhook|MyCommands)|forward\w*|copy\w*|"
+                             r"pinChatMessage|unpinChatMessage|unpinAllChatMessages|answerCallbackQuery|answerInlineQuery|"
+                             r"setMyCommands|getMyCommands|setMessageReaction|setChatMenuButton|getChatMenuButton|setMyName|"
+                             r"setMyDescription|setMyShortDescription|stopPoll|stopMessageLiveLocation|get[A-Z]\w*)$")
+# 5. tur: yeni kimlik/anahtar ÜRETEN uçlar (yazma sınıfında geçiyordu; Ghost hiçbirini kullanmaz) — sızan bir token
+# kendine kalıcı yedek üretemesin
+_GH_KIMLIK_URET = re.compile(r"^/(authorizations|applications|user/(keys|gpg_keys|ssh_signing_keys|installations))(/|$)")
+_SENTRY_KIMLIK_URET = re.compile(r"/(api-tokens|api-keys|auth-tokens|sentry-apps)(/|$)")
+_CF_KIMLIK_URET = re.compile(r"^/client/v4/(user/tokens(?!/verify)|accounts/[^/]+/tokens)(/|$)")
+_POSTHOG_KIMLIK_URET = re.compile(r"/(personal_api_keys|organizations/[^/]+/(members|invites))(/|$)")
 _GH_OKUMA_POST = re.compile(r"^/(graphql|markdown(/raw)?)$")
 _GH_YASAK_ALT = re.compile(r"^/repos/[^/]+/[^/]+/(hooks|keys|transfer|actions/secrets|environments/[^/]+/secrets)(/|$)")
 # MCP: beyaz liste — yalnız bu önekler/kalıplar OKUMA; geri kalan HER araç yazma sayılır (kara liste
@@ -143,11 +160,29 @@ _YORUM_SQL = re.compile(r"--[^\n]*|/\*.*?\*/", re.S)
 
 
 def _dize_yorum_at(q, graphql=False):
-    q = _DIZE.sub(" ", q)
-    if graphql:
-        q = _YORUM_GQL.sub(" ", q)
-    q = _YORUM_SQL.sub(" ", q)
-    return q
+    """Dize literal'lerini ve yorumları TEK geçişte at (5. tur N2): eski iki aşamalı sürümde `# "` … `# "` arasına yazılan
+    mutation dize sanılıp siliniyor, D1'de `-- '` … `-- '` arasındaki DELETE 'okuma' sayılıyordu. Soldan sağa tarama:
+    yorum başladıysa satır sonuna kadar her şey yorumdur (içindeki tırnak dize açmaz)."""
+    out, i, n = [], 0, len(q)
+    while i < n:
+        c = q[i]
+        if c in "\"'":
+            j = i + 1
+            while j < n and q[j] != c:
+                j += 2 if (q[j] == "\\" and graphql) else 1
+            out.append(" ")
+            i = j + 1
+        elif (graphql and c == "#") or (not graphql and q.startswith("--", i)):
+            j = q.find("\n", i)
+            i = n if j < 0 else j
+        elif not graphql and q.startswith("/*", i):
+            j = q.find("*/", i + 2)
+            out.append(" ")
+            i = n if j < 0 else j + 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 
 def _wikidata_bizim(h):
@@ -181,6 +216,8 @@ def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
             if yol_ == "/graphql" and re.search(r"\bmutation\b", _dize_yorum_at(q, graphql=True)):
                 return "red", "GraphQL mutation kapalı; REST yazma uçlarını kullan"
             return "okuma", ""
+        if _GH_KIMLIK_URET.match(yol_):
+            return "red", "GitHub kimlik/anahtar üreten uç (token, ssh/gpg anahtarı, uygulama) vekilden kapalı"
         sahip, _ = _gh_repo(yol_)
         if sahip:
             if sahip not in BIZIM_GITHUB:
@@ -207,6 +244,8 @@ def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
             return "okuma", ""
         if m.group(1).lower() not in BIZIM_GITHUB:
             return "red", "git push yalnız ornek-org/* ve ghost-bot/* repolarına"
+        if servis == "github-git-sahip" and not re.match(r"^/ornek-org/ghost-core(?:\.git)?/", yol_, re.I):
+            return "red", "sahibin token'ı yalnız ornek-org/ghost-core push'u için (5. tur)"
         return "yazma", ""
     if servis in ("github-mcp", "github-mcp-yaz"):
         if oku:
@@ -237,6 +276,10 @@ def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
         if servis == "telegram-dosya":
             return ("okuma", "") if oku else ("red", "telegram dosya ucu yalnız indirme")
         yontem_ad = yol_.strip("/").split("/")[-1]
+        if TELEGRAM_RED.match(yontem_ad):
+            return "red", "Telegram: %s vekilden kapalı (bot yönlendirmesi/oturum/yetki yöntemi)" % yontem_ad
+        if not TELEGRAM_IZINLI.match(yontem_ad):
+            return "red", "Telegram: '%s' vekil beyaz listesinde değil" % yontem_ad
         sahip = str(sirlar.get("TELEGRAM_OWNER_ID") or "")
         hedefler = _form_hepsi(govde, tur, sorgu, ("chat_id", "from_chat_id", "user_id"))
         if hedefler:
@@ -254,6 +297,8 @@ def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
         m = re.match(r"^/client/v4/accounts/([^/]+)", yol_)
         if m and not oku and (not hesap or m.group(1) != hesap):
             return "red", "Cloudflare yazma yalnız kendi hesabımıza"
+        if not oku and _CF_KIMLIK_URET.match(yol_):
+            return "red", "Cloudflare API token üretme/değiştirme vekilden kapalı (panelden)"
         if oku or yol_ in ("/client/v4/graphql", "/client/v4/user/tokens/verify"):
             return "okuma", ""
         if re.match(r"^/client/v4/accounts/[^/]+/d1/database/[^/]+/(query|raw)$", yol_):
@@ -272,11 +317,15 @@ def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
             return "red", "PostHog yalnız kendi projemiz"
         if oku or re.match(r"^/api/(?:projects|environments)/[^/]+/query/?$", yol_):
             return "okuma", ""
+        if _POSTHOG_KIMLIK_URET.search(yol_):
+            return "red", "PostHog anahtar/üye üretme vekilden kapalı"
         return "yazma", ""
     if servis == "sentry":
         m = re.match(r"^/api/0/(?:organizations|projects|teams)/([^/]+)", yol_)
         if m and m.group(1) != SENTRY_ORG:
             return "red", "Sentry yalnız %s kuruluşu" % SENTRY_ORG
+        if not oku and _SENTRY_KIMLIK_URET.search(yol_):
+            return "red", "Sentry token/anahtar üretme vekilden kapalı"
         return ("okuma", "") if oku else ("yazma", "")
     if servis == "wikidata":
         a = _form(govde, tur, sorgu)
@@ -294,7 +343,8 @@ def izin(servis, yontem, yol, govde=None, tur="", sirlar=None):
 
 
 _ATLA = {"host", "accept-encoding", "connection", "keep-alive", "proxy-authorization", "proxy-connection",
-         "te", "trailer", "transfer-encoding", "upgrade", "content-length"}
+         "te", "trailer", "transfer-encoding", "upgrade", "content-length",
+         "x-http-method-override", "x-http-method", "x-method-override"}     # 5. tur: yöntem taklidi üst sunucuya gitmez
 _CEVAP_ATLA = {"connection", "keep-alive", "transfer-encoding", "content-length", "content-encoding"}
 
 
@@ -341,6 +391,10 @@ class Vekil:
 
     def __init__(self, sirlar, gonder=None, dizin=DURUM_DIZIN):
         self.sirlar = sirlar
+        # S6 (Codex, 2026-10-28): akan cevapta parça sınırına düşen sır kaçıyordu — en uzun sır eksi bir bayt
+        # bir sonraki parçayla birlikte taranır (bkz. _akis_maskele).
+        self._kuyruk_boyu = max([len(v.encode()) - 1 for a, v in sirlar.items()
+                                 if len(v) >= 12 and not a.endswith(("_HOST", "_ID", "_URL", "_ADDRESS"))] or [0])
         self.gonder = gonder or self._https
         self.dizin = dizin
         self.sayac = {}
@@ -424,8 +478,18 @@ class Vekil:
         return veri
 
     def _akis_maskele(self, parcalar):
+        """Parça başına maskeleme, iki parçaya bölünen sırrı kaçırıyordu (Codex S6). Son _kuyruk_boyu bayt bir
+        sonraki parçayla birlikte taranır; sır satır sonu içermediği için son satır sonuna kadar olan kısım hemen
+        verilir (SSE olayları '\n\n' ile biter → gecikmez). maskele() yer tutucuya ('***') tekrar dokunmaz."""
+        kuyruk = b""
         for p in parcalar:
-            yield self.maskele(p)
+            m = self.maskele(kuyruk + p)
+            kes = max(m.rfind(b"\n") + 1, len(m) - self._kuyruk_boyu)
+            if kes > 0:
+                yield m[:kes]
+            kuyruk = m[kes:]
+        if kuyruk:
+            yield kuyruk
 
     @staticmethod
     def _https(host, yontem, yol, basliklar, govde):
@@ -511,6 +575,7 @@ class Vekil:
 class _Isleyici(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "ghost-vekil"
+    timeout = OKUMA_ZAMAN_ASIMI       # S9: başlık/gövde gelmeyen bağlantı iş parçacığını sonsuza dek tutamaz
 
     def _kos(self):
         if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
@@ -523,6 +588,10 @@ class _Isleyici(http.server.BaseHTTPRequestHandler):
                 return self._yaz(*_hata(413, "gövde çok büyük"))
             govde = self.rfile.read(n) if n else None
         v = self.server.vekil
+        uid = self.server.peer_uid(self) if hasattr(self.server, "peer_uid") else None
+        if uid is None or uid not in IZINLI_UID:     # 5. tur N8: fail-closed — kimliği okunamayan/yabancı kullanıcıya hiç cevap yok
+            v._gunluk_yaz("RED uid=%s %s %s" % (uid, self.command, self.path.split("?")[0][:80]))
+            return self._yaz(*_hata(403, "vekil yalnız ghost kullanıcısına"))
         if self.path == "/_durum":
             return self._yaz(200, [("Content-Type", "application/json")], json.dumps(
                 {"ok": True, "servisler": sorted(SERVISLER), "sayac": v.sayac,
@@ -593,20 +662,84 @@ def _var(tanim, sirlar, dizin):
     return all(sirlar.get(a) for a in alanlar)
 
 
+def _izinli_uidler():
+    """Vekile bağlanabilen kullanıcılar: ghost (+root). ghost yoksa (CI) bu sürecin kullanıcısı."""
+    import pwd
+    try:
+        return {pwd.getpwnam("ghost").pw_uid, 0}
+    except KeyError:
+        return {os.getuid(), 0}
+
+
+IZINLI_UID = _izinli_uidler()
+
+
+def _tcp_peer_uid(port, hedef, metin=None):
+    """127.0.0.1:<port> → 127.0.0.1:<hedef> bağlantısının sahibi (uid) — /proc/net/tcp herkese okunur, kimlik servisi
+    gerekmez. Bulunamazsa None (5. tur N8: okuma yolu ve IMAP her yerel kullanıcıya açıktı; nginx/www-data ele geçirilse
+    Gmail + okuma API'leri açılırdı)."""
+    try:
+        if metin is None:
+            with open("/proc/net/tcp", encoding="ascii") as f:
+                metin = f.read()
+    except OSError:
+        return None
+    for satir in metin.splitlines()[1:]:
+        p = satir.split()
+        if len(p) < 8:
+            continue
+        try:
+            yerel_port, uzak_port = int(p[1].split(":")[1], 16), int(p[2].split(":")[1], 16)
+        except (IndexError, ValueError):
+            continue
+        if yerel_port == port and uzak_port == hedef:
+            try:
+                return int(p[7])
+            except ValueError:
+                return None
+    return None
+
+
 class Sunucu(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, adres, vekil, kimlik=None):
+    def __init__(self, adres, vekil, kimlik=None, uid_bul=None, tavan=ES_ZAMANLI_TAVAN):
         super().__init__(adres, _Isleyici)
         self.vekil = vekil
         self.kimlik = kimlik or kimlik_sor
+        self.uid_bul = uid_bul or _tcp_peer_uid
+        self._es = threading.BoundedSemaphore(max(1, int(tavan)))
+
+    def process_request(self, request, client_address):
+        # S9: sınırsız iş parçacığı yerine tavan — dolunca 503, bağlantı kapanır (okuma/yazma yolu etkilenmez)
+        if not self._es.acquire(blocking=False):
+            try:
+                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._es.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._es.release()
 
     def ozerk_mi(self, port):
         return self.kimlik(port, self.server_address[1])
 
     def ozerk_mi_baglanti(self, isleyici):
         return self.ozerk_mi(isleyici.client_address[1])
+
+    def peer_uid(self, isleyici):
+        return self.uid_bul(isleyici.client_address[1], self.server_address[1])
 
 
 # ---------------------------------------------------------------- Mac vekil tüneli (Unix soketi)
@@ -674,6 +807,14 @@ class UnixSunucu(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         except OSError:
             return None
         return self.dogrula(pid)
+
+    def peer_uid(self, isleyici):
+        import socket as _s
+        import struct as _st
+        try:
+            return _st.unpack("3i", isleyici.request.getsockopt(_s.SOL_SOCKET, _s.SO_PEERCRED, _st.calcsize("3i")))[1]
+        except OSError:
+            return None
 
 
 KIMLIK_SOKET = "/run/ghost-kimlik/kimlik.sock"
@@ -998,6 +1139,10 @@ class _ImapIsleyici(socketserver.BaseRequestHandler):
         v = self.server.vekil
         adres, sifre = v.sirlar.get("GMAIL_ADDRESS"), (v.sirlar.get("GMAIL_APP_PASSWORD") or "").replace(" ", "")
         ist = _Satirlar(self.request)
+        uid = _tcp_peer_uid(self.client_address[1], self.server.server_address[1]) if self.server.server_address[0] else None
+        if self.server.server_address[0] and (uid is None or uid not in IZINLI_UID):        # 5. tur N8
+            v._gunluk_yaz("imap RED uid=%s" % uid)
+            return ist.yaz(b"* BYE ghost-vekil: yalniz ghost kullanicisi\r\n")
         if not (adres and sifre):
             return ist.yaz(b"* BYE ghost-vekil: Gmail kimligi yok\r\n")
         try:
@@ -1026,12 +1171,92 @@ class _ImapIsleyici(socketserver.BaseRequestHandler):
                     if not c or (p and c.startswith(p[0] + b" ")):
                         break
             v._gunluk_yaz("imap giris")
-            _cift_yon(self.request, ust.sock, v)
+            _imap_aktar(self.request, ust.sock, v)
         finally:
             try:
                 ust.sock.close()
             except Exception:
                 pass
+
+
+# 5. tur N9: giriş sonrası aktarım KÖR'dü — STORE/EXPUNGE/APPEND/COPY/MOVE/CREATE/DELETE üst sunucuya gidiyordu;
+# "salt-okunur" yalnız gmail.py'nin readonly/PEEK iyi niyetine bağlıydı. İstemci→üst yönünde yalnız bu komutlar:
+IMAP_SALT_OKUNUR = re.compile(rb"^(?:CAPABILITY|NOOP|LOGOUT|SELECT|EXAMINE|LIST|LSUB|XLIST|STATUS|FETCH|SEARCH|ESEARCH|THREAD|"
+                              rb"SORT|IDLE|ID|ENABLE|NAMESPACE|CHECK|CLOSE|UNSELECT|GETQUOTA|GETQUOTAROOT|MYRIGHTS|"
+                              rb"UID\s+(?:FETCH|SEARCH|THREAD|SORT))(?:\s|\r|\n|$)", re.I)
+_IMAP_LITERAL = re.compile(rb"\{(\d+)(\+?)\}\r?\n$")
+
+
+def _imap_aktar(ist, ust, v):
+    """Giriş sonrası: üst→istemci ham (maskeli); istemci→üst yalnız salt-okunur komutlar. Yazma komutuna `tag NO`
+    verilir, üst sunucu onu hiç görmez. Literal ({n}) gövdesi ve etiketsiz devam satırı komutun sınıfını taşır."""
+    def ustten():
+        try:
+            while True:
+                d = ust.recv(65536)
+                if not d:
+                    break
+                ist.sendall(v.maskele(d))
+        except OSError:
+            pass
+        finally:
+            for x in (ist, ust):
+                try:
+                    x.shutdown(2)
+                except OSError:
+                    pass
+    t = threading.Thread(target=ustten, daemon=True)
+    t.start()
+    tampon, kalan, aktar, devam = b"", 0, True, False
+    try:
+        while True:
+            d = ist.recv(65536)
+            if not d:
+                break
+            tampon += d
+            while tampon:
+                if kalan:                                   # literal gövdesi: izinli komutunsa üste, değilse çöpe
+                    n = min(kalan, len(tampon))
+                    parca, tampon, kalan = tampon[:n], tampon[n:], kalan - n
+                    if aktar:
+                        ust.sendall(parca)
+                    if not kalan:
+                        devam = True
+                    continue
+                i = tampon.find(b"\n")
+                if i < 0:
+                    break
+                satir, tampon = tampon[:i + 1], tampon[i + 1:]
+                m = _IMAP_LITERAL.search(satir)
+                if devam:                                   # literal sonrası etiketsiz devam satırı
+                    devam = False
+                    if aktar:
+                        ust.sendall(satir)
+                    if m:
+                        kalan = int(m.group(1))
+                    continue
+                p = satir.split(None, 1)
+                etiket, komut = (p[0] if p else b""), (p[1] if len(p) > 1 else b"")
+                if satir.strip().upper() == b"DONE" or IMAP_SALT_OKUNUR.match(komut):
+                    aktar = True
+                    ust.sendall(satir)
+                else:
+                    aktar = False
+                    v._gunluk_yaz("imap RED %s" % komut.split()[:1])
+                    ist.sendall(etiket + b" NO ghost-vekil: salt-okunur aktarici, bu komut kapali\r\n")
+                if m:
+                    kalan = int(m.group(1))
+                    if not aktar and not m.group(2):        # eşzamanlı literal: istemci '+' bekliyordu, NO aldı → göndermez
+                        kalan = 0
+    except OSError:
+        pass
+    finally:
+        for x in (ist, ust):
+            try:
+                x.shutdown(2)
+            except OSError:
+                pass
+    t.join(5)
 
 
 def _cift_yon(a, b, v):

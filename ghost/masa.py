@@ -612,8 +612,10 @@ def baglam_satiri():
             % (len(y), ornek, "…" if len(y) > 3 else ""))
 
 
-def ilet(kid, cihaz=None):
-    """Sahip 'Ghost'a ilet' dedi: kayıt sohbete Sahip mesajı olarak düşer (paylaşım rayıyla aynı)."""
+def ilet(kid, cihaz=None, imzala=None):
+    """Sahip 'Ghost'a ilet' dedi: kayıt sohbete Sahip mesajı olarak düşer (paylaşım rayıyla aynı).
+    imzala(metin) → (imza, ts): API cihaz doğrulamasının jetonuyla verir (2026-10-28); imzasız kayıt köprüde
+    tam yetkili sohbete değil özerk işe gider, sahibin 'ilet'i karşılıksız kalırdı."""
     from ghost import kokpit
     k = oku(kid)
     if not k:
@@ -625,15 +627,16 @@ def ilet(kid, cihaz=None):
             raise MasaHata("dosya bulunamadı")
         metin = "[Masa › %s] %s" % (kirinti, k["ad"])
         kokpit.outbox_yaz(metin, "sahip", medya=kokpit.medya_sakla(d[0], ad=k["ad"], kopyala=False))
-        kokpit.mesaj_kuyrukla("Masa'daki şu kaydı iletiyorum: %s\n%s" % (kirinti, d[0]), cihaz,
-                              yol=d[0], tur=k["tur"], ad=k["ad"], not_="Masa › " + kirinti)
+        ileti = "Masa'daki şu kaydı iletiyorum: %s\n%s" % (kirinti, d[0])
+        kokpit.mesaj_kuyrukla(ileti, cihaz, yol=d[0], tur=k["tur"], ad=k["ad"], not_="Masa › " + kirinti,
+                              imza=imzala(ileti) if imzala else None)
     else:
         govde = (k.get("icerik") or "")[:6000]
         if k["tur"] == "sahne":
             govde = "(Sahne kaydı; `python3 -m ghost.masa oku %d`)" % k["id"]
         metin = "[Masa › %s]\n%s" % (kirinti, govde)
         kokpit.outbox_yaz(metin, "sahip")
-        kokpit.mesaj_kuyrukla(metin, cihaz)
+        kokpit.mesaj_kuyrukla(metin, cihaz, imza=imzala(metin) if imzala else None)
     c = _db()
     try:
         c.execute("UPDATE masa_kart SET gorulme=? WHERE id=?", (_now(), int(kid)))

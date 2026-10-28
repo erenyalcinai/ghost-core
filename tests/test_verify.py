@@ -85,6 +85,21 @@ class TestAyristirma(unittest.TestCase):
         self.assertEqual(k, verify.YANLIS)
         self.assertEqual(g, "birinci satır ikinci satır.")
 
+    def test_karar_satiri_tam_sozcuk_ister(self):
+        """Codex S7 (2026-10-28): 'geçti değil, yanlış' alt dizeyle GEÇTİ sayılıyordu. İlk sözcük karar olmalı,
+        satırda ikinci karar sözcüğü ya da olumsuzlama olmamalı; noktalama/kalın yazı/aksansız yazım serbest."""
+        self.assertEqual(verify.parse("KARAR: geçti değil, yanlış\nGEREKÇE: x")[0], verify.BELIRSIZ)
+        self.assertEqual(verify.parse("KARAR: eksik, geçti sayılmaz")[0], verify.BELIRSIZ)
+        self.assertEqual(verify.parse("KARAR: yanlış değil")[0], verify.BELIRSIZ)
+        self.assertEqual(verify.parse("KARAR: tamam")[0], verify.BELIRSIZ)
+        self.assertEqual(verify.parse("KARAR: sonuç geçti")[0], verify.BELIRSIZ)      # ilk sözcük karar değil
+        self.assertEqual(verify.parse("KARAR: **geçti**.")[0], verify.GECTI)
+        self.assertEqual(verify.parse("KARAR: geçti — kontrol koştu")[0], verify.GECTI)
+        self.assertEqual(verify.parse("KARAR: GEÇTİ")[0], verify.GECTI)
+        self.assertEqual(verify.parse("KARAR: gecti")[0], verify.GECTI)
+        self.assertEqual(verify.parse("KARAR: yanlis")[0], verify.YANLIS)
+        self.assertEqual(verify.parse("KARAR: doğrulanamadı (kontrol koşmadı)")[0], verify.BELIRSIZ)
+
     def test_bicimsiz_cikti_gectiye_dusmez(self):
         # En tehlikeli sessiz hata: denetçi saçmaladı diye iş onaylanmış saymak.
         self.assertEqual(verify.parse("bilmiyorum ki")[0], verify.BELIRSIZ)

@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -172,6 +173,49 @@ class Asama2(unittest.TestCase):
         self.assertEqual(jwt.get_unverified_header(tok)["kid"], "KID123")
         self.v.isle("GET", "/asc/v1/apps", [], None)
         self.assertEqual(self.g.cagri[-1][3]["Authorization"], bas["Authorization"])   # önbellek
+
+    def test_akista_parcaya_bolunen_sir_maskelenir(self):
+        """Codex S6 (2026-10-28): parça başına maskeleme, iki parçaya bölünen sırrı kaçırıyordu."""
+        tok = self.sir["GITHUB_MCP_TOKEN"].encode()
+        for kes in (1, 5, len(tok) // 2, len(tok) - 1):
+            parcalar = [b"data: " + tok[:kes], tok[kes:] + b"\n\n", b"data: 2\n\n"]
+            cikti = b"".join(self.v._akis_maskele(iter(parcalar)))
+            self.assertNotIn(tok, cikti, kes)
+            self.assertEqual(cikti, b"data: ***\n\ndata: 2\n\n", kes)
+        # üç parçaya bölünmüş ve iki farklı sır
+        el = self.sir["ELEVENLABS_API_KEY"].encode()
+        parcalar = [b"a=" + tok[:4], tok[4:9], tok[9:] + b" b=" + el[:3], el[3:] + b" son"]
+        cikti = b"".join(self.v._akis_maskele(iter(parcalar)))
+        self.assertEqual(cikti, b"a=*** b=*** son")
+        # SSE olayı bir sonraki parçayı BEKLEMEZ: satır sonuna kadar olan kısım hemen verilir
+        uret = self.v._akis_maskele(iter([b"data: 1\n\n", b"data: kuyruk"]))
+        self.assertEqual(next(uret), b"data: 1\n\n")
+        self.assertEqual(b"".join(uret), b"data: kuyruk")
+        # sırsız vekil: kuyruk sıfır, çıktı parça parça aynen
+        self.assertEqual(list(srv.Vekil({}, gonder=self.g)._akis_maskele(iter([b"ab", b"cd"]))), [b"ab", b"cd"])
+
+    def test_sunucu_eszamanlilik_tavani_ve_okuma_zaman_asimi(self):
+        """Codex S9 (2026-10-28): sınırsız iş parçacığı ve okuma zaman aşımı yoktu."""
+        import socket
+        s = srv.Sunucu(("127.0.0.1", 0), srv.Vekil(self.sir, gonder=self.g, dizin=self.d), kimlik=TEMIZ, tavan=1)
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+        eski = srv._Isleyici.timeout
+        srv._Isleyici.timeout = 1.0
+        try:
+            taban = "http://127.0.0.1:%d" % s.server_address[1]
+            bos = socket.create_connection(("127.0.0.1", s.server_address[1]))      # başlık göndermeyen bağlantı
+            time.sleep(0.2)
+            with self.assertRaises(urllib.error.HTTPError) as c:
+                urllib.request.urlopen(taban + "/_durum", timeout=5)
+            self.assertEqual(c.exception.code, 503)                                  # tavan dolu
+            bos.settimeout(5)
+            self.assertEqual(bos.recv(10), b"")                                       # okuma zaman aşımı: sunucu kapattı
+            bos.close()
+            time.sleep(0.2)
+            self.assertEqual(urllib.request.urlopen(taban + "/_durum", timeout=5).status, 200)   # yer açıldı
+        finally:
+            srv._Isleyici.timeout = eski
+            s.shutdown()
 
     def test_jwt_ucu_yalniz_apns_ve_akis(self):
         def akan(host, yontem, yol, bas, govde):

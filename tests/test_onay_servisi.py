@@ -135,7 +135,32 @@ class Cekirdek(unittest.TestCase):
         self.assertFalse(self.isle(peer=KOPRU, op="inbox_dogrula", metin="/unfreeze", imza="0" * 64, ts=ts)["gecerli"])
         r = self._kokpit(did, "11" * 32, "POST", "/v1/mesaj", json.dumps({"metin": "/unfreeze"}).encode())
         self.assertIsNone(r["cihaz"])                                   # yanlış cihaz anahtarı: jeton yok
-        self.assertFalse(self.isle(op="inbox_imzala", metin="/unfreeze")["ok"])   # ayrı imzalama ucu YOK
+        self.assertFalse(self.isle(op="inbox_imzala", metin="/unfreeze")["ok"])   # jetonsuz imzalama YOK
+
+    def test_paylasim_inbox_imzasi_yalniz_cihaz_jetonuyla_tek_kullanimlik(self):
+        """2026-10-28 (Codex sonrası): /v1/paylas ve Masa 'ilet' metni gövdede yok → op_kokpit geçerli cihaz
+        imzasında tek kullanımlık jeton verir, ghost-api metni kurup imzalatır. Jeton: tek kullanım, 60 sn,
+        yalnız cihaz imzası doğrulanınca; GET ya da bozuk imza jeton vermez."""
+        did, key = self._cihaz()
+        ham = b"%PDF-1.4 x"
+        r = self._kokpit(did, key, "POST", "/v1/paylas?ad=a.pdf", ham)
+        jeton = r["cihaz"]["inbox_jeton"]
+        self.assertTrue(jeton and "inbox_imza" not in r["cihaz"])
+        metin = "[Paylaşım: belge] /ops/kokpit_paylasim/x-a.pdf (0 KB)"
+        i = self.isle(op="inbox_imzala", jeton=jeton, metin=metin)
+        self.assertTrue(i["ok"])
+        self.assertTrue(self.isle(peer=KOPRU, op="inbox_dogrula", metin=metin, imza=i["imza"], ts=i["ts"])["gecerli"])
+        self.assertFalse(self.isle(op="inbox_imzala", jeton=jeton, metin=metin)["ok"])            # tek kullanımlık
+        self.assertFalse(self.isle(op="inbox_imzala", jeton="0" * 32, metin=metin)["ok"])         # uydurma jeton
+        self.assertFalse(self.isle(op="inbox_imzala", jeton="", metin=metin)["ok"])
+        # bayat jeton
+        r = self._kokpit(did, key, "POST", "/v1/paylas", b"y")
+        j2 = r["cihaz"]["inbox_jeton"]
+        self.o.inbox_jetonlar[j2] = (did, time.time() - srv.JETON_OMUR_SN - 1)
+        self.assertFalse(self.isle(op="inbox_imzala", jeton=j2, metin="m")["ok"])
+        # GET ve bozuk imza jeton vermez
+        self.assertNotIn("inbox_jeton", self._kokpit(did, key, "GET", "/v1/outbox")["cihaz"])
+        self.assertIsNone(self._kokpit(did, "11" * 32, "POST", "/v1/paylas", b"z")["cihaz"])
 
     def test_kirpilmis_onizleme_ozetle_tuketilemez(self):
         uzun = "x" * 9000

@@ -42,14 +42,32 @@ def _audit(detay):
 
 def calistir(cmd, bekleme=180, zaman=120, cwd=None, sessiz=True):
     """Komutu kuyruğa koy, sonucu bekle. (metin, bitti_mi) döner."""
-    jid = int(time.time() * 10) % 2147483647
+    # 2026-10-28 (Codex bulgu 4): kimlik 100 ms'lik zamandan geliyordu, aynı dilimdeki iki çağrı aynı dosyayı
+    # 'w' ile açıp birbirini eziyordu (veri kaybı). Şimdi: ms çözünürlük, dosya önce geçici ada yazılır,
+    # hedefe `link` ile atomik ve TEK SAHİPLİ taşınır (hedef varsa kimlik bir artar). İşçi yalnız
+    # [0-9]*.json bekler, yarım yazılmış dosya hiç görmez.
+    os.makedirs(QUEUE, exist_ok=True)
+    jid = int(time.time() * 1000) % 2147483647
     job = {"id": jid, "kind": "shell", "cmd": cmd, "timeout": zaman,
            "sessiz": sessiz, "prompt": cmd, "chat_id": "",
            "ts": time.strftime("%F %T"), "reset": False, "rc": False}
     if cwd:
         job["cwd"] = cwd
-    with open(os.path.join(QUEUE, "%d.json" % jid), "w", encoding="utf-8") as f:
-        json.dump(job, f, ensure_ascii=False)
+    gecici = os.path.join(QUEUE, ".%d-%d.json.tmp" % (jid, os.getpid()))
+    while True:
+        job["id"] = jid
+        with open(gecici, "w", encoding="utf-8") as f:
+            json.dump(job, f, ensure_ascii=False)
+        try:
+            os.link(gecici, os.path.join(QUEUE, "%d.json" % jid))
+            break
+        except FileExistsError:
+            jid += 1
+        finally:
+            try:
+                os.unlink(gecici)
+            except OSError:
+                pass
     _audit("kuyrukta #%d: %s" % (jid, cmd))
 
     sonuc = os.path.join(QUEUE, "done", "%d.sonuc.md" % jid)

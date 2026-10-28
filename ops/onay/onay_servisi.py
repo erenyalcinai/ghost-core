@@ -41,6 +41,7 @@ import urllib.request
 import uuid
 
 SURUM = 2
+JETON_OMUR_SN = 60      # op_kokpit'in verdiği inbox imza jetonu (paylaşım/ilet) bu kadar yaşar, tek kullanımlık
 DURUM_DIZIN = "/var/lib/ghost-onay"
 SOKET = "/run/ghost-onay/onay.sock"
 ONAY_OMUR_SN = 24 * 3600
@@ -131,6 +132,7 @@ class Onay:
         self._telegram = telegram or (lambda m: _telegram(self.ayar.get("telegram_token"),
                                                           self.ayar.get("sahip_id"), m))
         self.inbox_key = self._inbox_key()
+        self.inbox_jetonlar = {}      # jeton → (cihaz, ts); yalnız geçerli cihaz imzasında üretilir (op_kokpit)
 
     def _inbox_key(self):
         """Kokpit inbox imza anahtarı — /var/lib/ghost-onay altında (ghost/model okuyamaz). İlk koşuda üretilir."""
@@ -416,6 +418,19 @@ class Onay:
             neden = "tekrar-get"
         self.db.execute("UPDATE cihazlar SET last_seen=? WHERE id=?", (_now(), did))
         cevap = {"ok": True, "cihaz": {"id": row[0], "ad": row[1]}, "neden": neden, "onay": None, "karar": None}
+        if method == "POST" and neden == "ok":
+            # 2026-10-28 (Codex sonrası bulgu): Kokpit paylaşımı (/v1/paylas) ve Masa "ilet" gelen kutusu kaydının
+            # METNİ istek gövdesinde yok (sunucu dosya yolu/kırıntı ekler) → imzasız kalıyor, köprü özerk işe
+            # yolluyordu; sahibin belgeli sorusu cevapsız kaldı. Jeton: geçerli cihaz imzasında bir kez verilir,
+            # ghost-api metni kurup op_inbox_imzala ile imzalatır. Model geçerli cihaz imzası üretemediği için
+            # jeton da alamaz; tek kullanımlık, JETON_OMUR_SN.
+            simdi = time.time()
+            for j, (_c, jts) in list(self.inbox_jetonlar.items()):
+                if simdi - jts > JETON_OMUR_SN:
+                    del self.inbox_jetonlar[j]
+            jeton = secrets.token_hex(16)
+            self.inbox_jetonlar[jeton] = (row[0], simdi)
+            cevap["cihaz"]["inbox_jeton"] = jeton
         if method == "POST" and neden == "ok" and govde is not None:
             yol = urllib.parse.urlparse(path).path
             try:
@@ -442,6 +457,17 @@ class Onay:
                         self._gunluk("karar", peer, "%s %s" % (pid, did))
                         cevap["karar"] = pid
         return cevap
+
+    def op_inbox_imzala(self, i, peer):
+        """Paylaşım/Masa-ilet kaydını imzala — yalnız op_kokpit'in aynı cihaz isteğinde verdiği jetonla (tek
+        kullanımlık, JETON_OMUR_SN). Jetonsuz/bayat çağrı imza alamaz: imza üretimi hâlâ cihaz imzasına bağlı."""
+        jeton = str(i.get("jeton") or "")
+        kayit = self.inbox_jetonlar.pop(jeton, None) if jeton else None
+        if not kayit or time.time() - kayit[1] > JETON_OMUR_SN:
+            self._gunluk("red-inbox-jeton", peer)
+            return {"ok": False, "hata": "jeton yok ya da süresi geçti"}
+        ts = int(time.time())
+        return {"ok": True, "imza": self._inbox_imza(str(i.get("metin") or "").strip(), ts), "ts": ts}
 
     def op_karar_tuket(self, i, peer):
         """Kokpit'ten gelen 'onay' kararı imzalı istekle kaydedilmiş mi? (tek kullanımlık)"""

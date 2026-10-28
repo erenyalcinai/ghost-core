@@ -408,7 +408,7 @@ class H(BaseHTTPRequestHandler):
                 if governance.is_frozen():
                     return self._json(423, {"hata": "FREEZE aktif"})
                 channels.son_kanal_ayarla("kokpit")
-                sonuc = masa.ilet(kid, cihaz["id"])
+                sonuc = masa.ilet(kid, cihaz["id"], imzala=lambda m: _inbox_imza(cihaz, m))
             else:
                 return self._json(400, {"hata": "eylem duzenle|adlandir|tasi|sirala|dolap|geri|sil|ilet"})
             governance.audit("api", "masa", governance.READ, "%s #%d" % (eylem, kid))
@@ -587,6 +587,16 @@ def _gunluk_yaz(cihaz, satirlar):
         pass
 
 
+def _inbox_imza(cihaz, metin):
+    """Paylaşım/ilet gelen kutusu kaydının imzası (2026-10-28): cihaz doğrulamasında alınan jetonla onay
+    servisi imzalar; imzasız kayıt köprüde özerk işe düşer (sahibin belgeli sorusu cevapsız kalıyordu)."""
+    from ghost import onay as _onay
+    try:
+        return _onay.inbox_imzala((cihaz or {}).get("inbox_jeton"), metin)
+    except Exception:
+        return None
+
+
 def _paylas_kaydet(cihaz, veri, ham, q):
     """Share Extension: metin/URL JSON ile, görsel ham gövdeyle gelir.
     Görsel ops/kokpit_paylasim/'a yazılır; köprüye "[Paylaşım] …" mesajı düşer."""
@@ -618,7 +628,7 @@ def _paylas_kaydet(cihaz, veri, ham, q):
         except (TypeError, ValueError):
             grup, sira, toplam = "", 1, 1
         kokpit.mesaj_kuyrukla(metin, cihaz["id"], yol=yol, tur=tur, ad=ad, not_=not_,
-                              grup=grup or None, sira=sira, toplam=toplam)
+                              grup=grup or None, sira=sira, toplam=toplam, imza=_inbox_imza(cihaz, metin))
         governance.audit("api", "paylasim", governance.READ, metin[:120])
         return metin, None
     else:
@@ -629,7 +639,7 @@ def _paylas_kaydet(cihaz, veri, ham, q):
         not_ = (veri.get("not") or "").strip()[:500]
         metin = "[Paylaşım: %s] %s%s" % (tur, icerik[:4000], ("\n" + not_) if not_ else "")
     kokpit.outbox_yaz(metin, "sahip")
-    kokpit.mesaj_kuyrukla(metin, cihaz["id"])
+    kokpit.mesaj_kuyrukla(metin, cihaz["id"], imza=_inbox_imza(cihaz, metin))
     governance.audit("api", "paylasim", governance.READ, metin[:120])
     return metin, None
 

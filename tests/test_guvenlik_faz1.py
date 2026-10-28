@@ -114,8 +114,11 @@ class Madde13Ozerk(unittest.TestCase):
     def test_ozerk_write_rapor_serbest(self):
         self.assertIsNone(karar("Write", file_path="/home/ghost/jarvis/dossier/rapor.md", content="# x"))
         self.assertIsNone(karar("Write", file_path="/tmp/not.py", content="print(1)"))
-        self.assertIsNone(karar(
-            "Write", file_path="/home/ghost/.claude/projects/-home-ghost-jarvis/memory/x.md", content="y"))
+        # 5. tur (2026-10-28 akşam, injection ekseni N1): hafıza dizini her oturuma kendiliğinden girer → özerkte KAPALI;
+        # rapor dossier/intel'e. (Faz 1 madde 13 "memory serbest" varsayımı bilinçli değişti.)
+        self.assertIn("kalıcı bağlama", karar(
+            "Write", file_path="/home/ghost/.claude/projects/-home-ghost-jarvis/memory/x.md", content="y") or "")
+        self.assertIsNone(karar("Write", file_path="/home/ghost/jarvis/intel/x.md", content="y"))
 
     def test_gozetimli_kipte_serbest(self):
         self.env.stop()
