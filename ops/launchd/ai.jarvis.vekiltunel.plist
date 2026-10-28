@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Sır vekili Mac'e (2026-10-28, Faz 2): Mac'teki betikler VPS vekilini 127.0.0.1:8797'den kullanır; anahtarlar Mac'te
+     de durmaz. Ana tünelden (ai.jarvis.tunnel, -R) BAĞIMSIZ — bu düşse ana hat etkilenmez. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.jarvis.vekiltunel</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/ssh</string>
+        <string>-i</string>
+        <string>/Users/sahip/.ssh/ghost_runtime</string>
+        <string>-N</string>
+        <string>-o</string>
+        <string>BatchMode=yes</string>
+        <string>-o</string>
+        <string>ExitOnForwardFailure=yes</string>
+        <string>-o</string>
+        <string>ServerAliveInterval=15</string>
+        <string>-o</string>
+        <string>ServerAliveCountMax=3</string>
+        <string>-o</string>
+        <string>ControlMaster=no</string>
+        <string>-o</string>
+        <string>ControlPath=none</string>
+        <string>-L</string>
+        <string>127.0.0.1:8797:127.0.0.1:8797</string>
+        <string>ghost@203.0.113.10</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardErrorPath</key>
+    <string>/Users/sahip/.ghost/vekiltunel.log</string>
+</dict>
+</plist>

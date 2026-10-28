@@ -78,6 +78,42 @@ def _yakalananlar(komut):
     return YAKALAMA.sub(degistir, komut), adlar
 
 
+def _yalniz_anahtar_adi(parca):
+    """`cut -s -d= -f1 <dosya...>`: yalnız '=' içeren satırların '=' ÖNCESİ (anahtar adı) basılır; -s '=' olmayan
+    satırı (düz bir sır olabilir) hiç basmaz. Değer çıkmaz → sır okuma sayılmaz (Sahip 2026-10-28: "güvenliği
+    artırmak kendi işimizi zorlaştırmak değil" — adlara bakmak her seferinde onay istiyordu).
+    Katı: yalnız -s/-d=/-f1 (ve uzun eşleri); başka her seçenek, yönlendirme ya da açılım → istisna YOK."""
+    import shlex
+    parca = re.sub(r"\$\{?HOME\}?(?=/)", "~", parca)          # yalnız $HOME/… açılımı serbest
+    if re.search(r"[`$<>\\]", parca):
+        return False
+    try:
+        t = shlex.split(parca)
+    except ValueError:
+        return False
+    if not t or t[0] != "cut":
+        return False
+    s_, d_, f_, dosya, i = False, False, False, 0, 1
+    while i < len(t):
+        a = t[i]
+        if a in ("-s", "--only-delimited"):
+            s_ = True
+        elif a == "-d" and i + 1 < len(t) and t[i + 1] == "=":
+            d_, i = True, i + 1
+        elif a in ("-d=", "--delimiter=="):
+            d_ = True
+        elif a == "-f" and i + 1 < len(t) and t[i + 1] == "1":
+            f_, i = True, i + 1
+        elif a in ("-f1", "--fields=1"):
+            f_ = True
+        elif a.startswith("-"):
+            return False
+        else:
+            dosya += 1
+        i += 1
+    return s_ and d_ and f_ and dosya > 0
+
+
 def _sir_okuma(komut):
     komut, _ = _yakalananlar(komut)
     if PY_OKUMA.search(komut):
@@ -94,6 +130,8 @@ def _sir_okuma(komut):
             continue
         if re.match(r"^grep\s+(-[A-Za-z]*[cqlL][A-Za-z]*\s+)", parca) and not re.search(r"\s-[A-Za-z]*[oA-CN]", parca):
             continue                                   # grep -c/-q/-l: değer basmaz (anahtar var mı?)
+        if _yalniz_anahtar_adi(parca):
+            continue                                   # cut -s -d= -f1: yalnız ANAHTAR ADLARI (Sahip 2026-10-28: sürtünme)
         if OKUYAN.match(parca):
             return True
         if re.search(r"<\s*\S*(secrets\.env|\.secrets/|\.p8)", parca):          # cmd < secrets.env

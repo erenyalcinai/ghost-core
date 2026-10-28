@@ -47,12 +47,16 @@ def sir_ya_da_yer_tutucu(ad, env=None):
     return _env(env).get(ad, "")
 
 
+MAC_TUNEL_ISARETI = os.path.expanduser("~/.ghost/vekil_tunel")   # Mac: ai.jarvis.vekiltunel kurulu
+
+
 def kurulu():
+    """VPS: ghost-vekil kullanıcısı var. Mac: vekil tüneli kurulu (127.0.0.1:8797 → VPS vekili, ssh -L)."""
     try:
         pwd.getpwnam(KULLANICI)
         return True
     except KeyError:
-        return False
+        return sys.platform == "darwin" and os.path.exists(MAC_TUNEL_ISARETI)
 
 
 _ERISIM = {}

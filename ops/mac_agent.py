@@ -45,6 +45,57 @@ def log(m):
         f.write(time.strftime("%F %T ") + m + "\n")
 
 
+# Mac tarafı sır koruması (Faz 2 / Mac turu, 2026-10-28): VPS tamamen ele geçirilip kapı atlatılsa bile bu kod
+# Mac'te koşar. YALNIZ değer basan dar küme — Ghost'un günlük işinde hiçbiri yok (Sahip: güvenlik işimizi
+# zorlaştırmasın). Ret Mac günlüğüne + Telegram'a (sır vekili üzerinden) düşer.
+import re as _re  # noqa: E402
+SIR_KOMUT = _re.compile(
+    r"\bgh\s+auth\s+(token|status\b[^;&|\n]*(-t\b|--show-token))|"
+    r"\bsecurity\s+(find-(generic|internet)-password\b(?![^;&|\n]*Claude Code-credentials)[^;&|\n]*\s-[a-z]*[wg]|"
+    r"dump-keychain|export)\b|"     # Claude girişi (kota göstergesi, ghost/kota.py) bilinçli serbest
+    r"\.ssh/(ghost_[a-z_]+|id_[a-z0-9]+)(?!\.pub)\b(?![\w.-])|"
+    r"jarvis/(secrets\.env|\.env)\b(?!\S*\.example)")
+
+
+def _cut_yalniz_ad(m):
+    p = m.group(0).split()
+    ok = "-s" in p and _re.search(r"-d\s*['\"]?=", m.group(0)) and _re.search(r"(^|\s)-f\s*1(\s|$)", m.group(0))
+    return " " if ok else m.group(0)
+
+
+def sir_komutu(cmd):
+    """Değer basabilecek sır erişimi mi? Serbest: anahtar ADI okumak (cut -s -d= -f1) ve ssh/scp'nin anahtarı -i ile
+    KULLANMASI (içeriği basmaz)."""
+    c = cmd or ""
+    if not SIR_KOMUT.search(c):
+        return False
+    c = _re.sub(r"\b(ssh|scp)\b[^;&|\n]*?-i\s+\S*\.ssh/ghost_\w+", " ", c)
+    c = _re.sub(r"\bcut\s+[^;&|\n]*", _cut_yalniz_ad, c)
+    return bool(SIR_KOMUT.search(c))
+
+
+def _uyar(metin):
+    try:
+        import urllib.parse
+        import urllib.request
+        sys.path.insert(0, BASE)
+        from ghost import vekil
+        sahip = ""
+        for ad in (".env", "secrets.env"):
+            try:
+                for satir in open(os.path.join(BASE, ad), encoding="utf-8"):
+                    if satir.startswith("TELEGRAM_OWNER_ID="):
+                        sahip = satir.split("=", 1)[1].strip()
+            except OSError:
+                pass
+        if sahip and vekil.aktif():
+            urllib.request.urlopen(urllib.request.Request(
+                vekil.url("telegram", "/sendMessage"),
+                data=urllib.parse.urlencode({"chat_id": sahip, "text": metin[:3500]}).encode()), timeout=10).read()
+    except Exception:
+        pass
+
+
 def token():
     try:
         return open(TOKEN_DOSYA, encoding="utf-8").read().strip()
@@ -105,6 +156,14 @@ class Uc(BaseHTTPRequestHandler):
             cmd = (v.get("cmd") or "").strip()
             if not cmd:
                 return self._yaz(400, {"hata": "cmd boş"})
+            if sir_komutu(cmd):
+                log("SIR RED: " + cmd[:200])
+                _uyar("🛡 Mac ajanı bir sır erişimini REDDETTİ (VPS'ten gelen komut):\n%s\n\nSen değilsen /freeze."
+                      % cmd[:600])
+                return self._yaz(200, {"rc": 126, "sn": 0, "cikti": (
+                    "Mac ajanı: bu komut bir sırrın DEĞERİNİ basabilir (gh auth token / Anahtar Zinciri parolası / ssh özel "
+                    "anahtarı / Mac sır dosyası) — reddedildi, sahibe bildirildi. Anahtarı KULLANMAK serbest (gh api, ssh -i, "
+                    "vekil 127.0.0.1:8797); adlar için cut -s -d= -f1.")})
             sure = min(int(v.get("timeout") or 120), AZAMI_SURE)
             t0 = time.time()
             try:
