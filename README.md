@@ -316,12 +316,18 @@ not a general one.
     approval.
   - Secrets and personal data cannot be sent to unknown hosts; secret values cannot be committed.
   - Dependency versions are pinned; the owner's accounts use 2FA.
+- **Structural separation where it costs nothing.** API keys live in a separate system user behind a
+  local secret proxy (`ops/vekil/`): the agent calls every endpoint as before but never holds the key,
+  and each key can only reach its own fixed host. Approvals, cockpit device keys and the mail gate live
+  in another separate user (`ops/onay/`); the agent can ask, not write. Outbound mail goes through the
+  proxy, which sends only after the approval service confirms the owner's real approval was just used.
 - **Defence in depth, not a cage.** The root-owned tool guard, the restricted root key and the
   emergency stop protect against a *manipulated* session — an injection that got partly through —
   not against a hostile model. They are seatbelts.
-- **Deliberately absent:** full OS isolation of the agent, separation of the agent from its own
-  credentials, and narrow per-task permissions on the owner's Mac. Under this threat model they
-  would cost daily usefulness without matching gain.
+- **Deliberately absent:** full OS isolation of the agent and narrow per-task permissions on the
+  owner's Mac. Under this threat model they would cost daily usefulness without matching gain.
+  A few credentials stay with the agent on purpose (its own model login, tools that read a key file
+  directly); the guard still watches those.
 - **If your threat model differs** — a shared machine, an untrusted operator, a model you do not
   trust — this design is not sufficient as is. Start with OS-level isolation.
 
@@ -333,9 +339,9 @@ not a general one.
   people is a rewrite, not a config change.
 - **Not sandboxed for untrusted code.** `ghost/sandbox.py` limits time and process group
   and scrubs the environment, but there is no filesystem or network jail. Everything the
-  agent runs, it runs as the owner's user. Treat it as such. What stands between untrusted
-  text and the secrets is a root-owned tool guard (`ops/guvenlik_kapisi.py`, QUICKSTART 4b):
-  heuristic, it stops plain one-step exfiltration, not a determined attacker.
+  agent runs, it runs as the owner's user. Treat it as such. Most API keys are not in that user at
+  all (secret proxy, above); for the rest, a root-owned tool guard (`ops/guvenlik_kapisi.py`,
+  QUICKSTART 4b) is heuristic — it stops plain one-step exfiltration, not a determined attacker.
   Full e-mails and external pages are read through `ops/karantina.py` (a tool-less, secret-less
   sub-model); the main session only sees its answer and a flag if the text tries to instruct it.
 - **Not finished.** Automated inputs (monitors, scheduler, goals, webhooks) flow through the
