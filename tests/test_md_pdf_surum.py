@@ -13,9 +13,15 @@ from ghost import surum  # noqa: E402
 class TestMdPdf(unittest.TestCase):
     def test_html_tablo_ve_kacis(self):
         h = md_pdf.html_uret("# Başlık\n\n| a | b |\n|---|---|\n| 1 | <x> |\n", "Rapor <1>")
+        self.assertIn("<title>Rapor &lt;1&gt;</title>", h)
+        try:
+            import markdown  # noqa: F401
+        except ImportError:                          # CI'da paket yok → kaçışlı <pre> yedeği
+            self.assertIn("<pre>", h)
+            self.assertIn("&lt;x&gt;", h)
+            return
         self.assertIn("<table>", h)
         self.assertIn("<td><x></td>", h)            # markdown ham HTML geçirir (Masa içeriği kendi metnimiz)
-        self.assertIn("<title>Rapor &lt;1&gt;</title>", h)
 
     def test_testte_pdf_yerine_html(self):
         veri, mime = md_pdf.pdf_uret("merhaba", "x")
