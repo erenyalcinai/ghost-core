@@ -32,7 +32,6 @@ BRIDGE_VPS = "ghost-bridge"
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPS = os.path.join(BASE, "ops")
 JOBS_DIR = os.path.join(OPS, "jobs")
-LOG_FILE = os.path.join(OPS, "selfcheck.log")
 STUCK_SEC = 45 * 60
 KEEP_DAYS = 7           # iş/rc/inbox dosyaları bu yaştan sonra silinir
 LOG_MAX = 5 * 1024 * 1024  # log bu boyutu aşarsa son 2000 satıra kırpılır
@@ -53,7 +52,7 @@ if os.path.exists(_ENV_PATH):
 
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
-from ghost import notify, vekil  # noqa: E402  sır vekili (Faz 2); Telegram gönderimi tek yerde (Faz 2.9)
+from ghost import gunluk, notify, vekil  # noqa: E402  sır vekili (Faz 2); Telegram gönderimi tek yerde (Faz 2.9)
 _env = dict(os.environ)
 _env["PATH"] = _env.get("PATH", "") + ":/usr/local/bin:/opt/homebrew/bin:/usr/bin"
 # secrets.env de env'e (beyin probu CLAUDE_CODE_OAUTH_TOKEN'a muhtaç — yoksa
@@ -69,8 +68,7 @@ if os.path.exists(_secrets):
 
 
 def log(msg):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(time.strftime("%F %T ") + msg + "\n")
+    gunluk.yaz("selfcheck", msg)   # journald: journalctl -t ghost-selfcheck (Faz 2.9)
 
 
 def owner_id():
@@ -298,7 +296,10 @@ def brain_reachable():
 
 # Bu makinede damga bırakan nöbetçiler yoklanır; hiç atmamış isim atlanır
 # (heartbeat.stale kuralı) → aynı dosya Mac'te ve VPS'te sahte alarm vermez.
-WATCHED = ["uptime", "biz_watch", "marka_deploy", "defter", "port_watch"]
+WATCHED = ["uptime", "biz_watch", "marka_deploy", "defter", "port_watch",
+           # Faz 2.10 (2026-10-30): tüm nöbetçiler damga bırakır; hiç atmamış isim atlanır
+           "tunnel_watch", "giris", "knowsync", "acik_nabiz", "chatgpt_export", "gmail_is_nabzi",
+           "sms_watch", "iphone_watch", "listen", "brief", "yedek", "weekly"]
 
 
 def test_kapisi_yerinde():
@@ -918,6 +919,20 @@ def main():
                 log("tek gün kartı gönderildi (%d karakter)" % len(_m))
         except Exception as e:
             log("tek gün kartı hata: %r" % e)
+        try:  # Uzun ufuklu iş bekçisi (Faz 2.6, 2026-10-30): rapor vermeyen adım işi → soru/tamam; FREEZE → iptal
+            from ghost import uzun_is
+            _u = uzun_is.tick()
+            if _u:
+                log("uzun iş: %s" % ", ".join(_u))
+        except Exception as e:
+            log("uzun iş hata: %r" % e)
+        try:  # Gece vardiyası (Faz 2.1, 2026-10-30): pencere içinde hedef kuyrukla, pencere bitince sabah kartına rapor
+            from ghost import vardiya
+            _v = vardiya.tick()
+            if _v:
+                log("vardiya: %s" % ", ".join(_v))
+        except Exception as e:
+            log("vardiya hata: %r" % e)
         try:  # Haftalık sentez dosyası (dossier/sentez/*.md, Faz 1.11) → Masa "Raporlar" kartı; özerk iş Masa'ya yazamaz, burası yazar
             import glob as _glob
             from ghost import masa as _masa, durum as _durum

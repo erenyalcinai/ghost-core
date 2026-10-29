@@ -93,12 +93,19 @@ class HeartbeatTest(unittest.TestCase):
                          "susturma dirilişte temizlenmeliydi")
 
     PERIYOT = {"uptime": 10 * 60, "selfcheck": 15 * 60, "biz_watch": 3600,
-               "marka_deploy": 6 * 3600}
+               "marka_deploy": 6 * 3600,
+               "port_watch": 10 * 60, "tunnel_watch": 60, "giris": 5 * 60, "knowsync": 15 * 60, "acik_nabiz": 30 * 60,
+               "chatgpt_export": 30 * 60, "gmail_is_nabzi": 4 * 3600, "sms_watch": 6 * 3600,
+               "iphone_watch": 6 * 3600, "listen": 6 * 3600, "brief": 24 * 3600, "yedek": 24 * 3600,
+               "weekly": 7 * 86400}
 
     def test_saglikli_nobetci_asla_alarm_vermez(self):
         """Eşik periyottan küçük/yakınsa, sorunsuz koşan nöbetçi bağırır."""
         for ad, (_etiket, esik) in heartbeat.WATCHERS.items():
-            self.assertGreater(esik, self.PERIYOT[ad] * 1.2, ad)
+            if self.PERIYOT[ad] <= 86400:      # haftalık işte ×1.2 = 1,4 gün körlük; onu "+pay" kuralı korur
+                self.assertGreater(esik, self.PERIYOT[ad] * 1.2, ad)
+            else:
+                self.assertGreater(esik, self.PERIYOT[ad], ad)
 
     def test_sik_kosanlar_bir_tur_kacirmayi_tolere_eder(self):
         """≤1 saatlik nöbetçilerde tek tur kaçırmak (ağ/yük) alarm olmamalı."""

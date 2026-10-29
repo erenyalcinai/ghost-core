@@ -23,13 +23,13 @@ launchd yarım saatte bir çalıştırır (ops/launchd/ai.jarvis.iphone.plist).
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.request
 
 HOME = os.path.expanduser("~")
 BASE = os.path.join(HOME, "jarvis")
 OPS = os.path.join(BASE, "ops")
-LOG_FILE = os.path.join(OPS, "iphone_report.log")
 IOS_BIN = os.path.join(HOME, "ghost-ios", "bin", "ios")
 UDID = "00008110-000000000000000A"
 # 8101: WDA rölesi (ai.jarvis.wdarelay, ops/wda_relay.py) — telefonun Wi-Fi'daki
@@ -59,9 +59,12 @@ SSH = ["ssh", "-i", SSH_KEY, "-o", "ConnectTimeout=10",
        "-o", "ControlPersist=120", VPS]
 
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ghost import gunluk  # noqa: E402  günlük tek yer (Faz 2.9 journald)
+
+
 def log(msg):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(time.strftime("%F %T ") + msg + "\n")
+    gunluk.yaz("iphone_report", msg)   # journald: journalctl -t ghost-iphone_report (Faz 2.9)
 
 
 def cihaz_bagli():

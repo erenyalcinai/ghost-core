@@ -39,7 +39,6 @@ import time
 
 OPS = os.path.dirname(os.path.abspath(__file__))
 BASE = os.path.dirname(OPS)
-LOG_FILE = os.path.join(OPS, "tunnel_watch.log")
 STATE_FILE = os.path.join(OPS, "tunnel_watch_state.json")
 QUEUE = os.path.join(OPS, "mac-queue")
 
@@ -51,9 +50,13 @@ MAX_KILL = 3         # bir turda en fazla bu kadar oturum düşür
 SETTLE = 4.0         # öldürdükten sonra tünelin yeniden kurulmasını bekle
 
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ghost import gunluk  # noqa: E402  günlük tek yer (Faz 2.9 journald)
+import heartbeat  # noqa: E402  Nabız damgası (Faz 2.10; sys.path[0] = ops)
+
+
 def log(msg):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write("%s %s\n" % (time.strftime("%F %T"), msg))
+    gunluk.yaz("tunnel_watch", msg)   # journald: journalctl -t ghost-tunnel_watch (Faz 2.9)
 
 
 EREN_ESIK = 3        # bu kadar ARDIŞIK "düşürüldü ama ray dönmedi" turu → sahibe (6 sa soğuma)
@@ -277,4 +280,6 @@ def _alarm_kapat():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    heartbeat.beat("tunnel_watch")      # Nabız damgası (Faz 2.10)
+    sys.exit(_rc)

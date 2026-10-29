@@ -34,13 +34,12 @@ OPS = os.path.dirname(os.path.abspath(__file__))
 BASE = os.path.dirname(OPS)
 sys.path.insert(0, OPS)
 
-from ghost import dis_veri  # noqa: E402
+from ghost import dis_veri, gunluk  # noqa: E402
 
 MODEL = os.environ.get("JARVIS_KARANTINA_MODEL", "sonnet")
 METIN_TAVAN = 40000          # modele giden ham metin tavanı (karakter)
 WEB_TAVAN = 3 * 1024 * 1024  # indirme tavanı (bayt)
 SPOOL = os.path.join(OPS, "email_spool.jsonl")
-GUNLUK = os.path.join(OPS, "karantina.log")
 
 
 # ---------------------------------------------------------------------------- kaynaklar (deterministik)
@@ -338,9 +337,8 @@ def _gunluk(kayit):
     try:
         import time
         kayit["ts"] = time.strftime("%F %T")
-        with open(GUNLUK, "a", encoding="utf-8") as f:
-            f.write(json.dumps(kayit, ensure_ascii=False) + "\n")
-    except OSError:
+        gunluk.yaz("karantina", json.dumps(kayit, ensure_ascii=False))   # journalctl -t ghost-karantina (Faz 2.9)
+    except Exception:
         pass
 
 

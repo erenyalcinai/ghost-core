@@ -47,7 +47,6 @@ OTO_KAPAT = re.compile(r"python3?\s+-m\s+http\.server|SimpleHTTPServer")
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPS = os.path.join(BASE, "ops")
 STATE_FILE = os.path.join(OPS, "port_state.json")
-LOG_FILE = os.path.join(OPS, "port_watch.log")
 
 ENV = {}
 with (open(os.path.join(BASE, ".env"), encoding="utf-8") if os.path.exists(os.path.join(BASE, ".env")) else open(os.devnull)) as f:
@@ -57,12 +56,11 @@ with (open(os.path.join(BASE, ".env"), encoding="utf-8") if os.path.exists(os.pa
             k, v = line.split("=", 1)
             ENV[k] = v.strip()
 
-from ghost import durum, notify  # noqa: E402  durum tablosu (Faz 1.9); Telegram tek yerde (Faz 2.9)
+from ghost import durum, gunluk, notify  # noqa: E402  durum tablosu (Faz 1.9); Telegram tek yerde (Faz 2.9)
 
 
 def log(msg):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(time.strftime("%F %T ") + msg + "\n")
+    gunluk.yaz("port_watch", msg)   # journald: journalctl -t ghost-port_watch (Faz 2.9)
 
 
 def owner_id():

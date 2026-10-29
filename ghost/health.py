@@ -20,6 +20,15 @@ from ghost import config
 # nöbetçi damgaları için "bayat" eşiği (sn) — periyodunun ~2-3 katı
 NOBETCI_ESIK = {"selfcheck": 45 * 60, "uptime": 40 * 60, "port_watch": 40 * 60,
                 "biz_watch": 3 * 3600, "marka_deploy": 14 * 3600}
+try:  # Faz 2.10: tek kaynak ops/heartbeat.WATCHERS (varsa); yoksa yukarıdaki çekirdek eşikleri
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("_heartbeat", os.path.join(config.BASE, "ops", "heartbeat.py"))
+    if _spec and _spec.loader:
+        _hb = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_hb)
+        NOBETCI_ESIK.update({k: v[1] for k, v in getattr(_hb, "WATCHERS", {}).items()})
+except Exception:
+    pass
 AKTIF_IS = ("kuyrukta", "çalışıyor", "denetimde")
 
 

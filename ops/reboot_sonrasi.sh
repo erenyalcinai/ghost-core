@@ -26,5 +26,5 @@ MSG="$BASLIK
 çekirdek $(uname -r) · uptime $(uptime -p | sed 's/^up //')
 köprü $KOPRU · hook $HOOK · kokpit api $API · ufw $UFW · ssh $SSHS
 Mac tüneli $TUNEL · WDA rölesi $WDA · zamanlayıcı $TIMERS"
-echo "$(date '+%F %T') $MSG" >> "$BASE/ops/reboot.log"
-echo "$MSG" | /usr/bin/env python3 "$BASE/ops/send_telegram.py" 2>>"$BASE/ops/reboot.log" || true
+printf '%s\n' "$MSG" | /usr/bin/logger -t ghost-reboot   # journalctl -t ghost-reboot (Faz 2.9)
+echo "$MSG" | /usr/bin/env python3 "$BASE/ops/send_telegram.py" 2>&1 | /usr/bin/logger -t ghost-reboot || true

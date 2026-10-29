@@ -246,7 +246,9 @@ def son_rapor_oku(goal):
     return ""
 
 
-def _queue_work(goal):
+def _queue_work(goal, kind="hedef", announce=True, vardiya=False):
+    """Hedef turunu olay veriyoluna bırak. vardiya=True (Faz 2.1): gece vardiyası turu — duyuru yok, istem sabah kartı için
+    3 satırlık rapor ister; kind "vardiya:<gid>" ile iş kaydı sabah eşlenir."""
     from ghost import bus
     plan = goal.get("plan") or []
     plan_metni = "\n".join("  %d. [%s] %s" % (i + 1, "x" if p.get("durum") == "tamam" else " ", p.get("ad", ""))
@@ -268,7 +270,11 @@ def _queue_work(goal):
         % (goal["id"], goal["title"], ("Detay: %s\n" % goal["detail"]) if goal.get("detail") else "",
            goal.get("kill") or "yok", int(goal.get("puan") or 0), int(goal.get("work_count") or 0) + 1,
            plan_metni, (son or "(ilk tur)")[:2500], goal["id"], goal["id"]))
-    bus.istek(prompt, "hedef", "goal", announce="🎯 Hedef çalışılıyor: %s" % goal["title"][:80])
+    if vardiya:
+        prompt = ("GECE VARDİYASI TURU (Sahip uyuyor; sonuç sabah Tek Gün kartına 3 satırla girer — raporunun ilk 3 satırı "
+                  "'bitti / yarım / onay gerek' hükmünü taşısın).\n" + prompt)
+    ann = ("🎯 Hedef çalışılıyor: %s" % goal["title"][:80]) if announce is True else (announce or None)
+    bus.istek(prompt, kind, "goal", announce=ann)
 
 
 def tick(now=None, kota_uygun=None):

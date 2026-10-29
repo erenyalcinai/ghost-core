@@ -37,6 +37,8 @@ from ghost import sahip  # noqa: E402
 
 GHOST_ROOT_PARMAKLAR = set(sahip.ssh_parmak_izleri())   # ops/sahip.json "ssh_parmak_izleri"
 AUTHORIZED_KEYS = os.environ.get("GHOST_AUTHORIZED_KEYS") or os.path.expanduser("~/.ssh/authorized_keys")
+import heartbeat  # noqa: E402  Nabız damgası (Faz 2.10; sys.path[0] = ops)
+
 
 
 def yetkili_anahtarlar(yol=None):
@@ -187,6 +189,7 @@ def kos():
     if kendi:
         _uyar("🚪 Kendi anahtarımızla yeni IP'den giriş:\n" + "\n".join(kendi[:10]),
               sinif="ghost", anahtar="kendi-anahtar-yeni-ip")
+    heartbeat.beat("giris")
     print("%d satır, %d uyarı (Sahip), %d kendi (Ghost)" % (len(satirlar), len(uyarilar), len(kendi)))
     return 0
 

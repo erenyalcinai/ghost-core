@@ -42,6 +42,8 @@ NOBET = os.path.join(OPS, "iphone_watch_state.json")
 PROFIL_ADI = "Ghost WDA Dev"
 UYARI_GUN = 21          # profil bitişine bu kadar kala uyar
 BAYAT_SAAT = 48         # Mac bu kadar süredir durum yazmadıysa şüphelen
+import heartbeat  # noqa: E402  Nabız damgası (Faz 2.10; sys.path[0] = ops)
+
 
 
 def _load_env():
@@ -171,6 +173,7 @@ def main():
 
     nobet["son_kontrol"] = int(time.time())
     nobet["profil_bitis"] = bitis
+    heartbeat.beat("iphone_watch")
     json.dump(nobet, open(NOBET, "w", encoding="utf-8"), ensure_ascii=False)
     return 0
 

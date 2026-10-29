@@ -53,6 +53,8 @@ FILES = [
 ]
 DIRS = ["intel", "dossier", "ops/requests", "ops/jobs",
         "ops/masa_dosya"]   # Masa kalıcı: sahibin yüklediği foto/belge tek kopyaydı (2026-10-04)
+import heartbeat  # noqa: E402  Nabız damgası (Faz 2.10; sys.path[0] = ops)
+
 
 
 def log(msg):
@@ -400,6 +402,7 @@ def main():
     if silinen:
         ozet += " · budandı: %d" % len(silinen)
     ozet += " · %.0fs" % (time.time() - t0)
+    heartbeat.beat("yedek")
     log(ozet)
     print(ozet)
     return 0

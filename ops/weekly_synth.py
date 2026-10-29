@@ -33,9 +33,9 @@ PROMPT = (
     "5) GÜVENLİK KAPISI: ~/jarvis/ops/guvenlik_kapisi.log'daki bu haftanın ENGEL satırlarını say ve "
     "ayır: (a) yanlış alarm (gerçek bir işi durdurmuş — hangi kural, öneri) (b) olası saldırı/injection "
     "(güvenilmez içerikten gelmiş görünen) (c) Ghost'un kendi alışkanlığı (değeri basma vb.). Yoksa "
-    "'kapı bu hafta sessiz' de. KARANTİNA: ~/jarvis/ops/karantina.log'da bu hafta kaç okuma yapıldı ve kaçı "
+    "'kapı bu hafta sessiz' de. KARANTİNA: `journalctl -t ghost-karantina --since '7 days ago' -o cat` (JSON satırlar) çıktısında bu hafta kaç okuma yapıldı ve kaçı "
     "talimat=true (dış metin Ghost'a iş yaptırmaya çalıştı) — sayı ve kaynak türü (posta/spool/web/masa); 0 ise 'karantina temiz' de.\n"
-    "6) ÖZ-GELİŞİM (kendini geliştir): ~/jarvis/ops/bridge.log ve ops/audit.jsonl"
+    "6) ÖZ-GELİŞİM (kendini geliştir): köprü günlüğü (`journalctl -t ghost-kopru --since '7 days ago' -o cat`; boşsa ~/jarvis/ops/bridge.log) ve ops/audit.jsonl"
     "'deki hata/tekrar desenlerine bak. Ghost'un KENDİSİNDE gördüğün en değerli "
     "1-2 iyileştirmeyi öner (somut: hangi dosya, ne değişmeli, neden). Sahip "
     "onaylarsa uygulanacak — sen sadece öner, DEĞİŞTİRME.\n"
@@ -58,3 +58,10 @@ try:
     notify.telegram(transparency.report(days=7))
 except Exception as e:
     print("şeffaflık raporu hatası:", e)
+
+try:  # Nabız damgası (Faz 2.10): sentez isteği bırakıldı + rapor gitti → "weekly" attı
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import heartbeat
+    heartbeat.beat("weekly")
+except Exception as e:
+    print("damga hatası:", e)

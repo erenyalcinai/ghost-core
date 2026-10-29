@@ -217,7 +217,6 @@ _mcp_vekile_cevir = motor._mcp_vekile_cevir
 # Belirsiz mesajda yüklenen "güvenli" küme — posthog ve github-yaz yalnız anahtar kelimeyle.
 MCP_DEFAULT = ("github", "sentry", "playwright", "sosumi")
 UPTIME_STATE = os.path.join(OPS, "uptime_state.json")
-LOG_FILE = os.path.join(OPS, "bridge.log")
 REQUESTS = os.path.join(OPS, "requests")     # nöbetçi/cron → otomatik iş kuyruğu
 MAC_QUEUE = os.path.join(OPS, "mac-queue")   # Mac-yerel işler; Mac işçisi çeker
 for d in (INBOX, MODELS, JOBS_DIR, REQUESTS, MAC_QUEUE):
@@ -450,9 +449,11 @@ def _sessiz(nerede, e, araligi=600):
         pass
 
 
+from ghost import gunluk  # noqa: E402  günlük tek yer (Faz 2.9 journald)
+
+
 def log(msg):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(time.strftime("%F %T ") + msg + "\n")
+    gunluk.yaz("kopru", msg)   # journalctl -t ghost-kopru / -u ghost-bridge (Faz 2.9; ops/bridge.log kalktı)
 
 
 motor.gunluk = log   # motorun sessiz-except günlüğü köprü dosyasına (Faz 2.9)

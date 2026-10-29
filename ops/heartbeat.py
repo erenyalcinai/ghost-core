@@ -57,6 +57,20 @@ WATCHERS = {
     "selfcheck":    ("öz-denetim (köprü/iş/beyin, 15 dk)", 50 * 60),
     "biz_watch":    ("iş nöbetçisi (saatlik)",              3 * 3600),
     "marka_deploy": ("ghostinprod.com dağıtımı (6 saat)",  14 * 3600),
+    # Faz 2.10 (2026-10-30): Nabız nöbetçi listesi 5 → 17. Eşik kuralı yukarıdaki gibi (tests/test_heartbeat.py).
+    "port_watch":   ("port nöbeti (10 dk)",                  40 * 60),
+    "tunnel_watch": ("Mac ters tünel nöbeti (1 dk)",          10 * 60),
+    "giris":        ("SSH giriş nöbeti (5 dk)",               20 * 60),
+    "knowsync":     ("bilgi senkronu/push (15 dk)",           50 * 60),
+    "acik_nabiz":   ("ghost-core nabzı (30 dk)",              2 * 3600),
+    "chatgpt_export": ("ChatGPT export bekçisi (30 dk)",      2 * 3600),
+    "gmail_is_nabzi": ("Gmail iş nabzı (4 saat)",             10 * 3600),
+    "sms_watch":    ("SMS rayı nöbeti (6 saat)",              14 * 3600),
+    "iphone_watch": ("iPhone rayı nöbeti (6 saat)",           14 * 3600),
+    "listen":       ("dinleme organı (6 saat)",               14 * 3600),
+    "brief":        ("sabah brifingi (günlük 08:04)",         30 * 3600),
+    "yedek":        ("hafıza dış yedeği (günlük)",            30 * 3600),
+    "weekly":       ("haftalık sentez (Pazar 20:07)",         7 * 86400 + 8 * 3600),
     # "defter" (günlük defter taslağı, 21:40) 2026-09-09'da KALDIRILDI — Sahip:
     # "artık günlük defter taslağına gerek yok". Cron da silindi.
 }

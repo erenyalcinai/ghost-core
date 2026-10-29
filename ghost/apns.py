@@ -64,9 +64,13 @@ ONEM = ("passive", "active", "time-sensitive")
 
 def onem_sec(collapse=None, veri=None):
     """Faz 1.12 (2026-10-29, denetim 06 #7) + Sahip aynı gün "bildirimler çok yoruyor": onay/karar kartı NORMAL (active)
-    düzeyde — Odak'ı delmez; gerisi passive (bildirim merkezinde durur, ses/titreşim yok). time-sensitive kullanılmaz."""
+    düzeyde — Odak'ı delmez; sohbet cevabı (collapse "sohbet") da active (Sahip 2026-10-30: ilk satır balonu sessiz, tam cevap
+    gelince banner gelmeliydi — 1.12 onu da passive yapmıştı); gerisi (alarm, iş özeti) passive (bildirim merkezinde durur,
+    ses/titreşim yok). time-sensitive kullanılmaz."""
     c = (collapse or "")
     if c.startswith(("karar", "onay")) or (veri or {}).get("sekme") == "kararlar":
+        return "active"
+    if c == "sohbet":   # 2026-10-30 Sahip "tam mesaj gelince bildirim gelmiyor": sohbet CEVABI istenen şeydir → banner
         return "active"
     return "passive"
 

@@ -16,7 +16,7 @@ import heartbeat   # aynı dizin (ops) — sys.path[0] betiğin dizini
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BASE not in sys.path:
     sys.path.insert(0, _BASE)
-from ghost import durum, sahip  # noqa: E402  (profil: ops/sahip.json)
+from ghost import durum, gunluk, sahip  # noqa: E402  (profil: ops/sahip.json)
 
 # İzlenen siteler profilden (ops/sahip.json "siteler": izle/strict200/get_only).
 # STRICT_200: 404 = içerik kayboldu (Pages dağıtımı bozuldu, NFC kart boş sayfa).
@@ -31,7 +31,6 @@ STATE_FILE = os.path.join(OPS, "uptime_state.json")
 # Olay müdahalesi zinciri AYRI dosyada: uptime_state.json'ı health/api/trafik/köprü {url: bool}
 # diye okur, oraya başka anahtar koymak onları kırar (2026-10-29).
 MUDAHALE_FILE = os.path.join(OPS, "uptime_mudahale_state.json")
-LOG_FILE = os.path.join(OPS, "uptime.log")
 
 ENV = {}
 # .env gitignore'da — CI runner'da YOKTUR. Import anında koşulsuz açmak,
@@ -52,8 +51,7 @@ from ghost import notify, vekil  # noqa: E402  sır vekili (Faz 2); Telegram gö
 
 
 def log(msg):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(time.strftime("%F %T ") + msg + "\n")
+    gunluk.yaz("uptime", msg)   # journald: journalctl -t ghost-uptime (Faz 2.9)
 
 
 def owner_id():

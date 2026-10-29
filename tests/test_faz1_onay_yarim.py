@@ -71,7 +71,8 @@ class TestPushOnem(unittest.TestCase):
         self.assertEqual(apns.onem_sec("karar"), "active")
         self.assertEqual(apns.onem_sec("onay-0123456789abcdef"), "active")
         self.assertEqual(apns.onem_sec(None, {"sekme": "kararlar"}), "active")
-        self.assertEqual(apns.onem_sec("sohbet", {"sekme": "sohbet"}), "passive")
+        self.assertEqual(apns.onem_sec("sohbet", {"sekme": "sohbet"}), "active")     # 2026-10-30: cevap banner
+        self.assertEqual(apns.onem_sec("is:12", {"sekme": "akis"}), "passive")
         y = apns.yuk("Ghost", "mesaj", {"sekme": "sohbet"})
         self.assertEqual(y["aps"]["interruption-level"], "passive")
         self.assertNotIn("sound", y["aps"])                      # passive → ses yok
