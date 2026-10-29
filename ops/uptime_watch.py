@@ -16,7 +16,7 @@ import heartbeat   # aynı dizin (ops) — sys.path[0] betiğin dizini
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BASE not in sys.path:
     sys.path.insert(0, _BASE)
-from ghost import sahip  # noqa: E402  (profil: ops/sahip.json)
+from ghost import durum, sahip  # noqa: E402  (profil: ops/sahip.json)
 
 # İzlenen siteler profilden (ops/sahip.json "siteler": izle/strict200/get_only).
 # STRICT_200: 404 = içerik kayboldu (Pages dağıtımı bozuldu, NFC kart boş sayfa).
@@ -145,8 +145,7 @@ def main():
 
     simdi = time.time()
     try:
-        with open(MUDAHALE_FILE, encoding="utf-8") as f:
-            mz = json.load(f)
+        mz = durum.tasi("uptime_mudahale", MUDAHALE_FILE, {}) or {}   # Faz 1.9: durum tablosu
     except Exception:
         mz = {}
     dusuk_onceki = mz.get("dusuk") or {}          # {url: ilk düşüş ts}
@@ -173,9 +172,7 @@ def main():
                 down_now.append(url)
                 mudahale[url] = simdi
     try:  # ayağa kalkan uç zincirden düşer; yazılamazsa nöbetçi durmaz
-        with open(MUDAHALE_FILE + ".tmp", "w", encoding="utf-8") as f:
-            json.dump({"dusuk": dusuk, "mudahale": mudahale}, f)
-        os.replace(MUDAHALE_FILE + ".tmp", MUDAHALE_FILE)
+        durum.yaz("uptime_mudahale", {"dusuk": dusuk, "mudahale": mudahale})
     except Exception as e:
         log("müdahale durumu yazılamadı: %r" % e)
 

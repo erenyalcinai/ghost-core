@@ -19,6 +19,7 @@ import unittest
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ops"))
 import heartbeat  # noqa: E402
+from ghost import durum  # noqa: E402
 
 
 HEPSI = list(heartbeat.WATCHERS)
@@ -26,20 +27,27 @@ HEPSI = list(heartbeat.WATCHERS)
 
 def _geriye_al(name, dakika):
     """Damgayı geçmişe çek — bekleyerek test etmek yerine saati oynat."""
-    import json
-    p = heartbeat._path(name)
-    with open(p, encoding="utf-8") as f:
-        d = json.load(f)
-    d["ts"] = int(time.time() - dakika * 60)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(d, f)
+    durum.guncelle("heartbeat." + name, lambda d: dict(d or {}, ts=int(time.time() - dakika * 60)))
 
 
 class HeartbeatTest(unittest.TestCase):
     def setUp(self):
+        for r in durum.liste("heartbeat"):          # heartbeat.* + heartbeat_alerted
+            durum.sil(r["ad"])
         for f in os.listdir(heartbeat.BEAT_DIR) if os.path.isdir(
                 heartbeat.BEAT_DIR) else []:
             os.remove(os.path.join(heartbeat.BEAT_DIR, f))
+
+    def test_eski_dosya_bir_kez_tasinir(self):
+        """Faz 1.9: ops/heartbeats/<ad>.json ilk okumada durum tablosuna alınır, dosya .tasindi olur."""
+        import json
+        os.makedirs(heartbeat.BEAT_DIR, exist_ok=True)
+        p = heartbeat._path("uptime")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"ts": int(time.time()) - 5, "at": "x"}, f)
+        self.assertLess(heartbeat.age("uptime"), 60)
+        self.assertFalse(os.path.exists(p))
+        self.assertEqual(durum.oku("heartbeat.uptime")["at"], "x")
 
     def test_gercek_ops_dizinine_yazmaz(self):
         """Testin kendisi canlı nöbet durumunu bozmasın."""
@@ -107,12 +115,9 @@ class HeartbeatTest(unittest.TestCase):
 
     def test_beat_hata_yutar(self):
         """Damga basılamazsa nöbetçinin ASIL işi çökmemeli."""
-        eski = heartbeat.BEAT_DIR
-        heartbeat.BEAT_DIR = "/gecersiz/yol/olmayan"
-        try:
+        from unittest import mock
+        with mock.patch.object(durum, "yaz", side_effect=OSError("disk")):
             heartbeat.beat("uptime")      # patlamamalı
-        finally:
-            heartbeat.BEAT_DIR = eski
 
 
 class UptimeKipTest(unittest.TestCase):

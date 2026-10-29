@@ -55,9 +55,10 @@ def olculer_oku(urun, okuyucu=None):
     if okuyucu is None:
         def okuyucu():
             try:
-                with open(os.path.join(config.OPS, "biz_state.json"), encoding="utf-8") as f:
-                    return json.load(f).get("metrics", {}) or {}
-            except (OSError, ValueError):
+                from ghost import durum     # Faz 1.9: biz_state durum tablosunda
+                d = durum.tasi("biz_state", os.path.join(config.OPS, "biz_state.json"), {}) or {}
+                return d.get("metrics", {}) or {}
+            except Exception:
                 return {}
     m = okuyucu()
     anahtarlar = OLCULER.get(urun) or (SITE_OLCULER if urun.startswith("site:") else ())

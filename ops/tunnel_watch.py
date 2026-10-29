@@ -155,17 +155,19 @@ def mac_isi_var_mi():
 def durum_yaz(durum, detay="", ardisik=0):
     """`ardisik`: kaç turdur üst üste "zombi-cozulemedi" (Sahip eşiği için, 2026-10-29)."""
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"ts": int(time.time()), "at": time.strftime("%F %T"),
-                       "durum": durum, "detay": detay, "ardisik": ardisik}, f, ensure_ascii=False)
+        sys.path.insert(0, BASE)
+        from ghost import durum as _durum          # Faz 1.9: durum tablosu `tunnel_watch`
+        _durum.yaz("tunnel_watch", {"ts": int(time.time()), "at": time.strftime("%F %T"),
+                                    "durum": durum, "detay": detay, "ardisik": ardisik})
     except Exception as e:
         log("durum yazma hata: %r" % e)
 
 
 def _onceki():
     try:
-        with open(STATE_FILE, encoding="utf-8") as f:
-            d = json.load(f)
+        sys.path.insert(0, BASE)
+        from ghost import durum as _durum
+        d = _durum.tasi("tunnel_watch", STATE_FILE, {})   # eski json varsa bir kez içeri alınır
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}

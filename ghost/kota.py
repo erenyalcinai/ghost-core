@@ -4,7 +4,7 @@ Kullanım yüzdesi Claude Code oturumunun kendi kullanım ucundan okunur; belirt
 sahibin makinesindeki Claude Code girişinden gelir ve yenilenmez (süresi dolunca
 ölçüm bayatlar, Nabız "ölçüm eski" der).
 
-Çıktı `ops/kota.json`; `health.nabiz()["kota"]` yalnız okur. Yenileme:
+Çıktı durum tablosu `kota` (Faz 1.9; eski ops/kota.json ilk okumada taşınır); `health.nabiz()["kota"]` yalnız okur. Yenileme:
 selfcheck (15 dk) + her sohbet turundan sonra (5 dk eşik).
 """
 import importlib.util
@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-from ghost import config
+from ghost import config, durum
 
 KOTA_DOSYASI = os.path.join(config.OPS, "kota.json")
 BELIRTEC_DOSYASI = os.path.expanduser("~/.secrets/claude_kota_token.json")
@@ -145,14 +145,11 @@ def cek(d):
 
 
 def _yaz(d):
-    tmp = KOTA_DOSYASI + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False)
-    os.replace(tmp, KOTA_DOSYASI)
+    durum.yaz("kota", d)             # Faz 1.9: ops/kota.json → durum tablosu
 
 
 def yenile(min_yas=0):
-    """Kotayı çek ve ops/kota.json'a yaz. Testte (GHOST_TEST) hiç dışarı çıkmaz.
+    """Kotayı çek ve durum 'kota'ya yaz. Testte (GHOST_TEST) hiç dışarı çıkmaz.
     min_yas: kayıt bu kadar saniyeden tazeyse dokunma. Hata → dosyaya `hata` yazılır,
     son başarılı ölçüm korunur."""
     if os.environ.get("GHOST_TEST"):
@@ -199,8 +196,7 @@ def arka_planda_yenile(min_yas=300):
 
 def _oku_ham():
     try:
-        with open(KOTA_DOSYASI, encoding="utf-8") as f:
-            return json.load(f)
+        return durum.tasi("kota", KOTA_DOSYASI, {}) or {}     # eski dosya varsa bir kez içeri alınır
     except Exception:
         return {}
 

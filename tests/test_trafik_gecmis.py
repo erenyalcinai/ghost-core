@@ -5,7 +5,7 @@ import os
 import unittest
 
 from tests import common  # noqa: F401  (ops yolunu geçici dizine çevirir)
-from ghost import config, trafik
+from ghost import config, durum, trafik
 
 
 class TrafikGecmisTest(unittest.TestCase):
@@ -15,14 +15,14 @@ class TrafikGecmisTest(unittest.TestCase):
                 os.remove(os.path.join(config.OPS, ad))
             except FileNotFoundError:
                 pass
+        durum.sil("tunnel_watch")
 
     def _kayit(self, g7, g1):
         return {"at": "2026-10-26 01:00:00", "toplam_g7": g7, "toplam_g1": g1,
                 "siteler": {"a": {"sahip7": 3, "bot7": 1}, "b": {"sahip7": 2, "bot7": 4}}}
 
     def test_satir_tunel_ile_yazilir_ve_okunur(self):
-        with open(os.path.join(config.OPS, "tunnel_watch_state.json"), "w", encoding="utf-8") as f:
-            json.dump({"durum": "saglikli"}, f)
+        durum.yaz("tunnel_watch", {"durum": "saglikli"})              # Faz 1.9: durum tablosu
         s = trafik.gecmis_yaz(self._kayit(47, 2))
         self.assertEqual(s["tunel"], "saglikli")
         self.assertEqual((s["g7"], s["g1"], s["sahip7"], s["bot7"]), (47, 2, 5, 5))

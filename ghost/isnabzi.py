@@ -9,7 +9,7 @@ import json
 import os
 import time
 
-from ghost import config
+from ghost import config, durum
 
 STATE = "biz_state.json"
 HISTORY = "biz_history.json"
@@ -49,33 +49,26 @@ def _deger(met, anahtar):
 
 
 def _oku(ad, default):
+    """Faz 1.9: durum tablosu (`biz_state` / `biz_history`); eski json ilk okumada taşınır."""
     try:
-        with open(os.path.join(config.OPS, ad), encoding="utf-8") as f:
-            return json.load(f)
+        return durum.tasi(ad[:-5] if ad.endswith(".json") else ad, os.path.join(config.OPS, ad), default)
     except Exception:
         return default
 
 
 def tarihce_ekle(kayit, yol=None):
     """biz_digest her yazımda çağırır: aynı güne ikinci ölçüm son kaydı günceller."""
-    yol = yol or os.path.join(config.OPS, HISTORY)
-    try:
-        with open(yol, encoding="utf-8") as f:
-            h = json.load(f)
-        if not isinstance(h, list):
-            h = []
-    except Exception:
-        h = []
-    if h and h[-1].get("date") == kayit.get("date"):
-        h[-1] = kayit
-    else:
-        h.append(kayit)
-    h = h[-HISTORY_TAVAN:]
-    tmp = yol + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(h, f, ensure_ascii=False)
-    os.replace(tmp, yol)
-    return len(h)
+    yol = yol or os.path.join(config.OPS, HISTORY)   # eski json (varsa bir kez içeri alınır)
+
+    def _ekle(h):
+        h = list(h) if isinstance(h, list) else []
+        if h and h[-1].get("date") == kayit.get("date"):
+            h[-1] = kayit
+        else:
+            h.append(kayit)
+        return h[-HISTORY_TAVAN:]
+    durum.tasi("biz_history", yol, None)
+    return len(durum.guncelle("biz_history", _ekle, []))
 
 
 def _onceki(tarih, h):

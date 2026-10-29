@@ -104,8 +104,9 @@ def gecmis_yaz(kayit):
     try:
         tunel = ""
         try:
-            with open(os.path.join(config.OPS, "tunnel_watch_state.json"), encoding="utf-8") as f:
-                tunel = (json.load(f) or {}).get("durum", "")
+            from ghost import durum     # Faz 1.9: tünel nöbetçisi durum tablosunda
+            tunel = (durum.tasi("tunnel_watch", os.path.join(config.OPS, "tunnel_watch_state.json"), {})
+                     or {}).get("durum", "")
         except Exception:
             pass
         siteler = kayit.get("siteler", {}).values()

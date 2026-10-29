@@ -47,11 +47,11 @@ DBS = ["ops/ghost.db", "ops/economy.db"]
 FILES = [
     "ops/audit.jsonl", "ops/email_spool.jsonl", "ops/email_seen.json",
     "ops/owner.json", "ops/payout.json", "ops/pending.json",
-    "ops/biz_state.json", "ops/baton.json", "ops/port_state.json",
+    "ops/baton.json",       # biz_state/port_state/heartbeats 2026-10-29'dan beri ghost.db `durum` tablosunda (DBS)
     "ops/uptime_state.json", "ops/offset.txt", "ops/chat_session.json",
     "secrets.env",          # anahtarların çoğu tek kopya; şifreli gider
 ]
-DIRS = ["intel", "dossier", "ops/heartbeats", "ops/requests", "ops/jobs",
+DIRS = ["intel", "dossier", "ops/requests", "ops/jobs",
         "ops/masa_dosya"]   # Masa kalıcı: sahibin yüklediği foto/belge tek kopyaydı (2026-10-04)
 
 

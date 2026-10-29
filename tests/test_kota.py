@@ -6,7 +6,7 @@ import unittest
 
 from tests import common  # noqa: F401
 
-from ghost import kota
+from ghost import durum, kota
 
 ORNEK = {
     "five_hour": {"utilization": 84.0, "resets_at": "2026-09-07T03:00:00.233705+00:00"},
@@ -47,6 +47,7 @@ class TestNormalize(unittest.TestCase):
 
 class TestDosyaVeMetin(unittest.TestCase):
     def setUp(self):
+        durum.sil("kota")
         kota.KOTA_DOSYASI = os.path.join(tempfile.mkdtemp(), "kota.json")
 
     def test_okunmamis(self):
@@ -56,7 +57,7 @@ class TestDosyaVeMetin(unittest.TestCase):
 
     def test_yenile_testte_disari_cikmaz(self):
         self.assertIsNone(kota.yenile())
-        self.assertFalse(os.path.exists(kota.KOTA_DOSYASI))
+        self.assertIsNone(durum.oku("kota"))
 
     def test_oku_ve_metin(self):
         kota._yaz({"ts": 1, "at": "2026-09-07 05:00:00", "plan": "Max 5x",
@@ -93,6 +94,7 @@ class TestPencereDurumu(unittest.TestCase):
         self._yedek = kota.KOTA_DOSYASI
         self.d = tempfile.mkdtemp()
         kota.KOTA_DOSYASI = os.path.join(self.d, "kota.json")
+        durum.sil("kota")
 
     def tearDown(self):
         kota.KOTA_DOSYASI = self._yedek
@@ -100,11 +102,10 @@ class TestPencereDurumu(unittest.TestCase):
     def _yaz(self, yuzde, ts=None, sifirlanma=None):
         import time
         ts = ts or int(time.time())
-        with open(kota.KOTA_DOSYASI, "w") as f:
-            json.dump({"ts": ts, "limitler": [
-                {"ad": "Oturum (5 saat)", "tur": "session", "yuzde": yuzde,
-                 "sifirlanma": sifirlanma, "sifirlanma_metin": "bugün 05:39"},
-                {"ad": "Haftalık · tüm modeller", "tur": "weekly_all", "yuzde": 10}]}, f)
+        durum.yaz("kota", {"ts": ts, "limitler": [
+            {"ad": "Oturum (5 saat)", "tur": "session", "yuzde": yuzde,
+             "sifirlanma": sifirlanma, "sifirlanma_metin": "bugün 05:39"},
+            {"ad": "Haftalık · tüm modeller", "tur": "weekly_all", "yuzde": 10}]})
 
     def test_dolu_pencere_erteler(self):
         import time

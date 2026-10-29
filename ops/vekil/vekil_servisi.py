@@ -22,6 +22,7 @@ import http.server
 import json
 import os
 import re
+import socket
 import socketserver
 import ssl
 import sys
@@ -33,6 +34,7 @@ DURUM_DIZIN = "/var/lib/ghost-vekil"
 GOVDE_TAVAN = 200 * 1024 * 1024
 TAMPON_TAVAN = 5 * 1024 * 1024        # bundan büyük ya da boyutsuz cevap akarak taşınır
 ZAMAN_ASIMI = 300
+BAGLANTI_ZAMAN_ASIMI = 10             # üst uca TCP+TLS kurulumu (okuma 300 sn'den ayrı; bkz. _baglan)
 OKUMA_ZAMAN_ASIMI = 60                # S9 (Codex, 2026-10-28): istemciden okuma (başlık/gövde) zaman aşımı
 ES_ZAMANLI_TAVAN = 48                 # S9: aynı anda işlenen bağlantı tavanı; üstü 503 (yerel istemci yeniden dener)
 # 6. tur (2026-10-29): FREEZE ortak konumu — köprü bayrak durumunu /run/ghost-freeze/durum'a (1/0) aynalar (ghost/governance.py);
@@ -433,6 +435,32 @@ def _hata(durum, metin):
     return durum, [("Content-Type", "application/json")], json.dumps({"vekil": metin}, ensure_ascii=False).encode()
 
 
+def _baglan(host, port, zaman=BAGLANTI_ZAMAN_ASIMI, gai=None, soket=None):
+    """Üst uca TCP bağlantısı: IPv4 ÖNCE, sonra kalan aileler; kurulum zaman aşımı kısa ve ayrı.
+
+    NEDEN (2026-10-29, 409 avı — yol haritası 0.13): api.telegram.org'un IPv6 ucuna SYN'ler ara ara kara deliğe
+    düşüyor (30 denemenin 4'ü ≥25 sn, IPv4 0/30; ICMP6 sorunsuz → yola/ECMP'ye bağlı, akışa göre). http.client
+    getaddrinfo sırasıyla (önce AAAA) bağlanıyor ve 300 sn'lik okuma zaman aşımı kurulumu da bekletiyordu; köprü
+    14 sn'de vazgeçip yeni getUpdates açıyor, vekildeki YETİM üst istek sonradan Telegram'a ulaşıp 409 Conflict +
+    BrokenPipe üretiyordu (günde ~1.900). v4 adresi varsa ve bağlanıyorsa v6 hiç denenmez; v4 düşerse v6'ya düşülür.
+    gai/soket: test enjeksiyonu (ağ yok)."""
+    gai = gai or socket.getaddrinfo
+    soket = soket or socket.socket
+    adresler = list(gai(host, port, 0, socket.SOCK_STREAM))
+    adresler.sort(key=lambda a: a[0] != socket.AF_INET)
+    son = None
+    for aile, tur, proto, _ad, sa in adresler:
+        s = soket(aile, tur, proto)
+        s.settimeout(zaman)
+        try:
+            s.connect(sa)
+            return s
+        except OSError as e:
+            son = e
+            s.close()
+    raise son or OSError("adres çözülemedi: %s" % host)
+
+
 class Vekil:
     """Yönlendirme + kimlik ekleme + maskeleme. Ağdan bağımsız test edilebilir (gonder enjekte edilir)."""
 
@@ -544,7 +572,10 @@ class Vekil:
 
     @staticmethod
     def _https(host, yontem, yol, basliklar, govde):
-        c = http.client.HTTPSConnection(host, 443, timeout=ZAMAN_ASIMI, context=ssl.create_default_context())
+        bag = ssl.create_default_context()
+        c = http.client.HTTPSConnection(host, 443, timeout=ZAMAN_ASIMI, context=bag)
+        c.sock = bag.wrap_socket(_baglan(host, 443), server_hostname=host)   # kurulum _baglan'da: v4 önce, 10 sn
+        c.sock.settimeout(ZAMAN_ASIMI)
         c.request(yontem, yol, body=govde, headers=basliklar)
         r = c.getresponse()
         tur = (r.getheader("Content-Type") or "").lower()
@@ -1339,8 +1370,7 @@ def _cift_yon(a, b, v):
 
 
 def _tls_ac(host, port, starttls=False):
-    import socket as _s
-    ham = _s.create_connection((host, port), timeout=60)
+    ham = _baglan(host, port, 60)                       # Gmail'in de AAAA kaydı var — aynı v4-önce kuralı
     bag = ssl.create_default_context()
     if not starttls:
         return _Satirlar(bag.wrap_socket(ham, server_hostname=host))

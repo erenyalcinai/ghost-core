@@ -31,6 +31,15 @@ def _json(ad, default=None):
         return default
 
 
+def _durum(ad, eski_dosya, default=None):
+    """Faz 1.9: durum tablosu; eski ops/<dosya>.json varsa bir kez içeri alınır."""
+    try:
+        from ghost import durum
+        return durum.tasi(ad, os.path.join(config.OPS, eski_dosya), default)
+    except Exception:
+        return default
+
+
 def servisler():
     """[(ad, durum)] — Linux'ta systemd, Mac'te launchd. Hata → boş liste."""
     out = []
@@ -104,7 +113,7 @@ def _mac():
     except Exception as e:
         d["durum"] = "uyari"
         d["detay"] = "hızlı hat cevap vermiyor (uykuda/tünel kopuk)"
-    tw = _json("tunnel_watch_state.json", {})
+    tw = _durum("tunnel_watch", "tunnel_watch_state.json", {}) or {}
     if tw.get("durum") and tw.get("durum") != "saglikli":
         d["detay"] += " · tünel: %s" % tw.get("durum")
     return d
@@ -146,7 +155,7 @@ def _baglanti(mak):
     Hepsi ŞU ANKİ yoklamadan; tunnel_watch_state yalnız nöbetçinin son notu."""
     mac = next((m for m in mak if m["ad"] == "Mac"), {})
     tel = next((m for m in mak if m["ad"].startswith("iPhone")), {})
-    tw = _json("tunnel_watch_state.json", {}) or {}
+    tw = _durum("tunnel_watch", "tunnel_watch_state.json", {}) or {}
     return {"mac": mac.get("durum") == "iyi", "telefon": tel.get("durum") == "iyi",
             "tunel": tw.get("durum", ""), "tunel_at": tw.get("at", ""),
             "ts": int(time.time())}
@@ -164,13 +173,29 @@ def _siteler():
 
 
 def _nobetciler():
+    """Faz 1.9: damgalar durum tablosunda `heartbeat.<ad>` (ops/heartbeat.py); eski ops/heartbeats/*.json
+    dosyaları ilk bakışta bir kez içeri alınır."""
     out = []
     now = time.time()
+    try:
+        from ghost import durum
+    except Exception:
+        return out
     for p in sorted(glob.glob(os.path.join(config.OPS, "heartbeats", "*.json"))):
         ad = os.path.basename(p)[:-5]
+        if not ad.startswith("_"):
+            try:
+                durum.tasi("heartbeat." + ad, p)
+            except Exception:
+                pass
+    try:
+        kayitlar = durum.liste("heartbeat.")
+    except Exception:
+        return out
+    for r in kayitlar:
+        ad = r["ad"][len("heartbeat."):]
         try:
-            with open(p) as f:
-                j = json.load(f)
+            j = durum.oku(r["ad"]) or {}
             yas = int(now - float(j.get("ts", 0)))
             out.append({"ad": ad, "son": j.get("at", ""), "yas_sn": yas,
                         "ok": yas < NOBETCI_ESIK.get(ad, 2 * 3600)})

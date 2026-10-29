@@ -60,7 +60,7 @@ with (open(os.path.join(BASE, ".env"), encoding="utf-8") if os.path.exists(os.pa
             ENV[k] = v.strip()
 
 __import__("sys").path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ghost import vekil  # noqa: E402  sır vekili (Faz 2)
+from ghost import durum, vekil  # noqa: E402  sır vekili (Faz 2); durum tablosu (Faz 1.9)
 API = vekil.url("telegram", "", ENV)
 
 
@@ -167,8 +167,7 @@ def kapat(pid):
 
 def main():
     try:
-        with open(STATE_FILE, encoding="utf-8") as f:
-            onceki = set(json.load(f))
+        onceki = set(durum.tasi("port_watch", STATE_FILE, []) or [])   # Faz 1.9: durum tablosu
     except Exception:
         onceki = set()
 
@@ -222,9 +221,7 @@ def main():
     else:
         log("sessiz: dışarıya açık beklenmedik port yok")
 
-    with open(STATE_FILE + ".tmp", "w", encoding="utf-8") as f:
-        json.dump(sorted(simdiki), f)
-    os.replace(STATE_FILE + ".tmp", STATE_FILE)
+    durum.yaz("port_watch", sorted(simdiki))
 
 
 if __name__ == "__main__":

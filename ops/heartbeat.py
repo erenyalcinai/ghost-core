@@ -32,7 +32,16 @@ import time
 
 # GHOST_OPS: testler gerçek ops/ dizinine dokunmasın (tests/common.py kuralı).
 OPS = os.environ.get("GHOST_OPS") or os.path.dirname(os.path.abspath(__file__))
-BEAT_DIR = os.path.join(OPS, "heartbeats")
+BEAT_DIR = os.path.join(OPS, "heartbeats")      # eski damga dizini: ilk okumada durum tablosuna taşınır
+_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _BASE not in sys.path:
+    sys.path.insert(0, _BASE)
+
+
+def _durum():
+    """Faz 1.9 (2026-10-29): damgalar ghost.db `durum` tablosunda `heartbeat.<ad>`; susturma `heartbeat_alerted`."""
+    from ghost import durum
+    return durum
 
 # isim -> (etiket, bayat sayılan yaş [sn]). Eşik iki kurala göre seçilir —
 # tek bir "×3" kuralı yanlış olurdu:
@@ -62,12 +71,7 @@ def _path(name):
 def beat(name):
     """Damgayı bas. Nöbetçinin ASIL işini asla bozmamalı → hata yutulur."""
     try:
-        os.makedirs(BEAT_DIR, exist_ok=True)
-        p = _path(name)
-        with open(p + ".tmp", "w", encoding="utf-8") as f:
-            json.dump({"ts": int(time.time()),
-                       "at": time.strftime("%F %T")}, f)
-        os.replace(p + ".tmp", p)          # atomik: yoklayan yarım dosya görmesin
+        _durum().yaz("heartbeat." + name, {"ts": int(time.time()), "at": time.strftime("%F %T")})
     except Exception:                       # noqa: BLE001 — damga kritik değil
         pass
 
@@ -75,9 +79,9 @@ def beat(name):
 def age(name):
     """Son atıştan bu yana geçen saniye; hiç atmamışsa None."""
     try:
-        with open(_path(name), encoding="utf-8") as f:
-            return time.time() - json.load(f)["ts"]
-    except (OSError, ValueError, KeyError):
+        d = _durum().tasi("heartbeat." + name, _path(name))
+        return None if d is None else time.time() - d["ts"]
+    except Exception:
         return None
 
 
@@ -108,20 +112,16 @@ def should_alert(name, gap=ALERT_GAP):
     saatte bir hatırlat. Nöbetçi dirildiğinde damga silinir → bir sonraki
     ölümde yine ANINDA haber verilir (susturma kalıcı değil)."""
     try:
-        with open(ALERT_STATE, encoding="utf-8") as f:
-            st = json.load(f)
-    except (OSError, ValueError):
+        st = _durum().tasi("heartbeat_alerted", ALERT_STATE, {}) or {}
+    except Exception:
         st = {}
     now = time.time()
     if now - st.get(name, 0) < gap:
         return False
     st[name] = now
     try:
-        os.makedirs(BEAT_DIR, exist_ok=True)
-        with open(ALERT_STATE + ".tmp", "w", encoding="utf-8") as f:
-            json.dump(st, f)
-        os.replace(ALERT_STATE + ".tmp", ALERT_STATE)
-    except OSError:
+        _durum().yaz("heartbeat_alerted", st)
+    except Exception:
         pass
     return True
 
@@ -129,19 +129,16 @@ def should_alert(name, gap=ALERT_GAP):
 def clear_alert(names):
     """Sağlıklı dönen isimlerin susturmasını kaldır."""
     try:
-        with open(ALERT_STATE, encoding="utf-8") as f:
-            st = json.load(f)
-    except (OSError, ValueError):
+        st = _durum().tasi("heartbeat_alerted", ALERT_STATE, {}) or {}
+    except Exception:
         return
     if not any(n in st for n in names):
         return
     for n in names:
         st.pop(n, None)
     try:
-        with open(ALERT_STATE + ".tmp", "w", encoding="utf-8") as f:
-            json.dump(st, f)
-        os.replace(ALERT_STATE + ".tmp", ALERT_STATE)
-    except OSError:
+        _durum().yaz("heartbeat_alerted", st)
+    except Exception:
         pass
 
 

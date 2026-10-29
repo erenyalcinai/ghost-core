@@ -716,8 +716,12 @@ def tunel_nobetcisi_yerinde():
     if IS_MAC:
         return None
     try:
-        taze = time.time() - os.path.getmtime(TUNNEL_STATE) < TUNNEL_STALE
-    except OSError:
+        from ghost import durum             # Faz 1.9: nöbetçi damgası durum tablosunda (`tunnel_watch`)
+        ts = durum.ts("tunnel_watch")
+        if ts is None:
+            ts = os.path.getmtime(TUNNEL_STATE)   # henüz taşınmamış eski dosya
+        taze = time.time() - ts < TUNNEL_STALE
+    except Exception:
         taze = False
     if taze:
         return None

@@ -24,10 +24,10 @@ here and probably the most useful.
 
 | | |
 |---|---|
-| Core Python (`ghost/`) | ~14,900 lines, 61 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
+| Core Python (`ghost/`) | ~15,000 lines, 61 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
 | Organs (`ops/`) | ~16,100 lines: bridge, sentinels, Mac and iPhone limbs |
 | Cockpit app (`kokpit/ios`) | ~7,800 lines Swift, iOS + macOS targets, one source |
-| Tests | ~890, run with `python -m unittest` in well under a minute, no network, CI on every push |
+| Tests | ~897, run with `python -m unittest` in well under a minute, no network, CI on every push |
 | Scheduling units | 8 launchd agents (Mac) + 3 systemd units (VPS) in this tree; the bridge and self-check units themselves live in the private deploy |
 | Lessons | 170 operational lessons, auto-extracted from commit messages, curated in [LESSONS.md](LESSONS.md) |
 | History | Started 11 August 2026; this open-core snapshot is from day 78 (880+ commits in the private tree, most authored by the agent under the owner's direction) |

@@ -4,9 +4,9 @@ import os
 import tempfile
 import unittest
 
-os.environ.setdefault("GHOST_TEST", "1")
+from tests import common  # noqa: F401  (GHOST_OPS/GHOST_DB geçici — durum tablosu canlı ghost.db'ye yazmasın)
 
-from ghost import gun, isnabzi
+from ghost import durum, gun, isnabzi
 
 
 class Gun(unittest.TestCase):
@@ -48,6 +48,8 @@ class IsNabzi(unittest.TestCase):
         from ghost import config
         self.eski = config.OPS
         config.OPS = self.d
+        durum.sil("biz_state")
+        durum.sil("biz_history")
 
     def tearDown(self):
         from ghost import config
@@ -81,7 +83,7 @@ class IsNabzi(unittest.TestCase):
         isnabzi.tarihce_ekle({"date": "2026-09-04", "metrics": {"a": 2}}, y)
         n = isnabzi.tarihce_ekle({"date": "2026-09-05", "metrics": {"a": 3}}, y)
         self.assertEqual(n, 2)
-        self.assertEqual(json.load(open(y))[0]["metrics"]["a"], 2)
+        self.assertEqual(durum.oku("biz_history")[0]["metrics"]["a"], 2)
 
 
 class Nabiz(unittest.TestCase):

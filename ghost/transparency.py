@@ -106,8 +106,9 @@ def ekonomi_satiri():
         pass
     gelir = ""
     try:
-        with open(os.path.join(config.OPS, "biz_state.json"), encoding="utf-8") as f:
-            b = json.load(f)
+        from ghost import durum     # Faz 1.9: biz_state durum tablosunda
+        b = durum.tasi("biz_state", os.path.join(config.OPS, "biz_state.json"), {}) or {}
+        b = b.get("metrics") or b   # ölçüler "metrics" altında (eski kod kökte arıyordu → satır hep boştu)
         ucretli = b.get("d1_paid", b.get("d1_ucretli"))
         if ucretli is not None:
             gelir = " · AppA ücretli %s" % ucretli
