@@ -271,8 +271,38 @@ def git(args, cwd, token=None, check=True):
     return r
 
 
+PARCA_BOYUTU = 90 * 1024 * 1024   # GitHub tek dosya tavanı 100 MB (GH001); 2026-10-29'da arşiv 120 MB'a çıkıp push reddedildi
+
+
+def parcala(enc_path, hedef_dizin, stamp):
+    """Şifreli arşivi `<stamp>.tar.gz.gpg.NN` parçalarına yaz (≤90 MB); küçükse tek dosya. Yazılan adlar."""
+    boyut = os.path.getsize(enc_path)
+    if boyut <= PARCA_BOYUTU:
+        ad = "%s.tar.gz.gpg" % stamp
+        shutil.copy2(enc_path, os.path.join(hedef_dizin, ad))
+        return [ad]
+    adlar = []
+    with open(enc_path, "rb") as f:
+        n = 0
+        while True:
+            veri = f.read(PARCA_BOYUTU)
+            if not veri:
+                break
+            ad = "%s.tar.gz.gpg.%02d" % (stamp, n)
+            with open(os.path.join(hedef_dizin, ad), "wb") as p:
+                p.write(veri)
+            adlar.append(ad)
+            n += 1
+    return adlar
+
+
+def damga(ad):
+    """'2026-10-29.tar.gz.gpg' ya da '2026-10-29.tar.gz.gpg.01' → '2026-10-29'."""
+    return ad.split(".tar.gz.gpg")[0]
+
+
 def rotate(repo_dir, enc_path, stamp):
-    """Yeni anlık görüntüyü yerleştir, saklama penceresi dışını sil."""
+    """Yeni anlık görüntüyü yerleştir (gerekirse parçalı), saklama penceresi dışını damga bazında sil."""
     today = date.today()
     slots = ["gunluk"]
     if today.weekday() == 0:
@@ -282,16 +312,21 @@ def rotate(repo_dir, enc_path, stamp):
     for s in slots:
         d = os.path.join(repo_dir, s)
         os.makedirs(d, exist_ok=True)
-        shutil.copy2(enc_path, os.path.join(d, "%s.tar.gz.gpg" % stamp))
+        for eski in os.listdir(d):            # aynı damganın eski (tek/parçalı) kopyaları
+            if damga(eski) == stamp:
+                os.remove(os.path.join(d, eski))
+        parcala(enc_path, d, stamp)
     silinen = []
     for s, keep in KEEP.items():
         d = os.path.join(repo_dir, s)
         if not os.path.isdir(d):
             continue
-        snaps = sorted(x for x in os.listdir(d) if x.endswith(".gpg"))
-        for old in snaps[:-keep] if len(snaps) > keep else []:
-            os.remove(os.path.join(d, old))
-            silinen.append("%s/%s" % (s, old))
+        damgalar = sorted({damga(x) for x in os.listdir(d) if ".tar.gz.gpg" in x})
+        for eski_damga in damgalar[:-keep] if len(damgalar) > keep else []:
+            for x in sorted(os.listdir(d)):
+                if damga(x) == eski_damga:
+                    os.remove(os.path.join(d, x))
+                    silinen.append("%s/%s" % (s, x))
     return slots, silinen
 
 
@@ -307,7 +342,9 @@ Saklama: günlük %d, haftalık %d, aylık %d.
 ## Geri yükleme
 
     git clone -b hafiza <repo> ghost-hafiza && cd ghost-hafiza
-    gpg --decrypt gunluk/EN-YENI.tar.gz.gpg > y.tar.gz
+    # tek dosya: gunluk/EN-YENI.tar.gz.gpg · parçalı (>90 MB): gunluk/EN-YENI.tar.gz.gpg.00, .01, … → önce birleştir
+    cat gunluk/EN-YENI.tar.gz.gpg.* > y.tar.gz.gpg   # parçalıysa; tek dosyaysa doğrudan kullan
+    gpg --decrypt y.tar.gz.gpg > y.tar.gz
     tar xzf y.tar.gz
 
 Parola sahibin şifre yöneticisinde. **Bu makinede duran kopya tek başına

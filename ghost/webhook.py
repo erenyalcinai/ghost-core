@@ -174,8 +174,12 @@ def handle_hook(source, payload, secret_ok):
         return 403, "yetkisiz"
     if governance.is_frozen():
         return 503, "frozen"
+    # BİLGİ olayı (status=done, akis.olay_yaz gibi): webhook kaydı zaman çizelgesi içindir, kuyruk
+    # değil. İş açan dallar aşağıda bus.istek() ile ayrı 'request' olayı bırakır; tüketici YALNIZ
+    # onu çeker. 2026-10-29 denetimi: varsayılan 'pending' ile 1.345 webhook kaydı 2026-08-12'den beri
+    # sahipsiz bekliyordu (ev_status indeksi şişti, /istekler özetleri yanılttı).
     bus.emit("webhook", source, payload if isinstance(payload, dict)
-             else {"raw": str(payload)[:2000]})
+             else {"raw": str(payload)[:2000]}, status="done")
     if source == "sms":
         # SMS ASLA İŞ AÇMAZ — bu satır güvenlik sınırı, kolaylık değil.
         # Aşağıdaki 'text' dalı gelen metni doğrudan işe çeviriyor; SMS içeriği

@@ -59,9 +59,24 @@ def _jwt():
     return tok
 
 
-def yuk(baslik, govde, veri=None, ses=True, rozet=None):
+ONEM = ("passive", "active", "time-sensitive")
+
+
+def onem_sec(collapse=None, veri=None):
+    """Faz 1.12 (2026-10-29, denetim 06 #7) + Sahip aynı gün "bildirimler çok yoruyor": onay/karar kartı NORMAL (active)
+    düzeyde — Odak'ı delmez; gerisi passive (bildirim merkezinde durur, ses/titreşim yok). time-sensitive kullanılmaz."""
+    c = (collapse or "")
+    if c.startswith(("karar", "onay")) or (veri or {}).get("sekme") == "kararlar":
+        return "active"
+    return "passive"
+
+
+def yuk(baslik, govde, veri=None, ses=True, rozet=None, onem=None):
     aps = {"alert": {"title": baslik[:80], "body": govde[:500]}}
-    if ses:
+    onem = onem or onem_sec(None, veri)
+    if onem in ONEM:
+        aps["interruption-level"] = onem
+    if ses and onem != "passive":
         aps["sound"] = "default"
     if rozet is not None:
         aps["badge"] = int(rozet)
@@ -71,8 +86,9 @@ def yuk(baslik, govde, veri=None, ses=True, rozet=None):
     return p
 
 
-def gonder(token, env, baslik, govde, veri=None, ses=True, rozet=None, collapse=None):
+def gonder(token, env, baslik, govde, veri=None, ses=True, rozet=None, collapse=None, onem=None):
     """Tek cihaza push → (ok, durum_kodu, apns_yanit). Asla fırlatmaz."""
+    onem = onem or onem_sec(collapse, veri)
     if os.environ.get("GHOST_TEST"):
         return False, 0, "test"
     if not hazir():
@@ -87,7 +103,7 @@ def gonder(token, env, baslik, govde, veri=None, ses=True, rozet=None, collapse=
     try:
         r = subprocess.run(["curl", "-sS", "--http2", "-m", "15", "-o", "-", "-w", "\n%{http_code}",
                             "-X", "POST", *hdr, "-d",
-                            json.dumps(yuk(baslik, govde, veri, ses, rozet), ensure_ascii=False), url],
+                            json.dumps(yuk(baslik, govde, veri, ses, rozet, onem), ensure_ascii=False), url],
                            capture_output=True, text=True, timeout=25)
         out = r.stdout.strip().rsplit("\n", 1)
         kod = int(out[-1]) if out and out[-1].isdigit() else 0
@@ -215,13 +231,21 @@ def etkinlik_bitir(jid, tur, durum, ozet="", basladi=None):
     return sonuc
 
 
-def herkese(baslik, govde, veri=None, collapse=None):
+def herkese(baslik, govde, veri=None, collapse=None, onem=None):
     """Kayıtlı token'ı olan tüm aktif cihazlara. Sonuç listesi; 410 (Unregistered) token'ı siler."""
     from ghost import kokpit
     sonuc = []
     for c in kokpit.apns_cihazlar():
-        ok, kod, y = gonder(c["apns_token"], c["apns_env"], baslik, govde, veri, collapse=collapse)
+        ok, kod, y = gonder(c["apns_token"], c["apns_env"], baslik, govde, veri, collapse=collapse, onem=onem)
         sonuc.append({"cihaz": c["id"], "ok": ok, "kod": kod, "yanit": y})
+        try:  # Faz 1.13 (denetim 02 e2): her push ops/apns.jsonl'e — teslim oranı ölçülebilsin
+            from ghost import config as _cfg
+            with open(os.path.join(_cfg.OPS, "apns.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"ts": time.strftime("%F %T"), "cihaz": c["id"], "baslik": baslik[:60],
+                                    "collapse": collapse, "onem": onem or onem_sec(collapse, veri), "ok": ok, "kod": kod},
+                                   ensure_ascii=False) + "\n")
+        except Exception:
+            pass
         if kod == 410 or (kod == 400 and "BadDeviceToken" in y):
             kokpit.apns_sil(c["id"])
     return sonuc

@@ -60,14 +60,47 @@ from ghost.tools import registry as tool_registry  # noqa: E402
 from ghost import continuity  # noqa: E402
 from ghost import akis, apns, bus, channels, health, kokpit, komutlar  # noqa: E402  (kokpit + Faz 3 omurga)
 from ghost import kesik_mesaj
-from ghost import kalici_oturum, kota  # noqa: E402  (2026-09-07: tek süreç çok tur + abonelik kotası)
+from ghost import kalici_oturum, kota, metrik  # noqa: E402  (2026-09-07: tek süreç çok tur + abonelik kotası; 2026-10-29: ölçü)
 from ghost import modeller  # noqa: E402  (2026-10-01: takma ad → en güncel tam kimlik)
 from ghost import kurallar  # noqa: E402  (2026-10-26: olay → kural motoru; Masa gelen kutusu tick'i)
 
 
 def _with_memory(text):
     """Sohbet mesajına ilgili kalıcı hafızayı iliştir (Hafıza Sarayı v1).
-    Eşleşme yoksa metin olduğu gibi döner."""
+    Eşleşme yoksa metin olduğu gibi döner.
+
+    2026-10-29 (denetim 05): eski `recall` OR'luyor ve eşiksizdi — "AppA için bugün ne
+    yapalım" üç kez Ağustos iş logu getiriyordu. Varsa `memory.baglam_notu` (AND→NEAR→OR
+    kademesi, bm25 eşiği, iş/test süzgeci; eşik altı → boş) kullanılır."""
+    notu = None
+    try:
+        if hasattr(memory, "baglam_notu"):
+            notu = memory.baglam_notu(text)
+    except Exception:
+        notu = None
+    # Faz 1.1 (2026-10-29): kararlar defterinden konuyla eşleşen 0-3 satır — "[rafta]" etiketi
+    # tekrar önermeyi kaynağında keser. Defter boşsa/eşleşme yoksa hiçbir şey eklenmez.
+    try:
+        from ghost import kararlar as _kararlar
+        kararlar_notu = _kararlar.baglam_notu(text) or ""
+    except Exception:
+        kararlar_notu = ""
+    if kararlar_notu:
+        text = ("%s\n\n[sahibin bu konudaki kayıtlı kararları — rafta/iptal olanı yeniden önerme:\n%s]"
+                % (text, kararlar_notu))
+    # Faz 1.4 (2026-10-29): dersler tüketilebilir — konuyla eşleşen ≤5 ders (~300 token), yoksa hiçbir şey.
+    try:
+        from ghost import dersler as _dersler
+        dersler_notu = _dersler.baglam_notu(text) or ""
+    except Exception:
+        dersler_notu = ""
+    if dersler_notu:
+        text = "%s\n\n[Geçmiş derslerden bu konuyla ilgili olanlar (playbooks/dersler.md):\n%s]" % (text, dersler_notu)
+    if notu is not None:
+        if not notu:
+            return text
+        return ("%s\n\n[Ghost kalıcı hafızasından ilgili kayıtlar — gerekiyorsa "
+                "kullan, gereksizse yok say:\n%s]" % (text, notu))
     try:
         rows = memory.recall(text, k=3)
     except Exception:
@@ -77,6 +110,78 @@ def _with_memory(text):
     ctx = "\n".join("- [%s] %s" % (r[1], r[2][:200]) for r in rows)
     return ("%s\n\n[Ghost kalıcı hafızasından ilgili kayıtlar — gerekiyorsa "
             "kullan, gereksizse yok say:\n%s]" % (text, ctx))
+
+
+# ---- çıktı kuralı (2026-10-29, denetim 06 #6) ----
+# Sohbet cevaplarının %22'si 1500 karakteri aşıyordu (telefonda 3 ekran), %3'ü 3000'i.
+# Kural: uzun cevap Masa'ya (Ghost / Uzun cevaplar) tam metin olarak gider, sohbete
+# ilk ~900 karakter + bağlantı düşer. Masa kopya değil arşiv: sohbette yalnız özet kalır.
+CIKTI_SOHBET_TAVAN = 1500
+CIKTI_OZET = 900
+
+
+# 2026-10-29 03:20 Sahip: "uzun cevapların Masa'ya gitmesini iptal et, sohbette olsun — daha kötü oldu."
+# Kural KAPALI; uzun cevap sohbette tam kalır. Kısalık prompt kuralıyla (CLAUDE.md 3) sağlanır, kesmeyle değil.
+CIKTI_MASAYA_TASI = False
+
+
+def _cikti_kurali(res):
+    """Uzun sohbet cevabını Masa'ya taşı, sohbete kısa hâlini döndür. Asla fırlatmaz.
+    CIKTI_MASAYA_TASI=False iken (Sahip kararı 2026-10-29) cevap olduğu gibi döner."""
+    if not CIKTI_MASAYA_TASI:
+        return res
+    if not res or len(res) <= CIKTI_SOHBET_TAVAN or res.lstrip().startswith(("⛔", "⏳", "⚠️")):
+        return res
+    try:
+        from ghost import masa
+        kok = masa.klasor_bul("Ghost", olustur=True)
+        c = masa._db()
+        try:
+            r = c.execute("SELECT id FROM masa_kart WHERE tur='klasor' AND ebeveyn=? AND ad=? "
+                          "AND durum='masa'", (kok, "Uzun cevaplar")).fetchone()
+        finally:
+            c.close()
+        ebeveyn = int(r["id"]) if r else masa.kart_ekle("klasor", "Uzun cevaplar", kok)
+        kid = masa.kart_ekle("rapor", "Sohbet cevabı %s" % time.strftime("%d.%m %H:%M"),
+                             ebeveyn, icerik=res, kaynak="sohbet")
+    except Exception as e:
+        log("çıktı kuralı: Masa'ya yazılamadı (%r) — cevap olduğu gibi gitti" % (e,))
+        return res
+    kes = res[:CIKTI_OZET]
+    nokta = kes.rfind("\n\n")
+    if nokta > 300:
+        kes = kes[:nokta]
+    if kes.count("```") % 2 == 1:          # kod bloğunun ortasında kesme
+        kes = kes[:kes.rfind("```")].rstrip()
+    try:
+        metrik.sayac("uzun_cevap")
+    except Exception as _e:
+        _sessiz("_cikti_kurali@158", _e)
+    return kes.rstrip() + "\n\n⤵ Tamamı Masa'da: Ghost / Uzun cevaplar #%d (%d karakter)" % (kid, len(res))
+
+
+def _kota_mesaji(res):
+    """Ham İngilizce "You've hit your 5-hour limit…" yerine tek Türkçe satır (denetim 04 Ö1/Ö7).
+    Sıfırlanma saati önce kota.json'dan, yoksa metinden."""
+    sifir = ""
+    try:
+        sifir = kota.pencere_durumu().get("sifirlanma_metin") or ""
+    except Exception as _e:
+        _sessiz("_kota_mesaji@169", _e)
+    if not sifir:
+        m = re.search(r"resets?\s+(?:at\s+)?([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)", res or "", re.I)
+        if m:
+            sifir = m.group(1).strip()
+    try:
+        metrik.sayac("kota_dolu")
+    except Exception as _e:
+        _sessiz("_kota_mesaji@177", _e)
+    return ("⏳ Kota penceresi dolu%s. Bu tur koşmadı; pencere açılınca mesajını yeniden gönder "
+            "ya da 'devam' de. (Yedek motora düşmedim: bu arıza değil, sınır.)"
+            % ((" — sıfırlanma " + sifir) if sifir else ""))
+
+
+_KOTA_ERTELE = [0.0]   # check_requests: son "ertelendi" log anı (10 dk'da bir satır)
 
 
 def _split_spec(arg):
@@ -323,13 +428,13 @@ def _duyu_note():
     try:
         from ghost import duyular
         out = duyular.satir()
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("_duyu_note@431", _e)
     try:  # Masa (2026-10-04): sahibin Ghost'un görmediği kayıtları — tek satır, yoksa boş
         from ghost import masa
         out += masa.baglam_satiri()
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("_duyu_note@436", _e)
     return out
 
 
@@ -375,6 +480,23 @@ if os.path.exists(_SECRETS):
             if _line and not _line.startswith("#") and "=" in _line:
                 _k, _v = _line.split("=", 1)
                 _env[_k.strip()] = _v.strip()
+
+
+# Faz 1.11 (2026-10-29, denetim 03 7a): 32 sessiz `except: pass` kör nokta idi — artık her biri konum
+# etiketiyle günlüğe düşer, aynı konum 10 dk'da en çok bir kez (sıcak döngüde taşmasın). Davranış değişmez.
+# (İlk yamada bu yardımcı eksik kalmıştı → 19:52 NameError; düzeltme.)
+_SESSIZ_SON = {}
+
+
+def _sessiz(nerede, e, araligi=600):
+    try:
+        simdi = time.time()
+        if simdi - _SESSIZ_SON.get(nerede, 0) < araligi:
+            return
+        _SESSIZ_SON[nerede] = simdi
+        log("sessiz except %s: %r" % (nerede, e))
+    except Exception:
+        pass
 
 
 def log(msg):
@@ -489,8 +611,8 @@ def _devir_note(mgr):
     note = "\n".join(parts)
     try:
         memory.remember(note, kind="devir")
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("_devir_note@597", _e)
     return note
 
 
@@ -550,8 +672,8 @@ def send(chat_id, text, buttons=None, yalniz=None):
 def answer_cb(cb_id, text=""):
     try:
         api("answerCallbackQuery", callback_query_id=cb_id, text=text)
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("answer_cb@658", _e)
 
 
 def download_file(file_id, suffix=""):
@@ -670,14 +792,14 @@ def _akit(proc, limit, on_event):
                     on_event(satir)
                 except Exception:
                     pass                      # akış asla cevabı düşürmesin
-        except Exception:
-            pass
+        except Exception as _e:
+            _sessiz("_stdout@778", _e)
 
     def _stderr():
         try:
             err[0] = proc.stderr.read() or ""
-        except Exception:
-            pass
+        except Exception as _e:
+            _sessiz("_stderr@784", _e)
 
     t1 = threading.Thread(target=_stdout, daemon=True)
     t2 = threading.Thread(target=_stderr, daemon=True)
@@ -737,8 +859,8 @@ def _run_kalici(kalici, prompt, model, session_id, resume, limit, on_usage, on_e
         try:  # kokpit "Ghost çalışıyor" göstergesi sonuç olayına bakar
             on_event(json.dumps({"type": "result", "is_error": True,
                                  "subtype": "timeout" if zaman_asimi else "kesildi"}))
-        except Exception:
-            pass
+        except Exception as _e:
+            _sessiz("_run_kalici@845", _e)
     if zaman_asimi:
         return ("%s (%d sn) — işi böl." % (engines.TIMEOUT_MARK, limit), session_id, True)
     if sonuc is None:
@@ -804,8 +926,8 @@ def run_claude(prompt, model, session_id=None, resume=False, on_proc=None,
                 try:
                     on_event(json.dumps({"type": "result", "is_error": True,
                                          "subtype": "timeout" if zaman_asimi else "kesildi"}))
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _sessiz("run_claude@912", _e)
             if zaman_asimi:
                 return ("%s (%d sn) — işi böl." % (engines.TIMEOUT_MARK, limit),
                         session_id, True)
@@ -865,8 +987,8 @@ def launch_rc(task=None):
             if m:
                 url = m.group(0)
                 break
-        except Exception:
-            pass
+        except Exception as _e:
+            _sessiz("launch_rc@973", _e)
     return name, url, None
 
 
@@ -939,8 +1061,8 @@ def _kill(proc):
     except Exception:
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except Exception as _e:
+            _sessiz("_kill@1047", _e)
 
 
 # ---------- İş yöneticisi ----------
@@ -1097,8 +1219,8 @@ class Manager:
                 log("sohbet işçisi hatası: %r" % e)
                 try:
                     send(self.chat_id, "⚠️ Sohbet hatası: %r" % e)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _sessiz("_chat_worker@1205", _e)
             finally:
                 kesik_mesaj.bitti()
 
@@ -1112,11 +1234,13 @@ class Manager:
         gönderiyordu. Üç kapı artık ayrı: zaman aşımı · kota sınırı · gerçek arıza.
         """
         model = self.state.get("model", DEFAULT_MODEL)
+        olay_bas = akis.son_id()   # Faz 1.10: zaman aşımında bu turun o ana kadarki metni kurtarılır
+        # Ölçü (2026-10-29): ilk görünür çıktının anı ve araç sayısı sarmalayıcıda tutulur.
         res, sid, err = run_claude(
             prompt, model, session_id=self.chat_sid,
             resume=self.chat_established, use_mcp=mcp_servers,
             timeout=CHAT_TIMEOUT, on_usage=on_usage,
-            on_event=akis.olay_kaydedici("sohbet"), kalici=self.kalici)
+            on_event=metrik.ilk_cikti_sarmala(akis.olay_kaydedici("sohbet")), kalici=self.kalici)
 
         # 0) FREEZE — tur FREEZE ile kesildiyse (freeze_uygula oturumu kapattı) ne tekrar ne yedek motor:
         # aksi hâlde kurtarma denemesi acil durdurmayı delip işi yeni oturumda sürdürürdü (2026-10-28).
@@ -1128,10 +1252,18 @@ class Manager:
         if err and engines.is_timeout(res):
             log("sohbet turu zaman aşımına uğradı (%d sn) — tekrar/failover yok"
                 % CHAT_TIMEOUT)
-            return ("%s\n\n(Ne tekrar denedim ne de yedek motora düştüm: zaman "
+            # Faz 1.10 (2026-10-29, denetim 09 #4): 1800 sn'de kayıp yok — o ana kadarki görünür metin
+            # "yarım" etiketiyle gider; 20 dk'yı aşan iş için /job devri önerilir.
+            try:
+                yarim, arac_n = akis.yarim_ozet(olay_bas)
+            except Exception:
+                yarim, arac_n = "", 0
+            yarim_blok = ("\n\n⏳ YARIM — kesilene kadar yazdıklarım (%d araç çağrısı):\n%s" % (arac_n, yarim)
+                          if yarim else "")
+            return ("%s%s\n\n(Ne tekrar denedim ne de yedek motora düştüm: zaman "
                     "aşımı bir arıza değil, iş bu tura sığmadı. 'devam et' de — "
-                    "kaldığım yerden sürerim; ya da işi /job ile ver, arka "
-                    "planda koşsun.)" % res, sid, err)
+                    "kaldığım yerden sürerim; 20 dk'yı aşacak işi /job ile ver, arka "
+                    "planda koşsun.)" % (res, yarim_blok), sid, err)
 
         if err:
             # 2) Oturum kurulamadı YA DA resume başarısız (oturum kaybolmuş) →
@@ -1165,10 +1297,8 @@ class Manager:
             # sınır arıza değildir, sessizce zayıf motora geçmek yerine
             # sınırı göster — kararı Sahip verir.
             if engines.is_cost_limit(res):
-                res = ("%s\n\n(yedek motora düşülmedi: bu bir erişim arızası "
-                       "değil, kullanım/kota sınırı. Yine de codex'e sormamı "
-                       "istersen söyle.)" % res)
-                log("failover atlandı: maliyet/kota sınırı (sohbet)")
+                log("failover atlandı: maliyet/kota sınırı (sohbet): %s" % (res or "")[:120])
+                res = _kota_mesaji(res)
             else:
                 # Yedek motora HAM kullanıcı mesajı gider: prompt içindeki
                 # araç notu/persona MCP'siz bir motor için yanıltıcı.
@@ -1180,8 +1310,8 @@ class Manager:
     def _chat_one(self, text, spoken):
             try:
                 api("sendChatAction", chat_id=self.chat_id, action="typing")
-            except Exception:
-                pass
+            except Exception as _e:
+                _sessiz("_chat_one@1296", _e)
             # Oturum tazeleme: OTOMATİK DEĞİL (CHAT_AUTO_ROTATE varsayılan kapalı).
             # Kapılar ölçülür, ama kendiliğinden kesmez — işin ortasında şerit
             # ölmesin diye. Doluluk yalnız uyarı olur; sıfırlamayı /tazele ve
@@ -1275,11 +1405,13 @@ class Manager:
                 self.chat_cost += c            # bu oturum (tazelemede sıfırlanır)
                 self.chat_cost_total += c      # tüm zamanlar (hiç sıfırlanmaz)
 
+            mesaj_ts = time.time()             # ölçü: tur başlangıcı (metrik.jsonl)
             nabiz = _nabiz_basla(self.chat_id)
             try:
                 res, sid, err = self._chat_run(prompt, text, mcp_servers, _usage)
             finally:
                 nabiz.set()
+            ilk_ts, arac_n = metrik.ilk_cikti()
             self.chat_established = True
             self.chat_turns += 1
             self.chat_last_ts = time.time()    # atalet kapısının referansı
@@ -1304,11 +1436,18 @@ class Manager:
                        "/tazele (bağlamı sıfırla, son konuşmayı devret) ya da "
                        "/new (temiz sayfa)." % adv)
             self._save_chat()  # şeridi diske yaz → sonraki restart unutmasın
+            res = _cikti_kurali(res)         # uzun cevap Masa'ya, sohbete özet (2026-10-29)
             send(self.chat_id, res)
+            try:  # ölçü: mesaj → ilk çıktı → cevap (metrik.jsonl); kanal = birincil kanal
+                metrik.tur_kaydet(channels.birincil(), mesaj_ts, ilk_ts, time.time(),
+                                  zaman_asimi=bool(err and engines.is_timeout(res)),
+                                  arac=arac_n, uzunluk=len(res or ""))
+            except Exception as _e:
+                _sessiz("_usage@1428", _e)
             try:  # abonelik kotası bu turla değişti → Nabız 5 dk eşikle tazelensin
                 kota.arka_planda_yenile(min_yas=300)
-            except Exception:
-                pass
+            except Exception as _e:
+                _sessiz("_usage@1432", _e)
             # Sesle sorulduysa ya da /sesli on ise cevabı seslendir
             if spoken or self.state.get("voice"):
                 threading.Thread(target=voice.speak_to,
@@ -1341,8 +1480,8 @@ class Manager:
                 try:
                     self._set(jid, status="hata", ended=time.strftime("%F %T"))
                     send(self.chat_id, "❌ İş #%s içeride hata verdi: %r" % (jid, e))
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _sessiz("_job_worker@1466", _e)
 
     def _job_one(self, jid, text, model):
             if self.jobs.get(jid, {}).get("status") == "iptal":
@@ -1458,8 +1597,8 @@ class Manager:
                                        ("\n[İKİNCİ GÖZ: %s — %s]" % (karar, denetim)
                                         if (takildi or dogrulanmadi) else "")),
                                     kind="iş-dogrulanmadi" if (takildi or dogrulanmadi) else "iş")
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _sessiz("_job_one@1583", _e)
             icon = "❌" if err else ("⚠️" if takildi else ("☑️" if dogrulanmadi else "✅"))
             kind_lbl = self.jobs[jid].get("department") or kind
             send(self.chat_id, "%s %s tamamlandı (%d sn):\n\n%s%s" %
@@ -1471,6 +1610,14 @@ class Manager:
                     _sahne.isten(res, "İş #%d · %s" % (jid, kind_lbl))
                 except Exception as e:
                     log("iş sahnesi basılamadı (#%s): %r" % (jid, e))
+            if not err and not takildi:  # Faz 1.6 (2026-10-29): çıktıdaki ÖNERİLEN EYLEM bloğu → onay-komut kartı (≤2)
+                try:
+                    from ghost import onerilen as _onerilen
+                    acilan = _onerilen.kart_ac(res, "İş #%d" % jid)
+                    if acilan:
+                        log("iş #%d önerilen eylem kartı: %s" % (jid, acilan))
+                except Exception as e:
+                    log("önerilen eylem kartı açılamadı (#%s): %r" % (jid, e))
             try:  # biten iş → telefona push (Faz 2 push kapsamı: onay · iş · alarm)
                 apns.herkese("%s İş #%d %s" % (icon, jid, durum),
                              "%s: %s" % (kind_lbl, res[:200]), {"sekme": "akis"},
@@ -1702,23 +1849,23 @@ def saglik_text(mgr):
     try:
         servers = json.load(open(MCP_CONFIG)).get("mcpServers", {})
         lines.append("MCP: " + ", ".join(servers.keys()))
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("saglik_text@1835", _e)
     counts = {}
     try:
         for fn in os.listdir(JOBS_DIR):
             if fn.endswith(".json"):
                 st = json.load(open(os.path.join(JOBS_DIR, fn))).get("status", "?")
                 counts[st] = counts.get(st, 0) + 1
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("saglik_text@1843", _e)
     if counts:
         lines.append("İşler: " + ", ".join("%s:%d" % (k, v) for k, v in counts.items()))
     try:
         stv = os.statvfs(BASE)
         lines.append("Disk boş: %.1f GB" % (stv.f_bavail * stv.f_frsize / 1e9))
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("saglik_text@1850", _e)
     return "\n".join(lines)
 
 
@@ -1741,8 +1888,8 @@ def durum_text(mgr):
             len(schedule.list_schedules()), len(goals.list_goals()),
             len(entities.search("")) if False else _entity_count())
         lines.append(core)
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("durum_text@1874", _e)
     # Sohbet bağlamı: otomatik tazeleme kapalı olduğu için sayı GÖRÜNÜR olmalı —
     # kararı Sahip veriyorsa ölçüyü de görmeli.
     # Dolar YOK (Sahip 2026-09-07): abonelikte gerçek kısıt kota — oturum/haftalık/Fable
@@ -1758,8 +1905,8 @@ def durum_text(mgr):
             lines.append("Kota: " + " · ".join(
                 "%s %%%d" % (l["ad"].replace("Haftalık · ", "hafta/").replace(" (5 saat)", ""), l.get("yuzde", 0))
                 for l in k["limitler"]) + (" · ölçüm eski" if k.get("bayat") else ""))
-    except Exception:
-        pass
+    except Exception as _e:
+        _sessiz("durum_text@1891", _e)
     engs = ", ".join(n for n, _c, _n in engines.available())
     _m = mgr.state.get("model", DEFAULT_MODEL)
     lines.append("Motor: %s → %s (kurulu: %s) | Guard: %s | Ses: %s" % (
@@ -1979,8 +2126,8 @@ def _reconcile_jobs():
                 save_json(path, j)
                 orphaned.append((fn.replace(".json", ""),
                                  j.get("department") or j.get("kind", "iş")))
-            except Exception:
-                pass
+            except Exception as _e:
+                _sessiz("_reconcile_jobs@2112", _e)
     if orphaned:
         log("restart uzlaşması: %d yetim iş kesildi (%s)"
             % (len(orphaned), ", ".join("#%s" % o[0] for o in orphaned)))
@@ -2077,8 +2224,8 @@ def check_kokpit(mgr):
             log("kokpit mesaj hatası (%s): %r" % (text[:80], e))
             try:
                 send(mgr.chat_id, "⚠️ Komut işlenemedi: %r" % e)
-            except Exception:
-                pass
+            except Exception as _e:
+                _sessiz("check_kokpit@2210", _e)
     for eksik in _grup_zaman_asimi():        # parçası gelmeyen grup: eldekiyle devam
         try:
             mgr.chat(_medya_prompt_coklu(eksik))
@@ -2162,6 +2309,19 @@ def check_requests(mgr):
         send(mgr.chat_id, "⚠️ Otomatik istek #%s (%s) köprü yeniden başlarken yarıda kaldı; "
              "iki kez koşmasın diye yeniden başlatılmadı:\n%s"
              % (ev["id"], ev.get("source", ""), str(p.get("prompt") or p.get("kind") or "")[:200]))
+    # Kota-farkında zamanlama (2026-10-29, denetim 04 Ö7 / 02 b2): 5 saatlik pencere doluysa
+    # özerk/zamanlı istekler kuyrukta BEKLER (pending kalır), pencere açılınca çekilir.
+    # 2026-10-28'de iş #55 "5-hour limit" ile 8 sn'de ölmüştü. Ölçüm bayatsa engel yok.
+    try:
+        uygun, neden = kota.ozerk_uygun()
+    except Exception:
+        uygun, neden = True, ""
+    if not uygun:
+        if time.time() - _KOTA_ERTELE[0] > 600:
+            _KOTA_ERTELE[0] = time.time()
+            log("özerk istekler ertelendi: %s" % neden)
+            metrik.sayac("kota_erteleme")
+        return
     for _ in range(20):  # tur başına tavan — tek tur sonsuz döngüye girmesin
         ev = bus.claim_next("request")   # atomik sahiplenme (pending → claimed)
         if not ev:
@@ -2291,8 +2451,8 @@ def main():
                 "♻️ Yeniden başladım. Restart sırasında %d iş yarıda kaldı "
                 "(kesildi işaretlendi): %s\nGerekeni tekrar başlatabilirsin."
                 % (len(orphaned), ", ".join(o[1] for o in orphaned[:5]))))
-        except Exception:
-            pass
+        except Exception as _e:
+            _sessiz("_kapanis@2437", _e)
     # Kesik sohbet mesajı: önceki köprü bir cevabın ortasında öldüyse (apt/needrestart
     # 06:00-07:00 penceresi, kendi restart'ı) mesajı BİR kez yeniden al ve söyle.
     try:
@@ -2311,15 +2471,15 @@ def main():
                          "iki kez kesildi, döngüye girmiyorum"
                          if kesik["neden"] == "deneme" else "2 saatten eski, tekrar koşmadım",
                          ozet))
-            except Exception:
-                pass
+            except Exception as _e:
+                _sessiz("_kapanis@2457", _e)
         else:
             log("kesik mesaj yeniden kuyrukta (%d sn önce): %s" % (kesik["yas"], ozet))
             try:
                 send(owner, "♻️ Köprü cevabın ortasında yeniden başlamıştı; mesajını "
                      "yeniden alıyorum: “%s”" % ozet)
-            except Exception:
-                pass
+            except Exception as _e:
+                _sessiz("_kapanis@2464", _e)
             mgr.chat(kesik["text"], spoken=kesik["spoken"], deneme=kesik["deneme"])
     try:  # telefonda "/" yazınca otomatik tamamlama menüsü
         api("setMyCommands", commands=json.dumps(
@@ -2476,6 +2636,16 @@ def main():
             # 51 ardışık) aralarında görünmüyordu. 3'e ulaşınca yaz, sonra her 10'da.
             if poll_fail_streak == 3 or (poll_fail_streak > 3 and poll_fail_streak % 10 == 0):
                 log("poll hata (ardışık %d): %r" % (poll_fail_streak, e))
+            # 409 Conflict = aynı bot token'ıyla İKİNCİ bir getUpdates tüketicisi (2026-10-28'de 18 kez,
+            # kaynağı bulunamadı — denetim 02 b1). İlk 409'da kanıt topla: webhook var mı, biz kimiz.
+            if isinstance(e, urllib.error.HTTPError) and getattr(e, "code", 0) == 409 and poll_fail_streak == 1:
+                try:
+                    wi = api("getWebhookInfo", http_timeout=15).get("result", {})
+                except Exception as _e:
+                    wi = {"hata": repr(_e)}
+                log("poll 409 Conflict — ikinci tüketici şüphesi; host=%s pid=%d rol=%s webhook=%s"
+                    % (os.uname().nodename, os.getpid(), ROLE, json.dumps(wi, ensure_ascii=False)[:300]))
+                metrik.sayac("poll_409")
             time.sleep(3)
             continue
         # Uzun poll sırasında baton el değiştirmiş olabilir → sahiplik teyidi.
@@ -2492,8 +2662,8 @@ def main():
             try:  # restart'ta çift işlemeye karşı kalıcılaştır
                 with open(OFFSET_FILE, "w", encoding="utf-8") as f:
                     f.write(str(offset))
-            except Exception:
-                pass
+            except Exception as _e:
+                _sessiz("_kapanis@2648", _e)
 
             # buton dokunuşları
             cb = u.get("callback_query")
@@ -2532,8 +2702,8 @@ def main():
                     try:  # sahibi doğrulanmış, iletilmemiş mesaj: gerçek onay kapısı
                         from ghost import sahne as _sahne
                         _sahne.sahip_onayi_kaydet(text, "telegram", uid=uid)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        _sessiz("_kapanis@2688", _e)
                 kokpit.outbox_yaz(text, "sahip")  # kokpit dökümü: sahibin tarafı
             # FREEZE: acil durdurma — sadece durum/çözme komutları çalışır
             if governance.is_frozen():
@@ -2567,8 +2737,8 @@ def main():
                 log("komut hatası (%s): %r" % (text[:80], e))
                 try:
                     send(chat_id, "⚠️ Komut işlenemedi: %r" % e)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _sessiz("_kapanis@2723", _e)
 
 
 if __name__ == "__main__":

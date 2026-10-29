@@ -28,6 +28,9 @@ GET_ONLY = sahip.get_only()
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPS = os.path.join(BASE, "ops")
 STATE_FILE = os.path.join(OPS, "uptime_state.json")
+# Olay müdahalesi zinciri AYRI dosyada: uptime_state.json'ı health/api/trafik/köprü {url: bool}
+# diye okur, oraya başka anahtar koymak onları kırar (2026-10-29).
+MUDAHALE_FILE = os.path.join(OPS, "uptime_mudahale_state.json")
 LOG_FILE = os.path.join(OPS, "uptime.log")
 
 ENV = {}
@@ -104,6 +107,26 @@ def check(url):
         return False
 
 
+# Olay müdahalesi eşiği (2026-10-29, denetim 02-durum d4): 4/4 otomatik "OLAY MÜDAHALESİ" kartı
+# Sahip tarafından reddedildi — hepsi geçici erişim dalgalanmasıydı (30 günde gerçek DOWN 0).
+# Artık uç 2 ARDIŞIK turda düşük VE ilk düşüşten bu yana ≥5 dk geçmişse, kesinti başına BİR kez.
+MUDAHALE_ESIK_SN = 5 * 60
+
+
+def mudahale_gerekir_mi(url, simdi, dusuk_onceki, mudahale_onceki, esik_sn=MUDAHALE_ESIK_SN):
+    """Saf: bu turda DOWN olan url için olay işi açılsın mı?
+    dusuk_onceki: {url: ilk_dusus_ts} (önceki turdan) · mudahale_onceki: {url: ts} (bu kesintide açıldı)."""
+    ilk = dusuk_onceki.get(url)
+    if ilk is None:
+        return False                      # ilk tur: tek seferlik dalgalanma olabilir
+    if url in mudahale_onceki:
+        return False                      # bu kesinti için zaten açıldı
+    try:
+        return simdi - float(ilk) >= esik_sn
+    except (TypeError, ValueError):
+        return False
+
+
 def main():
     if not vekil.hazir("telegram", ENV):
         raise SystemExit(
@@ -120,7 +143,15 @@ def main():
     # ayrı systemd timer'ı — birlikte susmaları için sistemin tamamı durmalı.
     changes = heartbeat.report(["selfcheck"])
 
-    cur, down_now = {}, []
+    simdi = time.time()
+    try:
+        with open(MUDAHALE_FILE, encoding="utf-8") as f:
+            mz = json.load(f)
+    except Exception:
+        mz = {}
+    dusuk_onceki = mz.get("dusuk") or {}          # {url: ilk düşüş ts}
+    mudahale_onceki = mz.get("mudahale") or {}    # {url: açıldığı ts}
+    cur, down_now, dusuk, mudahale = {}, [], {}, {}
     for url in SITES:
         ok = check(url)
         if not ok:
@@ -130,14 +161,26 @@ def main():
         before = prev.get(url)
         if before is None and not ok:
             changes.append("🔴 %s ERİŞİLEMİYOR" % url)
-            down_now.append(url)
         elif before is True and not ok:
             changes.append("🔴 %s DÜŞTÜ" % url)
-            down_now.append(url)
         elif before is False and ok:
             changes.append("🟢 %s ayağa kalktı" % url)
+        if not ok:
+            dusuk[url] = dusuk_onceki.get(url) or simdi
+            if url in mudahale_onceki:
+                mudahale[url] = mudahale_onceki[url]
+            if mudahale_gerekir_mi(url, simdi, dusuk_onceki, mudahale_onceki):
+                down_now.append(url)
+                mudahale[url] = simdi
+    try:  # ayağa kalkan uç zincirden düşer; yazılamazsa nöbetçi durmaz
+        with open(MUDAHALE_FILE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"dusuk": dusuk, "mudahale": mudahale}, f)
+        os.replace(MUDAHALE_FILE + ".tmp", MUDAHALE_FILE)
+    except Exception as e:
+        log("müdahale durumu yazılamadı: %r" % e)
 
-    # DÜŞEN her uç için otomatik araştırma isteği bırak (kendi kendini iyileştirme)
+    # Kalıcı düşen uç için otomatik araştırma isteği bırak (kendi kendini iyileştirme) —
+    # eşik: 2 ardışık DOWN + 5 dk (mudahale_gerekir_mi)
     if down_now:
         for url in down_now:
             prompt = (

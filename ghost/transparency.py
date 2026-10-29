@@ -5,6 +5,7 @@ alet üretimleri, freeze olayları. Yönetişim omurgasının görünür yüzü
 (VISION.md): güç arttıkça hesap verebilirlik de artar. Haftalık cron çağırır.
 """
 import json
+import os
 import time
 from collections import Counter
 
@@ -70,4 +71,50 @@ def report(days=7, now=None):
         for r in sensitive[-8:]:
             lines.append("• [%s] %s: %s" % (r["ts"][5:16], r.get("action", ""),
                                             r.get("detail", "")[:80]))
+    # 2026-10-29 (bütünsel denetim 09 #9, 08 #7): ölçü ve ekonomi satırları —
+    # ölçülmeyen sürtünme azaltılamaz, hatırlanan maliyet sayılamaz.
+    try:
+        from ghost import metrik
+        lines.append("")
+        lines.append(metrik.metin(days))
+    except Exception:
+        pass
+    try:
+        lines.append(ekonomi_satiri())
+    except Exception:
+        pass
     return "\n".join(lines)
+
+
+def ekonomi_satiri():
+    """'Ghost ekonomi' tek satır: sabit gider (ops/giderler.json) + haftalık kota + gelir (biz_state)."""
+    try:
+        with open(os.path.join(config.OPS, "giderler.json"), encoding="utf-8") as f:
+            g = json.load(f)
+        toplam = sum(float(k.get("aylik_usd") or 0) for k in g.get("kalemler", []))
+        tahmin = sum(1 for k in g.get("kalemler", []) if k.get("durum") != "dogrulandi")
+        gider = "gider ≈ $%d/ay (%d kalem tahmin)" % (round(toplam), tahmin)
+    except Exception:
+        gider = "gider: ops/giderler.json yok"
+    kota_s = ""
+    try:
+        from ghost import kota
+        h = next((l for l in kota.oku().get("limitler", []) if l.get("tur") == "weekly_all"), None)
+        if h:
+            kota_s = " · haftalık kota %%%d" % int(h.get("yuzde") or 0)
+    except Exception:
+        pass
+    gelir = ""
+    try:
+        with open(os.path.join(config.OPS, "biz_state.json"), encoding="utf-8") as f:
+            b = json.load(f)
+        ucretli = b.get("d1_paid", b.get("d1_ucretli"))
+        if ucretli is not None:
+            gelir = " · AppA ücretli %s" % ucretli
+        if b.get("appb_proceeds") is not None:
+            gelir += " · App B ciro $%s" % b["appb_proceeds"]
+        else:
+            gelir += " · App B satış: okunamıyor (vendor no)"
+    except Exception:
+        pass
+    return "💰 Ghost ekonomi: %s%s%s" % (gider, kota_s, gelir or " · gelir $0")

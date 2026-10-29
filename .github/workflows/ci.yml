@@ -8,6 +8,8 @@ on:
   push:
     paths: ["ghost/**", "ops/**", "tests/**", ".github/workflows/**"]
   pull_request:
+permissions:
+  contents: read      # 5. tur denetim: GITHUB_TOKEN varsayılan yetkisi daraltıldı — CI yalnız kodu okur
 jobs:
   test:
     runs-on: ubuntu-latest

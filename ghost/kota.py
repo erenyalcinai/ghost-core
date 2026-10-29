@@ -235,6 +235,48 @@ def metin():
     return "%s\n%s\n%s" % (bas, "\n".join(cizgi), son)
 
 
+# ---------- kota-farkında zamanlama (2026-10-29, bütünsel denetim 04 Ö7 / 02 b2) ----------
+PENCERE_ESIK = 85      # 5 saatlik pencere bu yüzdeyi aştıysa özerk iş ERTELENİR
+PENCERE_BAYAT_SN = 2 * 3600   # ölçüm bundan eskiyse (Mac kapalı) karar verilemez → engelleme
+
+
+def pencere_durumu(simdi=None):
+    """5 saatlik oturum penceresi: {bilinir, yuzde, dolu, sifirlanma_ts, sifirlanma_metin, yas_sn}.
+
+    NEDEN: 2026-10-28'de pencere iki kez doldu; zamanlı iş #55 8 sn'de "5-hour limit"
+    hatasıyla öldü, sohbet 1800 sn bekledi. Özerk iş kuyruktan çekilmeden önce buraya
+    bakar; dolu ise sıfırlanma anına ertelenir. Ölçüm bayatsa (Mac'ten okunur) ya da
+    yoksa `bilinir=False` döner ve kimse engellenmez (yanlış pozitif = kayıp iş).
+    """
+    simdi = simdi or time.time()
+    ham = _oku_ham()
+    yas = max(0, int(simdi) - int(ham.get("ts", 0) or 0))
+    oturum = next((l for l in ham.get("limitler") or [] if l.get("tur") == "session"), None)
+    if not oturum or yas > PENCERE_BAYAT_SN:
+        return {"bilinir": False, "yuzde": None, "dolu": False, "sifirlanma_ts": None,
+                "sifirlanma_metin": "", "yas_sn": yas}
+    sifir_ts = None
+    try:
+        from datetime import datetime
+        if oturum.get("sifirlanma"):
+            sifir_ts = datetime.fromisoformat(oturum["sifirlanma"]).timestamp()
+    except Exception:
+        sifir_ts = None
+    yuzde = int(oturum.get("yuzde") or 0)
+    # pencere geçmişte sıfırlanmışsa ölçüm bayat sayılır → dolu değil
+    dolu = yuzde >= PENCERE_ESIK and (sifir_ts is None or sifir_ts > simdi)
+    return {"bilinir": True, "yuzde": yuzde, "dolu": dolu, "sifirlanma_ts": sifir_ts,
+            "sifirlanma_metin": oturum.get("sifirlanma_metin") or "", "yas_sn": yas}
+
+
+def ozerk_uygun(simdi=None):
+    """Özerk/zamanlı iş şimdi koşsun mu? (uygun, gerekçe)."""
+    d = pencere_durumu(simdi)
+    if d["dolu"]:
+        return False, "kota penceresi %%%d dolu, sıfırlanma %s" % (d["yuzde"], d["sifirlanma_metin"] or "?")
+    return True, ""
+
+
 def main(argv):
     if not argv or argv[0] == "oku":
         print(json.dumps(oku(), ensure_ascii=False, indent=1))

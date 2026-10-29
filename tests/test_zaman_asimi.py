@@ -125,7 +125,8 @@ class TestSohbetZamanAsimiKapisi(unittest.TestCase):
         kota = ("⚠️ usage limit reached", "sid-0", True)
         mgr, res, err, eng = self._kos([kota, kota])
         self.assertEqual(eng, 0)
-        self.assertIn("kullanım/kota sınırı", res)
+        # 2026-10-29 Faz 0: ham İngilizce metin yerine tek Türkçe satır (_kota_mesaji); eski metin de kabul (geçiş)
+        self.assertTrue("kullanım/kota sınırı" in res or "Kota penceresi dolu" in res, res)
 
 
 class TestNabiz(unittest.TestCase):

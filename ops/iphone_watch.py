@@ -62,10 +62,18 @@ def _oku(p, vars_=None):
         return vars_
 
 
-def bildir(metin):
+def bildir(metin, duzeldi=False):
+    """GHOST sınıfı alarm (2026-10-29): 30 günde 32 "📵 iPhone durumu güncellenmedi" mesajı
+    sahibe gitti, elinden gelen yoktu (Mac/işçi/Wi-Fi meselesi; Sahip 2026-10-29: 13 mini şu an
+    Wi-Fi'da değil, sorun yok). Kayıt Nabız'da sarı nokta olur, Telegram'a düşmez.
+    Eskisi: ops/send_telegram.py alt süreci."""
     try:
-        subprocess.run([sys.executable, os.path.join(OPS, "send_telegram.py")],
-                       input=metin, text=True, timeout=60)
+        sys.path.insert(0, BASE)
+        from ghost import alarm
+        if duzeldi:
+            alarm.kapat("iphone", "durum")
+        else:
+            alarm.bildir("iphone", metin, sinif="ghost", anahtar="durum")
     except Exception:
         pass
 
@@ -160,7 +168,7 @@ def main():
         bildir("\n".join(uyarilar))
         nobet["son_imza"] = imza
     elif not uyarilar and nobet.get("son_imza"):
-        bildir("✅ iPhone rayı normale döndü.")
+        bildir("✅ iPhone rayı normale döndü.", duzeldi=True)
         nobet["son_imza"] = ""
 
     nobet["son_kontrol"] = int(time.time())

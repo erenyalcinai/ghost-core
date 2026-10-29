@@ -28,6 +28,8 @@ _DOGRUDAN = {
     "elevenlabs": ("https://api.elevenlabs.io", "ELEVENLABS_API_KEY", "xi-api-key", "%s"),
     "sentry": ("https://sentry.io", "SENTRY_ACCESS_TOKEN", "Authorization", "Bearer %s"),
     "asc": ("https://api.appstoreconnect.apple.com", "ASC_KEY_PATH", "Authorization", None),   # JWT
+    # 2026-10-29 Faz 0.8: ikinci ASC anahtarı (ghost-finans: Finance + Customer Support) — satış/finans raporları, yorum cevabı
+    "asc-finans": ("https://api.appstoreconnect.apple.com", "ASC_FIN_KEY_PATH", "Authorization", None),
     "github-mcp": ("https://api.githubcopilot.com", "GITHUB_MCP_TOKEN", "Authorization", "Bearer %s"),
     "github-mcp-yaz": ("https://api.githubcopilot.com", "GITHUB_MCP_YAZ_TOKEN", "Authorization", "Bearer %s"),
     "posthog-mcp": ("https://mcp.posthog.com", "POSTHOG_MCP_KEY", "Authorization", "Bearer %s"),   # 6. tur: http MCP, readonly zorlanır
@@ -119,23 +121,24 @@ def basliklar(servis, env=None):
     if aktif(env, _DOGRUDAN[servis][1]):
         return {}
     _, anahtar, ad, bicim = _DOGRUDAN[servis]
-    if servis == "asc":
-        t = _asc_jwt_yerel(_env(env))
+    if servis in ("asc", "asc-finans"):
+        t = _asc_jwt_yerel(_env(env), anahtar, "ASC_FIN_KEY_ID" if servis == "asc-finans" else "ASC_KEY_ID")
         return {"Authorization": "Bearer " + t} if t else {}
     deger = _env(env).get(anahtar, "")
     return {ad: bicim % deger} if (ad and deger) else {}
 
 
-def _asc_jwt_yerel(e):
-    """Vekil yokken (Mac, açık çekirdek) App Store Connect JWT'si yerelde, ortamdaki .p8 ile."""
+def _asc_jwt_yerel(e, yol_ad="ASC_KEY_PATH", kid_ad="ASC_KEY_ID"):
+    """Vekil yokken (Mac, açık çekirdek) App Store Connect JWT'si yerelde, ortamdaki .p8 ile.
+    2026-10-29: ikinci anahtar (asc-finans) için yol/kid adları parametre."""
     try:
         import time
         import jwt
-        with open(e["ASC_KEY_PATH"], encoding="utf-8") as f:
+        with open(e[yol_ad], encoding="utf-8") as f:
             k = f.read()
         n = int(time.time())
         return jwt.encode({"iss": e["ASC_ISSUER_ID"], "iat": n, "exp": n + 600, "aud": "appstoreconnect-v1"},
-                          k, algorithm="ES256", headers={"kid": e["ASC_KEY_ID"]})
+                          k, algorithm="ES256", headers={"kid": e[kid_ad]})
     except Exception:
         return None
 

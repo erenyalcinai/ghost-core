@@ -17,7 +17,8 @@ import time
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPS = os.path.join(BASE, "ops")
 BACKUP_DIR = os.path.join(OPS, "backups")
-KEEP = 7  # son 7 gün
+KEEP = 3  # son 3 gün (2026-10-29: 7→3; uzak gpg kopya ops/mem_backup.py ile GitHub 'hafiza'
+          # dalında günlük, yerel kopya yalnız kaza/bozulma içindir; 1,3 GB → ~0,6 GB)
 
 
 def _sqlite_backup(src, dst):

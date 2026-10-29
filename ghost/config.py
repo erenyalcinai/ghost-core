@@ -45,6 +45,12 @@ def _parse_env_file(path):
     return out
 
 
+def baglan(timeout=10):
+    """Tek bağlantı noktası (Faz 1.9): WAL + şema göçleri (ghost/semalar.py)."""
+    from ghost import semalar
+    return semalar.baglan(timeout=timeout)
+
+
 def load_env():
     """.env + secrets.env birleşik (secrets üstün gelir)."""
     env = _parse_env_file(os.path.join(BASE, ".env"))

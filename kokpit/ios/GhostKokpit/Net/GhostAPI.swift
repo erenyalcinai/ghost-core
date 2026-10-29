@@ -283,6 +283,8 @@ final class GhostAPI {
     func masaKart(_ id: Int) async throws -> MasaKart { try await istek("GET", "/v1/masa/\(id)") }
 
     func masaDosya(_ id: Int) async throws -> Data { try await kare("/v1/masa/\(id)/dosya") }
+    /// Faz 1.13b (2026-10-29): kartı PDF olarak indir (sunucu Chromium yoksa HTML döner; Paylaş sayfası yine açılır).
+    func masaPdf(_ id: Int) async throws -> Data { try await kare("/v1/masa/\(id)/pdf") }
 
     /// Uygulamadan eklenen her şey yazar=sahip. tur: klasor | not | baglanti.
     func masaEkle(tur: String, ad: String, ebeveyn: Int?, icerik: String? = nil) async throws -> MasaYazYanit {

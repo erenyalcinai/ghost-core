@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS kokpit_nonces(nonce TEXT PRIMARY KEY, ts REAL);
 """
 _EK_SUTUNLAR = (("apns_token", "TEXT"), ("apns_env", "TEXT"),   # Faz 2 (push)
                 ("la_start_token", "TEXT"))                       # Live Activity push-to-start
-_EK_OUTBOX = (("medya", "TEXT"),)   # Faz 4: Ghost'un/sahibin görseli, videosu, sesi, belgesi (JSON)
+_EK_OUTBOX = (("medya", "TEXT"),    # Faz 4: Ghost'un/sahibin görseli, videosu, sesi, belgesi (JSON)
+              ("kanal", "TEXT"))    # Faz 1.13 (2026-10-29): satır hangi kanaldan (kokpit|telegram|…) — teslim ölçüsü
 MEDYA_DIZIN = "kokpit_medya"        # ops/ altında; kaynak dosya buraya KOPYALANIR (özgünü silinebilir)
 MEDYA_TAVAN = 200 * 1024 * 1024     # dizin bu boyutu aşınca en eski dosyalar budanır
 SCHEMA += """
@@ -154,9 +155,15 @@ def medya_sakla(yol, ad=None, tur=None, kopyala=True):
         return None
 
 
-def outbox_yaz(metin, kaynak="ghost", butonlar=None, medya=None):
+def outbox_yaz(metin, kaynak="ghost", butonlar=None, medya=None, kanal=None):
     """Döküme bir satır ekle. Asla fırlatmaz — köprünün send()'ini düşürmesin.
-    medya: dosya yolu (kopyalanır) ya da medya_sakla() sözlüğü."""
+    medya: dosya yolu (kopyalanır) ya da medya_sakla() sözlüğü. kanal: verilmezse channels.son_kanal()."""
+    if kanal is None:
+        try:
+            from ghost import channels as _ch
+            kanal = _ch.son_kanal() or ""
+        except Exception:
+            kanal = ""
     if kaynak == "sahip" and metin:
         try:  # cevap hangi kanaldan/biçimde gelirse gelsin sahnedeki soru kapanır (tek huni);
             # buton cevabı id'li, düz metin sahnedeki bekleyen butona göre (sahne.cozumle_serbest)
@@ -172,9 +179,9 @@ def outbox_yaz(metin, kaynak="ghost", butonlar=None, medya=None):
             medya = medya_sakla(medya)
         c = _db()
         cur = c.execute(
-            "INSERT INTO kokpit_outbox(ts, kaynak, metin, butonlar, medya) VALUES(?,?,?,?,?)",
+            "INSERT INTO kokpit_outbox(ts, kaynak, metin, butonlar, medya, kanal) VALUES(?,?,?,?,?,?)",
             (_now(), kaynak, metin or "", _butonlar_json(butonlar),
-             json.dumps(medya, ensure_ascii=False) if medya else None))
+             json.dumps(medya, ensure_ascii=False) if medya else None, kanal or ""))
         rid = cur.lastrowid
         if rid % 200 == 0:  # ara sıra buda
             c.execute("DELETE FROM kokpit_outbox WHERE id < ?", (rid - OUTBOX_TUT,))

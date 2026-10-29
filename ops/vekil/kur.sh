@@ -21,14 +21,16 @@ J=/home/ghost/jarvis
 SRC=$J/ops/vekil
 DURUM=/var/lib/ghost-vekil
 LIB=/usr/local/lib/ghost-vekil
-ANAHTARLAR="CLOUDFLARE_API_TOKEN POSTHOG_API_KEY POSTHOG_HOST GHOST_GITHUB_TOKEN TELEGRAM_BOT_TOKEN ELEVENLABS_API_KEY SENTRY_ACCESS_TOKEN ASC_ISSUER_ID ASC_KEY_ID APNS_TEAM_ID APNS_KEY_ID GITHUB_MCP_TOKEN GITHUB_MCP_YAZ_TOKEN POSTHOG_MCP_KEY GMAIL_ADDRESS GMAIL_APP_PASSWORD HF_API_KEY_ID HF_API_KEY_SECRET WIKIDATA_BOT_PASS TELEGRAM_OWNER_ID CLOUDFLARE_ACCOUNT_ID POSTHOG_PROJECT_ID"
+ANAHTARLAR="CLOUDFLARE_API_TOKEN POSTHOG_API_KEY POSTHOG_HOST GHOST_GITHUB_TOKEN TELEGRAM_BOT_TOKEN ELEVENLABS_API_KEY SENTRY_ACCESS_TOKEN ASC_ISSUER_ID ASC_KEY_ID ASC_FIN_KEY_ID APNS_TEAM_ID APNS_KEY_ID GITHUB_MCP_TOKEN GITHUB_MCP_YAZ_TOKEN POSTHOG_MCP_KEY GMAIL_ADDRESS GMAIL_APP_PASSWORD HF_API_KEY_ID HF_API_KEY_SECRET WIKIDATA_BOT_PASS TELEGRAM_OWNER_ID CLOUDFLARE_ACCOUNT_ID POSTHOG_PROJECT_ID"
 [ "$(id -u)" = 0 ] || { echo "root gerekir" >&2; exit 1; }
 
 # ---------------------------------------------------------------- DON=1: anahtar yenileme (stdin)
 if [ "${DON:-}" = 1 ]; then
     [ -s "$DURUM/sirlar.env" ] || { echo "sirlar.env yok — önce kurulum" >&2; exit 1; }
     echo "== anahtar yenileme: AD=DEĞER satırlarını yapıştır, bitince Ctrl-D (değer ekrana basılmaz)"
-    SONUC="$(ANAHTARLAR="$ANAHTARLAR" /usr/bin/python3 -I - "$DURUM/sirlar.env" "$J/mcp-sentry.json" /var/lib/ghost-onay/ayar.json <<'EOF'
+    # 2026-10-29 (GPT kod incelemesi, Sahip iletti): `python3 -` kaynağı stdin'den okuyordu → yapıştırılan AD=DEĞER satırları
+    # python'a hiç ulaşmıyor, her seferinde "yeni değer yok" çıkardı. Betik fd 3'ten, stdin terminal/boru olarak kalır.
+    SONUC="$(ANAHTARLAR="$ANAHTARLAR" /usr/bin/python3 -I /dev/fd/3 "$DURUM/sirlar.env" "$J/mcp-sentry.json" /var/lib/ghost-onay/ayar.json 3<<'EOF'
 import json, os, re, sys
 hedef, sentry_mcp, onay_ayar = sys.argv[1:4]
 izinli = set(os.environ["ANAHTARLAR"].split())
@@ -192,12 +194,12 @@ yollar = {}
 for k in kaynaklar:
     try:
         for satir in open(k, encoding="utf-8"):
-            m = re.match(r"\s*(ASC_KEY_PATH|APNS_KEY_PATH)\s*=\s*(.*)$", satir.strip())
+            m = re.match(r"\s*(ASC_KEY_PATH|APNS_KEY_PATH|ASC_FIN_KEY_PATH)\s*=\s*(.*)$", satir.strip())
             if m:
                 yollar.setdefault(m.group(1), m.group(2).strip().strip('"').strip("'").replace("~", "/home/ghost", 1))
     except OSError:
         pass
-for ad, dosya in (("ASC_KEY_PATH", "asc.p8"), ("APNS_KEY_PATH", "apns.p8")):
+for ad, dosya in (("ASC_KEY_PATH", "asc.p8"), ("APNS_KEY_PATH", "apns.p8"), ("ASC_FIN_KEY_PATH", "asc-finans.p8")):
     y = yollar.get(ad)
     if y and os.path.exists(y):
         shutil.copyfile(y, os.path.join(os.path.dirname(hedef), dosya))

@@ -186,7 +186,7 @@ class GocmusKomutlar(unittest.TestCase):
         mgr2 = self.Mgr()
         komutlar.bul("/new")("", mgr2, ctx, _cmd="/new")
         self.assertEqual(mgr2.history, [])
-        self.assertIn("Yeni sohbet", ctx.gonderilen[-1])
+        self.assertIn("Yeni sayfa", ctx.gonderilen[-1])
 
     def test_sahne_komutu(self):
         from ghost import sahne

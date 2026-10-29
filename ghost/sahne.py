@@ -125,7 +125,7 @@ def temizle():
 
 
 # ---------------------------------------------------------------- tarihçe (2026-09-04)
-GECMIS_TAVAN = 8
+GECMIS_TAVAN = 200   # Faz 1.13 (2026-10-29): 8 → 200; Sahip eski sahneleri geri alabilsin (denetim 06 #9)
 
 
 def _gecmis_yol():

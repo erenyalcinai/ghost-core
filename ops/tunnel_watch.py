@@ -56,13 +56,20 @@ def log(msg):
         f.write("%s %s\n" % (time.strftime("%F %T"), msg))
 
 
-def telegram(msg):
+EREN_ESIK = 3        # bu kadar ARDIŞIK "düşürüldü ama ray dönmedi" turu → sahibe (6 sa soğuma)
+
+
+def telegram(msg, sinif="ghost", anahtar="zombi", soguma_sn=6 * 3600):
+    """Alarm kapısından geçer (ghost/alarm.py, 2026-10-29). NEDEN: 30 günde 16 "🔌 ters tünel"
+    mesajı sahibe gitti; zombi düşürme ve "ray döndü" Ghost'un kendi işidir, sahibin eli yok.
+    Varsayılan sınıf GHOST (Nabız'da sarı); yalnız EREN_ESIK ardışık "düşürüldü ama ray dönmedi"
+    turu sahibe gider (Mac'te `ai.jarvis.tunnel`e bakması gerekebilir). Eskisi: send_telegram.py."""
     try:
-        subprocess.run([sys.executable, os.path.join(OPS, "send_telegram.py")],
-                       input=msg, text=True, timeout=30,
-                       capture_output=True)
+        sys.path.insert(0, BASE)
+        from ghost import alarm
+        alarm.bildir("tunnel", msg, sinif=sinif, anahtar=anahtar, soguma_sn=soguma_sn)
     except Exception as e:
-        log("telegram hata: %r" % e)
+        log("alarm hata: %r" % e)
 
 
 def dinliyor_mu(port):
@@ -145,25 +152,51 @@ def mac_isi_var_mi():
     return bool(glob.glob(os.path.join(QUEUE, "*.json")))
 
 
-def durum_yaz(durum, detay=""):
+def durum_yaz(durum, detay="", ardisik=0):
+    """`ardisik`: kaç turdur üst üste "zombi-cozulemedi" (Sahip eşiği için, 2026-10-29)."""
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump({"ts": int(time.time()), "at": time.strftime("%F %T"),
-                       "durum": durum, "detay": detay}, f, ensure_ascii=False)
+                       "durum": durum, "detay": detay, "ardisik": ardisik}, f, ensure_ascii=False)
     except Exception as e:
         log("durum yazma hata: %r" % e)
 
 
-def onceki_durum():
+def _onceki():
     try:
         with open(STATE_FILE, encoding="utf-8") as f:
-            return json.load(f).get("durum", "")
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
     except Exception:
-        return ""
+        return {}
+
+
+def onceki_durum():
+    return _onceki().get("durum", "")
+
+
+def ardisik_say(onceki, yeni_durum):
+    """Saf: önceki durum kaydı + bu turun durumu → ardışık çözülemedi sayısı.
+    Zincir yalnız "zombi-cozulemedi" turlarıyla uzar; araya giren her başka durum sıfırlar."""
+    if yeni_durum != "zombi-cozulemedi":
+        return 0
+    if onceki.get("durum") != "zombi-cozulemedi":
+        return 1
+    try:
+        return int(onceki.get("ardisik", 1)) + 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def cozulemedi_sinifi(ardisik, esik=EREN_ESIK):
+    """Saf: ardışık çözülemedi sayısı → ("ghost"|"sahip", anahtar). İlk turlar Ghost'ta kalır;
+    esik'e ulaşınca sahibe (alarm.py soğuması 6 sa aynı anahtarı tekrar göndermez)."""
+    return ("sahip", "zombi-kalici") if ardisik >= esik else ("ghost", "zombi-cozulemedi")
 
 
 def main():
-    onceki = onceki_durum()
+    onceki_kayit = _onceki()
+    onceki = onceki_kayit.get("durum", "")
 
     if not dinliyor_mu(PORT):
         # Tünel hiç kurulmamış — Mac kapalı olabilir. Bu ARIZA DEĞİL, sessiz kal.
@@ -173,6 +206,7 @@ def main():
     if cevap_veriyor_mu(PORT):
         if onceki not in ("saglikli", ""):
             log("ray kendiliğinden döndü (%s -> saglikli)" % onceki)
+            _alarm_kapat()
         durum_yaz("saglikli")
         return 0
 
@@ -187,11 +221,12 @@ def main():
     liste = adaylar()
     if not liste:
         log("aday notty oturum yok — düşürecek bir şey bulunamadı")
-        durum_yaz("zombi-cozulemedi", "aday yok")
-        if onceki != "zombi-cozulemedi":
-            telegram("🔌 Ters tünel ölü: %d dinliyor ama cevap vermiyor ve "
-                     "düşürülecek notty oturum bulunamadı. Mac ve telefon rayı "
-                     "şu an erişilemez." % PORT)
+        ardisik = ardisik_say(onceki_kayit, "zombi-cozulemedi")
+        durum_yaz("zombi-cozulemedi", "aday yok", ardisik)
+        sinif, anahtar = cozulemedi_sinifi(ardisik)
+        telegram("🔌 Ters tünel ölü: %d dinliyor ama cevap vermiyor ve "
+                 "düşürülecek notty oturum bulunamadı (%d. tur). Mac ve telefon rayı "
+                 "şu an erişilemez." % (PORT, ardisik), sinif=sinif, anahtar=anahtar)
         return 1
 
     for sira, (yas, pid, cmd) in enumerate(liste[:MAX_KILL], 1):
@@ -217,20 +252,30 @@ def main():
             wda = "açık" if cevap_veriyor_mu(PORT_WDA) else "KAPALI"
             log("RAY DÖNDÜ (pid %d düşürüldükten sonra), 8101 %s" % (pid, wda))
             durum_yaz("saglikli", "zombi pid %d temizlendi" % pid)
-            telegram("🔧 Ters tünel zombi oturumu temizlendi (pid %d, yaş %d "
-                     "sn). Mac rayı geri döndü, telefon (8101) %s." %
-                     (pid, yas, wda))
-            return 0
+            _alarm_kapat()      # çözüldü: Nabız'daki sarı düşer; sahibe mesaj YOK (2026-10-29,
+            return 0            # eskiden "🔧 zombi temizlendi" Telegram'a gidiyordu — Ghost'un işi)
 
     log("düşürüldü ama ray dönmedi")
+    ardisik = ardisik_say(onceki_kayit, "zombi-cozulemedi")
     durum_yaz("zombi-cozulemedi", "%d oturum düşürüldü, düzelmedi" %
-              min(MAX_KILL, len(liste)))
-    if onceki != "zombi-cozulemedi":
-        telegram("🔌 Ters tünel ölü ve kendiliğinden düzelmedi: %d oturum "
-                 "düşürüldü, %d hâlâ cevap vermiyor. Mac/telefon rayı kapalı — "
-                 "Mac'te `ai.jarvis.tunnel` durumuna bakmak gerekebilir."
-                 % (min(MAX_KILL, len(liste)), PORT))
+              min(MAX_KILL, len(liste)), ardisik)
+    sinif, anahtar = cozulemedi_sinifi(ardisik)
+    telegram("🔌 Ters tünel ölü ve kendiliğinden düzelmedi (%d. ardışık tur): %d oturum "
+             "düşürüldü, %d hâlâ cevap vermiyor. Mac/telefon rayı kapalı — "
+             "Mac'te `ai.jarvis.tunnel` durumuna bakmak gerekebilir."
+             % (ardisik, min(MAX_KILL, len(liste)), PORT), sinif=sinif, anahtar=anahtar)
     return 1
+
+
+def _alarm_kapat():
+    """Ray döndü: açık tünel alarmları Nabız'dan düşer."""
+    try:
+        sys.path.insert(0, BASE)
+        from ghost import alarm
+        for a in ("zombi", "zombi-cozulemedi", "zombi-kalici"):
+            alarm.kapat("tunnel", a)
+    except Exception as e:
+        log("alarm kapatma hata: %r" % e)
 
 
 if __name__ == "__main__":

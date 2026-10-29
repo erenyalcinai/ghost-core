@@ -252,7 +252,28 @@ def nabiz():
             "baglanti": _baglanti(mak),
             # Abonelik kotası (2026-09-07, Sahip: dolar değil kota): oturum/haftalık/Fable.
             "kota": _kota(),
+            # Ölçüler (2026-10-29): ilk çıktı/tur p50-p95, kayıp cevap, sayaçlar; Ghost'a giden alarmlar.
+            "metrik": _metrik(), "alarmlar": _alarmlar(),
             "altyapi": _altyapi(ozet, mak, siteler, nob)}
+
+
+def _metrik():
+    try:
+        from ghost import metrik
+        o = metrik.ozet(7)
+        o["sayac"] = metrik.sayac_toplam(7)
+        return o
+    except Exception:
+        return {"var": False}
+
+
+def _alarmlar():
+    """Nöbetçi alarmlarının sahibe değil Ghost'a giden sınıfı (ghost/alarm.py) — Nabız sarı nokta."""
+    try:
+        from ghost import alarm
+        return alarm.ozet()
+    except Exception:
+        return {"sari": [], "sayac": {}}
 
 
 def _bekleyen():

@@ -681,19 +681,20 @@ def _kopru_bosta(pid):
 
 
 def _bayat_durum_oku():
+    """Faz 1.9: bayat_state.json → durum tablosu ("selfcheck.bayat"); ilk okumada dosya taşınır."""
     try:
-        with open(BAYAT_STATE, encoding="utf-8") as f:
-            d = json.load(f)
+        from ghost import durum
+        d = durum.tasi("selfcheck.bayat", BAYAT_STATE, {})
         return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
+    except Exception:
         return {}
 
 
 def _bayat_durum_yaz(imza, simdi, ilk=None):
     try:
-        with open(BAYAT_STATE, "w", encoding="utf-8") as f:
-            json.dump({"imza": imza, "ts": simdi, "ilk": ilk if ilk is not None else simdi}, f)
-    except OSError as e:
+        from ghost import durum
+        durum.yaz("selfcheck.bayat", {"imza": imza, "ts": simdi, "ilk": ilk if ilk is not None else simdi})
+    except Exception as e:
         log("bayat durum yazılamadı: %r" % e)
 
 
@@ -740,6 +741,59 @@ def sahip_profili_yerinde():
         return sahip.durum()
     except Exception as e:
         return "👤 Sahip profili denetimi hata: %r" % e
+
+
+# --- Alarm sınıflaması (2026-10-29, ghost/alarm.py) -------------------------------------
+# NEDEN: 30 günde selfcheck Telegram'a 115 mesaj attı; çoğu "bayat kod → yenilendi: tamam"
+# (işi zaten yapmış) ve "BAYAT KOD koşuyor, boşalınca yenilenecek" (10-28'de 13 yenileme/24 sa).
+# sahibin eli yok → GHOST sınıfı (Nabız'da sarı). sahibe gidenler: yenileme BAŞARISIZ (1 sa),
+# Beyin yanıt vermiyor (2 sa), vekil/onay/kapı/köprü düşük (1 sa), root bekleyen kopya (günde 1),
+# nöbetçi sessiz / denetim günlüğü / bilinmeyen (6 sa). Günlük tavan 5 alarm.py'de.
+SOGUMA_1S, SOGUMA_2S, SOGUMA_6S, SOGUMA_GUN = 3600, 2 * 3600, 6 * 3600, 24 * 3600
+SINIF_KURALLARI = (
+    # (satırda aranan parçalar — hepsi geçmeli, sinif, anahtar, soğuma sn)
+    (("BAŞARISIZ",), "sahip", "yenileme-basarisiz", SOGUMA_1S),
+    (("→ yenilendi",), "ghost", "bayat-yenilendi", 0),
+    (("BAYAT KOD koşuyor",), "ghost", "bayat-kosuyor", 0),
+    (("Beyin", "YANIT VERMİYOR"), "sahip", "beyin", SOGUMA_2S),
+    (("Köprü çalışmıyordu",), "sahip", "kopru-dusuk", SOGUMA_1S),
+    (("Sır vekili", "CEVAP VERMİYOR"), "sahip", "vekil-dusuk", SOGUMA_1S),
+    (("Sır vekilinde eksik anahtar",), "sahip", "vekil-eksik", SOGUMA_GUN),
+    (("Onay servisi", "CEVAP VERMİYOR"), "sahip", "onay-dusuk", SOGUMA_1S),
+    (("Güvenlik kapısı",), "sahip", "kapi-kopyasi", SOGUMA_GUN),
+    (("ghost-hook", "bayat"), "sahip", "hook-bayat", SOGUMA_GUN),
+    (("canlı kopya FARKLI",), "sahip", "kopya-farkli", SOGUMA_GUN),
+    (("Claude CLI",), "ghost", "cli-guncellendi", 0),
+    (("Model eşlemesi bayat",), "sahip", "model-eslemesi", SOGUMA_GUN),
+    (("dakikadır takılı",), "ghost", "is-takili", 0),
+    (("NÖBETÇİ SESSİZ",), "sahip", "nobetci-sessiz", SOGUMA_6S),
+)
+
+
+def sinifla(satir):
+    """Saf: öz-denetim satırı → (sinif, anahtar, soguma_sn). Bilinmeyen satır sahibe, 6 sa."""
+    for parcalar, sinif, anahtar, soguma in SINIF_KURALLARI:
+        if all(p in satir for p in parcalar):
+            return sinif, anahtar, soguma
+    import hashlib
+    return "sahip", "diger-" + hashlib.sha1(satir[:40].encode("utf-8")).hexdigest()[:8], SOGUMA_6S
+
+
+def alarmlari_dagit(problems, bildir=None, simdi=None):
+    """Satırları sınıflandırıp alarm kapısından geçirir; sahibe gidecekleri TEK mesajda toplar.
+    Döner: (eren_satirlari, ghost_satirlari). `bildir` test için enjekte edilir."""
+    if bildir is None:
+        from ghost import alarm
+        bildir = alarm.bildir
+    giden, kalan = [], []
+    toplayici = giden.append      # alarm.py tavan/soğuma kararını verir, gönderimi biz toplarız
+    for satir in problems:
+        sinif, anahtar, soguma = sinifla(satir)
+        r = bildir("selfcheck", satir, sinif=sinif, anahtar=anahtar, soguma_sn=soguma,
+                   simdi=simdi, gonder=lambda m: (toplayici(m) or True))
+        if r.get("neden") != "gitti":
+            kalan.append(satir)
+    return giden, kalan
 
 
 def main():
@@ -824,11 +878,64 @@ def main():
         kota.yenile(min_yas=600)
     except Exception as e:
         log("kota yenileme hata: %r" % e)
+    if not IS_MAC:
+        try:  # Boşta Ghost v1 (Faz 1.7, 2026-10-29): günde bir, köprü boşta, pencere <%50 → tek satır ya da sessiz
+            import bosta_ghost
+            kostu, ihtiyac, satir = bosta_ghost.tick(bosta=_kopru_bosta(pid))
+            if kostu:
+                log("boşta ghost koştu: ihtiyaç %s → %s" % (ihtiyac, satir or "sessiz"))
+        except Exception as e:
+            log("boşta ghost hata: %r" % e)
+        try:  # Epizod özeti (Faz 1.3, 2026-10-29): 30 dk sessiz, ≥3 turlu, özetlenmemiş döküm → araçsız alt model, tur başına ≤2
+            from ghost import epizod
+            ids, _kucuk = epizod.tick()
+            if ids:
+                log("epizod özetlendi: %s" % ids)
+        except Exception as e:
+            log("epizod hata: %r" % e)
+        try:  # Deploy → etki kartı (Faz 1.8): 24 sa / 7 gün dolan sürüm kayıtlarını ölçüp Masa'ya tablo
+            from ghost import etki
+            dok = etki.tick()
+            if dok:
+                log("etki kartı güncellendi: %s" % dok)
+        except Exception as e:
+            log("etki hata: %r" % e)
+        try:  # Haftalık sentez dosyası (dossier/sentez/*.md, Faz 1.11) → Masa "Raporlar" kartı; özerk iş Masa'ya yazamaz, burası yazar
+            import glob as _glob
+            from ghost import masa as _masa, durum as _durum
+            _yayinlanan = set(_durum.oku("sentez.yayinlanan", []) or [])
+            for _f in sorted(_glob.glob(os.path.join(BASE, "dossier", "sentez", "*.md"))):
+                _ad = os.path.basename(_f)
+                if _ad in _yayinlanan:
+                    continue
+                _masa.yayinla(_f, "Raporlar", "Haftalık sentez %s" % _ad[:-3])
+                _yayinlanan.add(_ad)
+                log("sentez Masa'ya yayınlandı: %s" % _ad)
+                _durum.yaz("sentez.yayinlanan", sorted(_yayinlanan))
+        except Exception as e:
+            log("sentez yayın hata: %r" % e)
+        try:  # Root işleri tek kart (Faz 1.14): YubiKey/ghost_vps isteyen uyarılar günde bir "Root işleri" kartında toplanır
+            _root = [p for p in problems if ("YubiKey" in p or "ghost_vps" in p or "ghost_root_sk" in p)]
+            from ghost import durum as _durum
+            _rdurum = _durum.oku("selfcheck.root_kart", {}) or {}
+            _imza = "|".join(sorted(x[:60] for x in _root))
+            if _root and (time.time() - float(_rdurum.get("ts", 0)) > 86400 or _rdurum.get("imza") != _imza):
+                from ghost import sahne as _sahne
+                _sahne.onay("Root işleri (YubiKey) — %d madde" % len(_root),
+                            "\n".join("• " + x for x in _root) + "\n\nReçete: playbooks/onay-komut.md §Root")
+                _durum.yaz("selfcheck.root_kart", {"ts": time.time(), "imza": _imza})
+                log("root işleri kartı açıldı (%d)" % len(_root))
+        except Exception as e:
+            log("root işleri kartı hata: %r" % e)
 
     if problems:
-        msg = "🩺 Ghost öz-denetim (%s):\n" % ("Mac" if IS_MAC else "VPS") + "\n".join(problems)
-        log(msg.replace("\n", " | "))
-        tg_send(msg)
+        log(("öz-denetim: " + " | ".join(problems)))
+        giden, kalan = alarmlari_dagit(problems)
+        if kalan:
+            log("Nabız'da kaldı (Ghost sınıfı/soğuma/tavan): " + " | ".join(kalan))
+        if giden:
+            msg = "🩺 Ghost öz-denetim (%s):\n" % ("Mac" if IS_MAC else "VPS") + "\n".join(giden)
+            tg_send(msg)
     else:
         log("sağlıklı")
 

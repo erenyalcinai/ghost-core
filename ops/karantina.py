@@ -277,8 +277,18 @@ def oku_karantinada(veri, soru, model=None, kosucu=None):
     if kosucu is not None:                     # testler
         cikti = kosucu(istem)
     else:
-        claude = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "/usr/bin/claude"
+        # Sohbet oturumunun kabuğunda CLAUDE_BIN ve giriş anahtarı YOK (köprü .env/secrets.env'de tutar);
+        # os.environ'dan bulunamazsa köprü dosyalarından alınır (modeller.claude_bin ile aynı yedek, 2026-10-29).
+        try:
+            from ghost import config as _cfg, modeller as _mod
+            _kopru = _cfg.load_env()
+            claude = _mod.claude_bin()
+        except Exception:
+            _kopru = {}
+            claude = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "/usr/bin/claude"
         env = {k: os.environ[k] for k in ("HOME", "PATH", "LANG", "CLAUDE_CODE_OAUTH_TOKEN") if os.environ.get(k)}
+        if not env.get("CLAUDE_CODE_OAUTH_TOKEN") and _kopru.get("CLAUDE_CODE_OAUTH_TOKEN"):
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = _kopru["CLAUDE_CODE_OAUTH_TOKEN"]
         with tempfile.TemporaryDirectory(prefix="karantina-") as kum:
             r = subprocess.run([claude, "-p", istem, "--output-format", "text", "--model", _tam_model(model or MODEL),
                                 "--tools", "", "--strict-mcp-config"],

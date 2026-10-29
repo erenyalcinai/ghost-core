@@ -84,6 +84,7 @@ final class MasaModel: ObservableObject {
     @Published var diyalog: MasaDiyalog?
     @Published var yeniAd = ""
     private var api: GhostAPI?
+    var apiErisim: GhostAPI? { api }          // Faz 1.13b: PDF paylaşımı (MasaPdf) indirme için
 
     func baglan(_ api: GhostAPI) { self.api = api }
 
@@ -513,6 +514,13 @@ struct KartMenusu: View {
             Button {
                 Task { await model.calistir { try await $0.masaEylem(kart.id, "ilet") } }
             } label: { Label("Ghost'a ilet", systemImage: "paperplane") }
+            if ["not", "rapor", "sahne"].contains(kart.tur) {
+                // Faz 1.13b (Sahip 2026-10-29 "masadaki yazıları telefona kaydedemiyorum"): kart → PDF → iOS paylaşım sayfası
+                ShareLink(item: MasaPdf(id: kart.id, ad: kart.ad, api: model.apiErisim),
+                          preview: SharePreview(kart.ad, image: Image(systemName: "doc.richtext"))) {
+                    Label("PDF olarak paylaş", systemImage: "square.and.arrow.up")
+                }
+            }
         }
         if kart.sabit != true {
             Divider()
@@ -521,6 +529,30 @@ struct KartMenusu: View {
                 Label(kart.ghostun ? "Dolaba kaldır (Ghost yayını)" : "Sil", systemImage: "trash")
             }
         }
+    }
+}
+
+/// Masa kartının PDF hâli — Paylaş sayfası istediğinde sunucudan indirilir, geçici dosya olarak verilir (Faz 1.13b).
+struct MasaPdf: Transferable {
+    let id: Int
+    let ad: String
+    let api: GhostAPI?
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .pdf) { item in
+            SentTransferredFile(try await item.indir())
+        }
+    }
+
+    func indir() async throws -> URL {
+        guard let api else { throw URLError(.userAuthenticationRequired) }
+        let veri = try await api.masaPdf(id)
+        let guvenli = ad.map { $0.isLetter || $0.isNumber || "-_ .".contains($0) ? $0 : "_" }
+        var dosyaAdi = String(String(guvenli).prefix(60)).trimmingCharacters(in: .whitespaces)
+        if dosyaAdi.isEmpty { dosyaAdi = "masa-\(id)" }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(dosyaAdi + ".pdf")
+        try veri.write(to: url, options: .atomic)
+        return url
     }
 }
 

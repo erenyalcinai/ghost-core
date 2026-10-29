@@ -199,7 +199,13 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/v1/ping":
-            return self._json(200, {"ok": True, "at": time.strftime("%F %T")})
+            try:  # Faz 1.13: sunucu sürümü (git kısa sha + commit zamanı) — Kokpit "hangi kodla konuşuyorum" görsün
+                from ghost import surum as _surum
+                sb = _surum.bilgi()
+            except Exception:
+                sb = {}
+            return self._json(200, {"ok": True, "at": time.strftime("%F %T"), "surum": sb.get("surum", "?"),
+                                    "build": sb.get("build", 0), "surum_zaman": sb.get("zaman", "")})
         if u.path == "/v1/acik/nabiz":        # sahip.kim Ghost kartı — herkese açık, kimliksiz, içeriksiz (2026-10-23)
             return self._acik_nabiz()
         cihaz = self._auth("GET", b"")
@@ -210,6 +216,11 @@ class H(BaseHTTPRequestHandler):
                 return self._json(200, health.nabiz())
             if u.path == "/v1/ses/token":      # ses ajanı (ElevenLabs) konuşma jetonu — ajan private
                 from ghost import ses_ajani
+                try:                            # 2026-10-29: Echo kullanım sayacı (2 hafta 0 ise raf — denetim 06 #12)
+                    from ghost import metrik
+                    metrik.sayac("echo_token")
+                except Exception:
+                    pass
                 tok, hata = ses_ajani.token()
                 if not tok:
                     return self._json(503, {"hata": hata})
@@ -295,6 +306,23 @@ class H(BaseHTTPRequestHandler):
                 if not parca or not parca[0].isdigit():
                     return self._json(404, {"hata": "yok"})
                 kid = int(parca[0])
+                if len(parca) > 1 and parca[1] == "pdf":   # Faz 1.13b: kartı PDF (Chromium yoksa HTML) olarak indir/paylaş
+                    import importlib.util as _ilu
+                    from urllib.parse import quote as _quote
+                    _spec = _ilu.spec_from_file_location("md_pdf", os.path.join(config.BASE, "ops", "md_pdf.py"))
+                    _mod = _ilu.module_from_spec(_spec)
+                    _spec.loader.exec_module(_mod)
+                    r = _mod.masa_pdf(kid)
+                    if not r:
+                        return self._json(404, {"hata": "kart yok ya da metin değil"})
+                    veri, mime, ad = r
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime)
+                    self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % _quote(ad))
+                    self.send_header("Content-Length", str(len(veri)))
+                    self.end_headers()
+                    self.wfile.write(veri)
+                    return
                 if len(parca) > 1 and parca[1] == "dosya":
                     d = masa.dosya_yol(kid)
                     if not d:

@@ -99,7 +99,41 @@ def olay_kaydedici(kaynak):
                 olay_yaz(kaynak, ev)
         except Exception:
             pass
+        try:  # Faz 1.12: onaylı komutun sonucu (süre/özet/hash) karta ve push'a
+            from ghost import onay_sonuc
+            onay_sonuc.izle(satir)
+        except Exception:
+            pass
     return _cb
+
+
+def son_id():
+    """events tablosundaki son sohbet olayının id'si (tur başlangıcı işareti; yarim_ozet için)."""
+    try:
+        c = sqlite3.connect(config.DB_PATH, timeout=10)
+        r = c.execute("SELECT COALESCE(MAX(id),0) FROM events WHERE type='chat'").fetchone()
+        c.close()
+        return int(r[0] or 0)
+    except Exception:
+        return 0
+
+
+def yarim_ozet(since_id, kaynak="sohbet", tavan=1500):
+    """Faz 1.10 (2026-10-29, denetim 09 #4): zaman aşımında o ana kadarki görünür metin kaybolmasın.
+    since_id'den sonraki metin olaylarını (araç özetleri değil) birleştirir; sondan tavan kadar.
+    (metin, arac_sayisi) — hiç yoksa ('', n)."""
+    metinler, arac = [], 0
+    for ev in olaylar(since=since_id, limit=500):
+        if ev.get("kaynak") != kaynak:
+            continue
+        if ev.get("tur") == "metin" and ev.get("metin"):
+            metinler.append(ev["metin"])
+        elif ev.get("tur") == "arac":
+            arac += 1
+    metin = "\n".join(metinler).strip()
+    if len(metin) > tavan:
+        metin = "…" + metin[-tavan:]
+    return metin, arac
 
 
 def olaylar(since=0, limit=100):

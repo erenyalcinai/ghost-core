@@ -61,6 +61,9 @@ SERVISLER = {
     "elevenlabs": {"host": "api.elevenlabs.io", "baslik": {"xi-api-key": "{ELEVENLABS_API_KEY}"}},
     "sentry": {"host": "sentry.io", "baslik": {"Authorization": "Bearer {SENTRY_ACCESS_TOKEN}"}},
     "asc": {"host": "api.appstoreconnect.apple.com", "jwt": "asc"},
+    # 2026-10-29 Faz 0.8: ikinci ASC anahtarı (ghost-finans: Finance + Customer Support) — satış/finans raporları ve
+    # yorum cevabı; "ghost" anahtarı App Manager olduğu için 403 alıyordu. İzin sınıfı asc ile aynı (bizim hesap).
+    "asc-finans": {"host": "api.appstoreconnect.apple.com", "jwt": "asc-finans"},
     "github-mcp": {"host": "api.githubcopilot.com", "baslik": {"Authorization": "Bearer {GITHUB_MCP_TOKEN}"}},
     "github-mcp-yaz": {"host": "api.githubcopilot.com", "baslik": {"Authorization": "Bearer {GITHUB_MCP_YAZ_TOKEN}"}},
     # 6. tur: PostHog MCP (http) — anahtar artık ghost'ta değil; vekil readonly=1'i zorlar (hedef()), cli kipi tek exec aracı
@@ -74,6 +77,7 @@ SERVISLER = {
 # JWT: (iss değişkeni, kid değişkeni, .p8 dosyası, ömür sn, aud)
 JWTLER = {
     "asc": ("ASC_ISSUER_ID", "ASC_KEY_ID", "asc.p8", 1200, "appstoreconnect-v1"),
+    "asc-finans": ("ASC_ISSUER_ID", "ASC_FIN_KEY_ID", "asc-finans.p8", 1200, "appstoreconnect-v1"),
     "apns": ("APNS_TEAM_ID", "APNS_KEY_ID", "apns.p8", 3000, None),
 }
 # ---------------------------------------------------------------- izin listesi (Faz 2 devamı, 2026-10-28)

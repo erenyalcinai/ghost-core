@@ -59,12 +59,19 @@ def main():
             return 1
 
         d = os.path.join(rp, "gunluk")
-        snaps = sorted(x for x in os.listdir(d) if x.endswith(".gpg"))
+        # Parçalı arşiv (2026-10-29): '<damga>.tar.gz.gpg.NN' → damgaya göre grupla, en yenisini birleştir
+        dosyalar = sorted(x for x in os.listdir(d) if ".tar.gz.gpg" in x)
+        snaps = sorted({x.split(".tar.gz.gpg")[0] for x in dosyalar})
         if not snaps:
             print("PROVA ✗ günlük anlık görüntü yok")
             return 1
-        son = os.path.join(d, snaps[-1])
-        notlar.append("uzakta %d günlük görüntü" % len(snaps))
+        parcalar = [x for x in dosyalar if x.split(".tar.gz.gpg")[0] == snaps[-1]]
+        son = os.path.join(tmp, "son.tar.gz.gpg")
+        with open(son, "wb") as birlesik:
+            for x in parcalar:
+                with open(os.path.join(d, x), "rb") as pf:
+                    shutil.copyfileobj(pf, birlesik)
+        notlar.append("uzakta %d günlük görüntü (%d parça)" % (len(snaps), len(parcalar)))
 
         tar = os.path.join(tmp, "c.tar.gz")
         r = subprocess.run(
@@ -111,7 +118,7 @@ def main():
             else:
                 notlar.append("⚠ %s YOK" % gerekli)
 
-    print("PROVA ✓ %s — %s" % (snaps[-1].replace(".tar.gz.gpg", ""),
+    print("PROVA ✓ %s — %s" % (snaps[-1],
                                " · ".join(notlar)))
     st = os.path.join(BASE, "ops", "backup_drill.json")
     json.dump({"utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),

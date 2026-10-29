@@ -39,7 +39,9 @@ PROMPT = (
     "'deki hata/tekrar desenlerine bak. Ghost'un KENDİSİNDE gördüğün en değerli "
     "1-2 iyileştirmeyi öner (somut: hangi dosya, ne değişmeli, neden). Sahip "
     "onaylarsa uygulanacak — sen sadece öner, DEĞİŞTİRME.\n"
-    "Kısa ve keskin ol; doldurma yok. Veri çekilemezse dürüstçe belirt."
+    "Kısa ve keskin ol; doldurma yok. Veri çekilemezse dürüstçe belirt.\n"
+    "SON ADIM (Faz 1.16): sentez metnini ~/jarvis/dossier/sentez/<YYYY>-W<WW>.md dosyasına da YAZ "
+    "(ISO hafta, örn. 2026-W44.md; dizin yoksa oluştur) — sabah brifingi ODAKLAN/ERTELE kararlarını oradan okur."
 )
 
 sys.path.insert(0, BASE)

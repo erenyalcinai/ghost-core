@@ -324,7 +324,8 @@ struct Site: Decodable, Identifiable {
 
 // MARK: Zarflar
 
-struct PingYanit: Decodable { var ok: Bool; var at: String? }
+struct PingYanit: Decodable { var ok: Bool; var at: String?; var surum: String?; var build: Int?; var surumZaman: String?
+    enum CodingKeys: String, CodingKey { case ok, at, surum, build; case surumZaman = "surum_zaman" } }   // Faz 1.13: sunucu sürümü
 struct EslesmeYanit: Decodable {
     var deviceId: String
     var key: String

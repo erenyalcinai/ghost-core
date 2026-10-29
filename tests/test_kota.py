@@ -83,3 +83,56 @@ class TestNabizAlani(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPencereDurumu(unittest.TestCase):
+    """2026-10-29 Faz 0.4: kota-farkında zamanlama — pencere doluysa özerk iş ertelenir,
+    ölçüm bayatsa/yoksa kimse engellenmez."""
+
+    def setUp(self):
+        self._yedek = kota.KOTA_DOSYASI
+        self.d = tempfile.mkdtemp()
+        kota.KOTA_DOSYASI = os.path.join(self.d, "kota.json")
+
+    def tearDown(self):
+        kota.KOTA_DOSYASI = self._yedek
+
+    def _yaz(self, yuzde, ts=None, sifirlanma=None):
+        import time
+        ts = ts or int(time.time())
+        with open(kota.KOTA_DOSYASI, "w") as f:
+            json.dump({"ts": ts, "limitler": [
+                {"ad": "Oturum (5 saat)", "tur": "session", "yuzde": yuzde,
+                 "sifirlanma": sifirlanma, "sifirlanma_metin": "bugün 05:39"},
+                {"ad": "Haftalık · tüm modeller", "tur": "weekly_all", "yuzde": 10}]}, f)
+
+    def test_dolu_pencere_erteler(self):
+        import time
+        from datetime import datetime, timezone, timedelta
+        ileri = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        self._yaz(92, sifirlanma=ileri)
+        d = kota.pencere_durumu()
+        self.assertTrue(d["bilinir"]); self.assertTrue(d["dolu"])
+        uygun, neden = kota.ozerk_uygun()
+        self.assertFalse(uygun); self.assertIn("92", neden); self.assertIn("05:39", neden)
+
+    def test_bos_pencere_uygun(self):
+        self._yaz(40)
+        self.assertEqual(kota.ozerk_uygun(), (True, ""))
+
+    def test_bayat_olcum_engellemez(self):
+        import time
+        self._yaz(99, ts=int(time.time()) - 3 * 3600)
+        d = kota.pencere_durumu()
+        self.assertFalse(d["bilinir"]); self.assertFalse(d["dolu"])
+        self.assertTrue(kota.ozerk_uygun()[0])
+
+    def test_sifirlanma_gecmisse_dolu_degil(self):
+        from datetime import datetime, timezone, timedelta
+        geri = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        self._yaz(99, sifirlanma=geri)
+        self.assertFalse(kota.pencere_durumu()["dolu"])
+
+    def test_dosya_yoksa_bilinmez(self):
+        d = kota.pencere_durumu()
+        self.assertFalse(d["bilinir"]); self.assertTrue(kota.ozerk_uygun()[0])

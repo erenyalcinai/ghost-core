@@ -188,9 +188,15 @@ def _new(arg, mgr, ctx, _cmd=None):
     mgr.chat_cost = 0.0       # oturum sayacı sıfırlanır; toplam korunur
     mgr.chat_advice_turn = 0
     mgr._save_chat()          # restart bu sıfırlamayı geri almasın
-    ctx.send(mgr.chat_id, "%s (önceki bağlam %%%d — %s token%s)." % (
-        "Bağlam tazelendi, konuyu devraldım" if mgr.chat_carry
-        else "Yeni sohbet oturumu", was, tok, "" if mgr.chat_carry else ", taşınmadı"))
+    # 2026-10-29 (denetim 04 Ö1): 30 günde 98 kez düşen "Yeni sohbet oturumu (… token, taşınmadı)"
+    # satırının bilgi değeri sıfırdı; tek kısa satır kalır, sayı metrik sayacında.
+    try:
+        from ghost import metrik
+        metrik.sayac("yeni_oturum")
+    except Exception:
+        pass
+    ctx.send(mgr.chat_id, "%s (önceki bağlam %%%d)." % (
+        "Bağlam tazelendi, konuyu devraldım" if mgr.chat_carry else "🆕 Yeni sayfa", was))
 
 
 @komut("/model", "Motor seç (fable/opus/sonnet/haiku)")
@@ -347,21 +353,49 @@ def _hedef(arg, mgr, ctx):
         gs = goals.list_goals(all_states=True)
         if not gs:
             return ctx.send(mgr.chat_id, "Duran hedef yok.\n/hedef ekle <başlık> | "
-                            "[detay] — Ghost 6 saatte bir üzerinde çalışır.")
+                            "[detay] — Ghost boş kaldıkça (haftada ≤3 tur) üzerinde çalışır.")
         return ctx.send(mgr.chat_id, "🎯 Duran hedefler:\n" + "\n".join(
-            "• #%d [%s] %s (%d tur)" % (g["id"], g["status"], g["title"][:60], g["work_count"])
+            "• #%d [%s] %s (%d tur, puan %+d%s)" % (g["id"], g["status"], g["title"][:60], g["work_count"],
+                                                     g["puan"], (", kill " + g["kill"]) if g["kill"] else "")
             for g in gs))
     if low.startswith("ekle "):
         parts = [p.strip() for p in arg[5:].split("|", 1)]
-        goals.add(parts[0], parts[1] if len(parts) > 1 else "")
-        return ctx.send(mgr.chat_id, "🎯 Hedef kaydedildi — Ghost boş kaldıkça üzerinde "
-                        "çalışıp rapor verecek.")
-    if low.startswith(("durdur ", "sil ")):
-        gid = int(arg.split()[1])
-        ok = goals.set_status(gid, "duraklatıldı" if low.startswith("durdur") else "tamam")
+        gid = goals.add(parts[0], parts[1] if len(parts) > 1 else "")
+        return ctx.send(mgr.chat_id, "🎯 Hedef #%d kaydedildi — Ghost boş kaldıkça üzerinde çalışıp rapor verecek. "
+                        "Plan: /hedef plan %d a | b | c · kill: /hedef kill %d 2026-11-16" % (gid, gid, gid))
+    parca = arg.split()
+    try:
+        gid = int(parca[1]) if len(parca) > 1 else None
+    except ValueError:
+        gid = None
+    if gid is None:
+        return ctx.send(mgr.chat_id, "Kullanım: /hedef · /hedef ekle <başlık> | [detay] · /hedef goster <no> · "
+                        "/hedef plan <no> a | b · /hedef puan <no> +|- · /hedef kill <no> <tarih|N tur> · "
+                        "/hedef durdur|devam|sil <no>")
+    if low.startswith("goster"):
+        g = goals.goster(gid)
+        return ctx.send(mgr.chat_id, goals._goster_metin(g) if g else "Bulunamadı.")
+    if low.startswith("plan "):
+        adimlar = [a.strip() for a in arg.split(None, 2)[2].split("|")] if len(parca) > 2 else []
+        return ctx.send(mgr.chat_id, "🎯 Plan yazıldı (%d adım)." % len(adimlar) if goals.plan_koy(gid, adimlar) else "Bulunamadı.")
+    if low.startswith("puan "):
+        p, d = goals.puan(gid, 1 if len(parca) > 2 and parca[2].startswith("+") else -1)
+        return ctx.send(mgr.chat_id, "Bulunamadı." if p is None else "🎯 Puan %+d%s" % (p, " — hedef duraklatıldı." if d else "."))
+    if low.startswith("kill "):
+        k = arg.split(None, 2)[2] if len(parca) > 2 else ""
+        c = goals._conn()
+        try:
+            c.execute("UPDATE goals SET kill=? WHERE id=?", (k, gid))
+            c.commit()
+        finally:
+            c.close()
+        return ctx.send(mgr.chat_id, "🎯 Kill ölçütü: %s" % (k or "yok"))
+    if low.startswith(("durdur", "sil", "devam")):
+        durum = {"durdur": goals.DURAKLATILDI, "sil": "tamam", "devam": "aktif"}[parca[0].lower()]
+        ok = goals.set_status(gid, durum)
         return ctx.send(mgr.chat_id, "🎯 Güncellendi." if ok else "Bulunamadı.")
-    ctx.send(mgr.chat_id, "Kullanım: /hedef · /hedef ekle <başlık> | [detay] "
-             "· /hedef durdur <no> · /hedef sil <no>")
+    ctx.send(mgr.chat_id, "Kullanım: /hedef · /hedef ekle <başlık> | [detay] · /hedef goster <no> · "
+             "/hedef plan <no> a | b · /hedef puan <no> +|- · /hedef durdur|devam|sil <no>")
 
 
 @komut("/varlik", "Dünya modeli: varlık + ilişkiler")

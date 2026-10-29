@@ -47,6 +47,8 @@ final class SohbetModel: ObservableObject {
     /// Kaydırma/klavye/mesaj olaylarını sunucuya taşır (3 sn'de bir toplu). Telefonda
     /// olan biteni Mac'ten göremiyorduk; teşhis tahmin oluyordu (2026-09-26).
     func gunluk(_ s: String) {
+        // Faz 1.13 (denetim 06 #9): kaydırma/klavye günlüğü yalnız DEBUG derlemede sunucuya gider; sürüm derlemesinde sessiz.
+        #if DEBUG
         gunlukTampon.append(Self.saat.string(from: Date()) + " " + s)
         if gunlukTampon.count > 400 { gunlukTampon.removeFirst(gunlukTampon.count - 400) }
         guard gunlukGorevi == nil else { return }
@@ -54,6 +56,7 @@ final class SohbetModel: ObservableObject {
             try? await Task.sleep(for: .seconds(3))
             await self?.gunlukGonder()
         }
+        #endif
     }
 
     private func gunlukGonder() async {

@@ -43,6 +43,35 @@ def commitler():
     return out
 
 
+def dokunulan(sha):
+    """Commit'te değişen yollar (etiket için; Faz 1.4)."""
+    r = subprocess.run(["git", "show", "--name-only", "--format=", sha], cwd=BASE, capture_output=True, text=True)
+    return [l for l in r.stdout.splitlines() if l.strip()] if r.returncode == 0 else []
+
+
+def karar_vade_isle(commitler_):
+    """Commit gövdesindeki `Karar:` / `Vade:` satırlarını deftere/vadelere indir (Faz 1.4). Her iki `ekle`
+    içerik üstünden tekilleştirir; betik istediği kadar sık koşabilir. (eklenen karar, eklenen vade)."""
+    from ghost import kararlar, vadeler
+    k_n = v_n = 0
+    for sha, tarih, _konu, govde in commitler_:
+        for konu, karar, durum in dersler.karar_ayikla(govde):
+            try:
+                onceki = kararlar.say()["toplam"]
+                kararlar.ekle(konu, karar, durum, tarih, "commit:" + sha[:7])
+                k_n += int(kararlar.say()["toplam"] > onceki)
+            except Exception:
+                continue
+        for ad, vtarih, notu in dersler.vade_ayikla(govde):
+            try:
+                onceki = len(vadeler.liste(None))
+                vadeler.ekle(ad, vtarih, notu, "commit:" + sha[:7])
+                v_n += int(len(vadeler.liste(None)) > onceki)
+            except Exception:
+                continue
+    return k_n, v_n
+
+
 def main():
     sessiz = "--sessiz" in sys.argv
     mevcut = ""
@@ -50,9 +79,16 @@ def main():
         with open(HEDEF, encoding="utf-8") as f:
             mevcut = f.read()
 
-    kayitlar = [(sha, tarih, konu, dersler.ders_ayikla(govde))
-                for sha, tarih, konu, govde in commitler()]
+    varolan = {s[:7] for s in dersler.yazili_shalar(mevcut)}
+    kayitlar = []
+    for sha, tarih, konu, govde in commitler():
+        ders = dersler.ders_ayikla(govde)
+        etiket = dersler.etiketler(dokunulan(sha)) if (ders and sha[:7] not in varolan) else ()
+        kayitlar.append((sha, tarih, konu, ders, etiket))
     yeni, eklenen = dersler.guncelle(mevcut, kayitlar)
+    k_n, v_n = karar_vade_isle(commitler())
+    if (k_n or v_n) and not sessiz:
+        print("ders_yaz: %d karar, %d vade commit mesajından işlendi" % (k_n, v_n))
     if eklenen:
         os.makedirs(os.path.dirname(HEDEF), exist_ok=True)
         with open(HEDEF, "w", encoding="utf-8") as f:
