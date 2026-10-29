@@ -200,8 +200,26 @@ def review(request, result, runner, kind="", jid=None, model=None, timeout=None,
         karar, gerekce, kontrol = BELIRSIZ, (out or "")[:200], ""
     else:
         karar, gerekce, kontrol = parse(out)
+    codex_k = None
+    # Faz 2.9 (Sahip 2026-10-29): Claude karara varamadıysa ve iş geri alınmaz/harcama sınıfındaysa codex HAKEM
+    # (üçüncü göz, salt-okunur kopya, günde ≤3). Yalnız SIKILAŞTIRIR: codex 'eksik/yanlış' derse karar o olur;
+    # 'geçti' derse Claude'un 'doğrulanamadı'sı kalır, not düşer. Özerk işte codex çağrılmaz (harcama yasağı).
+    if karar == BELIRSIZ and not ozerk and blocks(karar, request):
+        try:
+            from ghost import codex
+            if codex.uygun()[0]:
+                out2, err2 = codex.ucuncu_goz(request, result)
+                if not err2:
+                    k2, g2, _c2 = parse(out2)
+                    codex_k = k2
+                    if k2 in ENGELLEYEN:
+                        karar, gerekce = k2, "codex (üçüncü göz): " + (g2 or "")
+                    else:
+                        gerekce = "%s · codex: %s — %s" % (gerekce or "Claude karara varamadı", k2, (g2 or "")[:100])
+        except Exception:
+            pass                                  # hakem asla işi düşürmesin
     rec = log({"jid": jid, "kind": kind, "karar": karar, "gerekce": gerekce,
-               "kontrol": kontrol, "model": model or MODEL,
+               "kontrol": kontrol, "model": model or MODEL, "codex": codex_k,
                "sure": int(time.time() - t0),
                "emir": (request or "")[:200]})
     governance.audit("verify", "ikinci_goz", governance.READ,

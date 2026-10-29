@@ -32,12 +32,14 @@ def _yol(ad):
 # ---------- tur kayıtları ----------
 
 def tur_kaydet(kanal, mesaj_ts, ilk_cikti_ts, cevap_ts, zaman_asimi=False,
-               arac=0, uzunluk=0, tur="sohbet"):
+               arac=0, uzunluk=0, tur="sohbet", ilk_satir_ts=None):
     """Bir sohbet/iş turunu metrik.jsonl'e yaz. Süreler saniye; ilk çıktı yoksa None."""
     try:
         kayit = {"ts": time.strftime("%F %T", time.localtime(cevap_ts or time.time())),
                  "tur": tur, "kanal": kanal or "",
                  "ilk_sn": round(ilk_cikti_ts - mesaj_ts, 2) if (ilk_cikti_ts and mesaj_ts) else None,
+                 # Faz 2.7: ilk satırın sahibe GİTTİĞİ an (M3 ölçüsü); gitmediyse None (kısa tur, sonuç önce geldi)
+                 "ilk_satir_sn": round(ilk_satir_ts - mesaj_ts, 2) if (ilk_satir_ts and mesaj_ts) else None,
                  "toplam_sn": round((cevap_ts or time.time()) - mesaj_ts, 2) if mesaj_ts else None,
                  "zaman_asimi": bool(zaman_asimi), "arac": int(arac or 0), "uzunluk": int(uzunluk or 0)}
         with _LOCK:
@@ -93,6 +95,7 @@ def ozet(gun=7, simdi=None):
     simdi = simdi or time.time()
     esik = simdi - gun * 86400
     ilk, toplam, kayip, n = [], [], 0, 0
+    ilk_satir = []
     try:
         with open(_yol("metrik.jsonl"), encoding="utf-8") as f:
             for satir in f:
@@ -106,6 +109,8 @@ def ozet(gun=7, simdi=None):
                 n += 1
                 if r.get("ilk_sn") is not None:
                     ilk.append(r["ilk_sn"])
+                if r.get("ilk_satir_sn") is not None:
+                    ilk_satir.append(r["ilk_satir_sn"])
                 if r.get("toplam_sn") is not None:
                     toplam.append(r["toplam_sn"])
                 if r.get("zaman_asimi"):
@@ -116,6 +121,7 @@ def ozet(gun=7, simdi=None):
         pass
     return {"var": n > 0, "gun": gun, "tur": n,
             "ilk_p50": _yuzdelik(ilk, 50), "ilk_p95": _yuzdelik(ilk, 95),
+            "ilk_satir_p50": _yuzdelik(ilk_satir, 50), "ilk_satir_p95": _yuzdelik(ilk_satir, 95), "ilk_satir_n": len(ilk_satir),
             "toplam_p50": _yuzdelik(toplam, 50), "toplam_p95": _yuzdelik(toplam, 95),
             "kayip": kayip}
 
@@ -179,6 +185,8 @@ def metin(gun=7):
     satir = ["📏 Metrik (%d gün): %d sohbet turu" % (gun, o["tur"])]
     if o["ilk_p50"] is not None:
         satir.append("ilk çıktı p50 %ss · p95 %ss" % (o["ilk_p50"], o["ilk_p95"]))
+    if o.get("ilk_satir_p50") is not None:
+        satir.append("ilk satır sahibe p50 %ss · p95 %ss (%d turda gitti)" % (o["ilk_satir_p50"], o["ilk_satir_p95"], o["ilk_satir_n"]))
     if o["toplam_p50"] is not None:
         satir.append("tur p50 %ss · p95 %ss" % (o["toplam_p50"], o["toplam_p95"]))
     satir.append("kayıp cevap %d" % o["kayip"])

@@ -18,6 +18,7 @@ from ghost import kalici_oturum
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "ops"))
 import telegram_bridge as tb  # noqa: E402
+from ghost import motor  # noqa: E402  # noqa: E402
 
 SAHTE = r'''#!/usr/bin/env python3
 import json, sys, time, os
@@ -173,7 +174,7 @@ class TestRunClaudeKalici(unittest.TestCase):
         res, sid, err = tb.run_claude("uyu", "fable", session_id="s1", resume=False,
                                       timeout=1, kalici=self.k)
         self.assertTrue(err)
-        self.assertTrue(tb.engines.is_timeout(res))
+        self.assertTrue(motor.is_timeout(res))
 
     def test_surec_olunce_hata(self):
         res, sid, err = tb.run_claude("öl", "fable", session_id="s1", resume=False,

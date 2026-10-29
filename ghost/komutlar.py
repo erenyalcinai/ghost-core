@@ -234,11 +234,43 @@ def _ogren(arg, mgr, ctx):
     ctx.send(mgr.chat_id, "🧠 Kaydettim (%d kayıt)." % memory.count())
 
 
-@komut("/motorlar", "AI motorları (failover)")
+@komut("/motorlar", "AI motorları: Claude beyin, codex üçüncü göz")
 def _motorlar(arg, mgr, ctx):
-    from ghost import engines
-    ctx.send(mgr.chat_id, "🧠 Kurulu motorlar (failover sırası):\n" + "\n".join(
-        "• %s — %s" % (n, note) for n, _c, note in engines.available()))
+    from ghost import codex, modeller
+    _m = mgr.state.get("model", "fable")
+    ctx.send(mgr.chat_id, "🧠 Beyin: %s → %s (yedek motor yok — tek beyin)\n🔎 %s"
+             % (_m, modeller.tam_model(_m), codex.durum_metni()))
+
+
+@komut("/codex", "<görev> [@repo] codex'e salt-okunur görev (üçüncü göz; günde 3)")
+def _codex(arg, mgr, ctx):
+    """Faz 2.9 (Sahip 2026-10-29): sahibin codex'e verdiği görev. Kod kopyası salt-okunur; sonuç sohbete +
+    dossier/codex/. Harcamayı Sahip başlatır; Ghost özerk işte çağırmaz."""
+    import os as _os
+    import re as _re
+    import threading as _th
+    from ghost import codex, config
+    arg = (arg or "").strip()
+    if not arg or arg == "durum":
+        return ctx.send(mgr.chat_id, "🔎 %s\nKullanım: /codex <görev> [@~/appb]" % codex.durum_metni())
+    ok, neden = codex.uygun()
+    if not ok:
+        return ctx.send(mgr.chat_id, "🔎 codex çağrılmadı: %s" % neden)
+    repo = None
+    m = _re.search(r"\s@(\S+)$", " " + arg)
+    if m:
+        repo, arg = m.group(1), arg[:m.start()].strip()
+    ctx.send(mgr.chat_id, "🔎 codex çalışıyor (salt-okunur kopya%s) — bitince yazarım."
+             % ((", " + repo) if repo else ""))
+
+    def _kos():
+        try:
+            metin, hata, yol = codex.sor(arg, repo)
+        except Exception as e:
+            metin, hata, yol = "codex çalıştırılamadı: %r" % e, True, None
+        ctx.send(mgr.chat_id, ("⚠️ " if hata else "🔎 codex:\n") + metin[:3500]
+                 + ("\n(tamamı: %s)" % _os.path.relpath(yol, config.BASE) if yol and len(metin) > 3500 else ""))
+    _th.Thread(target=_kos, daemon=True).start()
 
 
 @komut("/departmanlar", "Uzman birimler")
@@ -271,78 +303,7 @@ def _is(arg, mgr, ctx):
         ctx.send(mgr.chat_id, "⚠️ İş dijesti hata: %r" % e)
 
 
-@komut("/kazanc", "Kazanç birimi durumu (huni/ROI)", "/kazanç")
-def _kazanc(arg, mgr, ctx):
-    try:
-        from ghost.economy import report, feedback
-        low = arg.lower().split()
-        if low and low[0] in ("gonderildi", "gönderildi") and len(low) >= 3:
-            feedback.mark_submitted(int(low[1]), arg.split()[2])
-            return ctx.send(mgr.chat_id, "✅ #%s gönderildi olarak işaretlendi." % low[1])
-        if low and low[0] == "merged" and len(low) >= 2:
-            feedback.mark_merged(int(low[1]))
-            return ctx.send(mgr.chat_id, "✅ #%s merge olarak işaretlendi." % low[1])
-        if low and low[0] in ("odendi", "ödendi") and len(low) >= 3:
-            ok = feedback.mark_paid(int(low[1]), float(low[2]))
-            return ctx.send(mgr.chat_id, "💰 #%s ödendi ($%s)." % (low[1], low[2])
-                            if ok else "Bulunamadı.")
-        if low and low[0] == "merge-kontrol":
-            r = feedback.check_pr_merges()
-            return ctx.send(mgr.chat_id, "🔄 %d PR yoklandı, %d merge, %d hata."
-                            % (r["checked"], r["merged"], r["errors"]))
-        ctx.send(mgr.chat_id, report.render()
-                 + "\n\nDurum ilerlet: /kazanc gonderildi <id> <pr_url> · "
-                 "merged <id> · odendi <id> <tutar> · merge-kontrol")
-    except ImportError:
-        ctx.send(mgr.chat_id, "Bu kurulumda Kazanç birimi yok (ghost/economy).")
-    except Exception as e:
-        ctx.send(mgr.chat_id, "⚠️ Kazanç hata: %r" % e)
-
-
-def _coz_veya_denetle(arg, mgr, ctx, is_hunt, cmd):
-    import threading
-    if not arg.strip().split():
-        return ctx.send(mgr.chat_id, "Kullanım: %s <fırsat_id> (/kazanc ile id'leri gör)" % cmd)
-    try:
-        opp_id = int(arg.split()[0])
-    except ValueError:
-        return ctx.send(mgr.chat_id, "Geçersiz id. /kazanc ile fırsatları listele.")
-    chat = mgr.chat_id
-
-    def work():
-        try:
-            from ghost.economy import ledger, pipeline, hunt_pipeline
-            o = ledger.get_opportunity(opp_id)
-            if not o:
-                return ctx.send(chat, "Fırsat #%s bulunamadı." % opp_id)
-            ctx.send(chat, "🔧 #%s (%s) %s — izole+hapisli ortamda başladı, birkaç dk sürebilir."
-                     % (opp_id, o["repo"], "denetleniyor" if is_hunt else "çözülüyor"))
-            if is_hunt:
-                r = hunt_pipeline.audit_pipeline(opp_id, o["repo"])
-                if r.get("stage") != "ready":
-                    return ctx.send(chat, "⚠️ Durdu (%s): %s" % (r.get("stage"), r.get("note")))
-                v = r.get("verification") or {}
-                ctx.send(chat, "🎯 #%s denetim taslağı hazır — %s\n\n%s"
-                         % (opp_id, r.get("note", ""), (r.get("findings") or "")[:3000]))
-                if v.get("verdicts"):
-                    ctx.send(chat, "🔍 Adversarial doğrulama:\n%s" % v["verdicts"][:2500])
-            else:
-                r = pipeline.solve_pipeline(opp_id, o["repo"], o["title"], o["url"])
-                if r.get("stage") != "ready":
-                    return ctx.send(chat, "⚠️ Durdu (%s): %s" % (r.get("stage"), r.get("note")))
-                val = r.get("validation") or {}
-                ctx.send(chat, "✅ #%s çözüm taslağı hazır (%s)\nDoğrulama: %s\n\n"
-                         "```diff\n%s\n```\n\nİncele → doğruysa PR aç → /kazanc gonderildi %s <pr_url>"
-                         % (opp_id, ", ".join(r.get("changed_files") or []),
-                            val.get("summary", "-"), (r.get("diff") or "")[:2500], opp_id))
-        except Exception as e:
-            ctx.send(chat, "⚠️ Hata: %r" % e)
-    threading.Thread(target=work, daemon=True).start()
-
-
-@komut("/denetle", "Tek hedefi güvenlik denetle → bulgu")
-def _denetle(arg, mgr, ctx):
-    _coz_veya_denetle(arg, mgr, ctx, True, "/denetle")
+# /kazanc, /denetle (Kazanç birimi) 2026-10-29 Faz 2.9/K6 ile arşive gitti: dal arsiv/economy-2026-10-29.
 
 
 @komut("/hedef", "Duran hedef (boşken çalışırım)")

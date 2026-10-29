@@ -65,7 +65,6 @@ def telegram(msg, sinif="ghost", anahtar="zombi", soguma_sn=6 * 3600):
     Varsayılan sınıf GHOST (Nabız'da sarı); yalnız EREN_ESIK ardışık "düşürüldü ama ray dönmedi"
     turu sahibe gider (Mac'te `ai.jarvis.tunnel`e bakması gerekebilir). Eskisi: send_telegram.py."""
     try:
-        sys.path.insert(0, BASE)
         from ghost import alarm
         alarm.bildir("tunnel", msg, sinif=sinif, anahtar=anahtar, soguma_sn=soguma_sn)
     except Exception as e:
@@ -155,7 +154,6 @@ def mac_isi_var_mi():
 def durum_yaz(durum, detay="", ardisik=0):
     """`ardisik`: kaç turdur üst üste "zombi-cozulemedi" (Sahip eşiği için, 2026-10-29)."""
     try:
-        sys.path.insert(0, BASE)
         from ghost import durum as _durum          # Faz 1.9: durum tablosu `tunnel_watch`
         _durum.yaz("tunnel_watch", {"ts": int(time.time()), "at": time.strftime("%F %T"),
                                     "durum": durum, "detay": detay, "ardisik": ardisik})
@@ -165,7 +163,6 @@ def durum_yaz(durum, detay="", ardisik=0):
 
 def _onceki():
     try:
-        sys.path.insert(0, BASE)
         from ghost import durum as _durum
         d = _durum.tasi("tunnel_watch", STATE_FILE, {})   # eski json varsa bir kez içeri alınır
         return d if isinstance(d, dict) else {}
@@ -272,7 +269,6 @@ def main():
 def _alarm_kapat():
     """Ray döndü: açık tünel alarmları Nabız'dan düşer."""
     try:
-        sys.path.insert(0, BASE)
         from ghost import alarm
         for a in ("zombi", "zombi-cozulemedi", "zombi-kalici"):
             alarm.kapat("tunnel", a)

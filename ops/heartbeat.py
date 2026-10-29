@@ -34,8 +34,6 @@ import time
 OPS = os.environ.get("GHOST_OPS") or os.path.dirname(os.path.abspath(__file__))
 BEAT_DIR = os.path.join(OPS, "heartbeats")      # eski damga dizini: ilk okumada durum tablosuna taşınır
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _BASE not in sys.path:
-    sys.path.insert(0, _BASE)
 
 
 def _durum():

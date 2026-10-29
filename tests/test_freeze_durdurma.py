@@ -12,6 +12,7 @@ from tests import common  # noqa: F401
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ops"))
 import telegram_bridge as tb  # noqa: E402
+from ghost import motor  # noqa: E402
 from ghost import governance  # noqa: E402
 from ops import mac_worker  # noqa: E402
 
@@ -76,14 +77,14 @@ class OzerkIsaret(unittest.TestCase):
         def sahte_popen(cmd, **k):
             gorulen.update(k.get("env") or {})
             raise RuntimeError("koşma")
-        with mock.patch.object(tb.subprocess, "Popen", sahte_popen):
+        with mock.patch.object(motor.subprocess, "Popen", sahte_popen):
             tb.run_claude("x", "sonnet", use_mcp=False, **kw)
         return gorulen
 
     def test_ozerk_isaretli_digeri_degil(self):
         self.assertEqual(self._env(ozerk=True).get("GHOST_OZERK"), "1")
         self.assertNotIn("GHOST_OZERK", self._env())
-        self.assertNotIn("GHOST_OZERK", tb._env)            # genel ortam kirlenmez
+        self.assertNotIn("GHOST_OZERK", motor.ORTAM)         # genel ortam kirlenmez
 
     def test_ozerk_onek_ayraci(self):
         self.assertTrue((tb.AUTONOMOUS_GUARD + "iş").startswith(tb.AUTONOMOUS_GUARD))

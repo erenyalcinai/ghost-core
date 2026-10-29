@@ -1,0 +1,20 @@
+# Ghost — Eren Yalçın'ın kişisel AI altyapısı. Çekirdek paket `ghost/`; `ops/` betikleri paket DEĞİL
+# (python3 ops/x.py ile koşar, kendi dizini sys.path[0]). Faz 2.9 (2026-10-29): bu dosya + düzenlenebilir
+# kurulum (`pip install --user --no-deps -e .`) sayesinde betikler `from ghost import …` için
+# sys.path.insert yazmaz. Bağımlılık yok: çekirdek yalnız stdlib; isteğe bağlı araçlar kendi yerinde.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghost-jarvis"
+version = "3.0"
+description = "Ghost — kişisel AI altyapısı (çekirdek: ghost/)"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.setuptools]
+packages = ["ghost", "ghost.agents", "ghost.tools"]
+
+[tool.setuptools.package-data]
+"ghost.agents" = ["*.yaml"]

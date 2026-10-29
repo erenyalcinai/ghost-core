@@ -19,6 +19,7 @@ from ghost import akis, api, bus, config, kokpit, sahne  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ops"))
 import telegram_bridge as tb  # noqa: E402
+from ghost import motor  # noqa: E402  (Faz 2.9: CLI koşumu motorda)
 
 STREAM = [
     {"type": "system", "subtype": "init", "model": "claude-x", "session_id": "sid-1"},
@@ -263,13 +264,13 @@ class RunClaudeAkis(unittest.TestCase):
         return p
 
     def setUp(self):
-        self._claude = tb.CLAUDE
+        self._claude = motor.CLAUDE
 
     def tearDown(self):
-        tb.CLAUDE = self._claude
+        motor.CLAUDE = self._claude
 
     def test_akis_kipi_sonuc_ve_olaylar(self):
-        tb.CLAUDE = self._sahte([json.dumps(s) for s in STREAM])
+        motor.CLAUDE = self._sahte([json.dumps(s) for s in STREAM])
         gelen, kullanim = [], {}
         res, sid, err = tb.run_claude("selam", "m", session_id="sid-1", use_mcp=False,
                                       timeout=20, on_usage=kullanim.update, on_event=gelen.append)
@@ -279,18 +280,18 @@ class RunClaudeAkis(unittest.TestCase):
         self.assertEqual(kullanim.get("cost"), 0.01)
 
     def test_json_kipi_degismedi(self):
-        tb.CLAUDE = self._sahte([json.dumps(STREAM[-1])])
+        motor.CLAUDE = self._sahte([json.dumps(STREAM[-1])])
         res, sid, err = tb.run_claude("selam", "m", session_id="sid-1", use_mcp=False, timeout=20)
         self.assertEqual((res, sid, err), ("Son commit abc1234.", "sid-1", False))
 
     def test_sonucsuz_olum_hata(self):
-        tb.CLAUDE = self._sahte([json.dumps(STREAM[0])], rc=3)
+        motor.CLAUDE = self._sahte([json.dumps(STREAM[0])], rc=3)
         res, _, err = tb.run_claude("selam", "m", use_mcp=False, timeout=20, on_event=lambda s: None)
         self.assertTrue(err)
         self.assertIn("hata metni", res)
 
     def test_zaman_asimi_akis_kipinde(self):
-        tb.CLAUDE = self._sahte([json.dumps(STREAM[0])] * 6, bekle=1)
+        motor.CLAUDE = self._sahte([json.dumps(STREAM[0])] * 6, bekle=1)
         res, _, err = tb.run_claude("selam", "m", use_mcp=False, timeout=2, on_event=lambda s: None)
         self.assertTrue(err)
         self.assertIn("Zaman", res)

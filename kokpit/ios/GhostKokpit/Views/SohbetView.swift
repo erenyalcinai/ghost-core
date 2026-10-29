@@ -516,6 +516,12 @@ struct MesajBalonu: View, Equatable {
                 if !mesaj.metin.isEmpty {
                     if mesaj.sahipten {
                         Text(mesaj.metin).foregroundStyle(Renk.metin)
+                    } else if mesaj.gecici == true {
+                        // Faz 2.7: ilk satır — Ghost'un niyet cümlesi; sonuç gelince aynı balon dolar.
+                        HStack(alignment: .top, spacing: 8) {
+                            MarkdownMetin(metin: mesaj.metin).opacity(0.75)
+                            ProgressView().controlSize(.small)
+                        }
                     } else {
                         MarkdownMetin(metin: mesaj.metin)
                     }

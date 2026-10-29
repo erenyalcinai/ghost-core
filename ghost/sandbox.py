@@ -8,7 +8,7 @@ için ileride container/nsjail katmanı — ARCHITECTURE.md). Her çalıştırma
 
 UYARI: cwd dışına çıkış engellenmez — `--dangerously-skip-permissions` ile
 koşan claude host FS'ine erişebilir. Untrusted kod (bounty/hunt clone'ları)
-için env sır-temizlenir (bkz. economy._tool_env) ama TAM izolasyon (FS/ağ
+için env sır-temizlenir (eski economy._tool_env deseni; paket 2026-10-29 arşivde) ama TAM izolasyon (FS/ağ
 hapsi) firejail/nsjail gerektirir; otonom untrusted çalıştırmadan ÖNCE şart.
 """
 import os

@@ -12,6 +12,7 @@ from ghost import akis, bus, channels, config, kokpit, notify  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ops"))
 import telegram_bridge as tb  # noqa: E402
+from ghost import motor  # noqa: E402
 
 
 def _dosya(ad, icerik=b"\xff\xd8\xff\xe0test"):
@@ -71,12 +72,12 @@ class Mesguliyet(unittest.TestCase):
         """run_claude stream kipinde result satırı gelmezse sentetik sonuç olayı düşer."""
         olaylar = []
         cb = lambda satir: olaylar.extend(akis.stream_olaylar(satir))  # noqa: E731
-        eski = tb.CLAUDE
-        tb.CLAUDE = "/bin/sh"      # "-p prompt --output-format ..." → sh hata verir, result yok
+        eski = motor.CLAUDE
+        motor.CLAUDE = "/bin/sh"      # "-p prompt --output-format ..." → sh hata verir, result yok
         try:
             res, _, err = tb.run_claude("x", "m", on_event=cb, timeout=5, use_mcp=False)
         finally:
-            tb.CLAUDE = eski
+            motor.CLAUDE = eski
         self.assertTrue(err)
         self.assertEqual(olaylar[-1]["tur"], "sonuc")
         self.assertTrue(olaylar[-1]["hata"])

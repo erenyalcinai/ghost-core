@@ -27,6 +27,7 @@ final class SohbetModel: ObservableObject {
 
     private var api: GhostAPI?
     private var son = -1                       // -1: açılışta en son 50 satır
+    private var gts: Double = 0                // Faz 2.7: sunucunun son güncelleme damgası; ilk satır balonu sonuçla dolar
     private var hataSayaci: Task<Void, Never>?
     /// Yarım kalan çoklu gönderi (bir parça yüklenemedi): aynı grupla devam edilir.
     private var aktifGrup: (id: String, toplam: Int, gonderilen: Int)?
@@ -88,9 +89,10 @@ final class SohbetModel: ObservableObject {
         while !Task.isCancelled {
             do {
                 let baslangic = Date()
-                let z = try await api.outbox(since: son, limit: 50, bekle: 25, durum: mesgul?.imza ?? "0|")
+                let z = try await api.outbox(since: son, limit: 50, bekle: 25, durum: mesgul?.imza ?? "0|", gts: gts)
                 ekle(z.mesajlar)
                 if let s = z.son { son = max(son, s) }
+                if let g = z.gts { gts = max(gts, g) }
                 if let m = z.mesgul {
                     let yeniBaslangic = m.aktif ? baslangicTahmini(m) : nil
                     if yeniBaslangic != mesgulBasladi { mesgulBasladi = yeniBaslangic }
@@ -152,6 +154,13 @@ final class SohbetModel: ObservableObject {
 
     private func ekle(_ yeni: [Mesaj]) {
         let varOlan = Set(mesajlar.map(\.id))
+        // Faz 2.7: bilinen id yeniden gelirse (ilk satır balonu sonuçla doldu) yerinde değişir — okunmamış sayacı ve kaydırma oynamaz.
+        for m in yeni where varOlan.contains(m.id) {
+            if let i = mesajlar.firstIndex(where: { $0.id == m.id }), mesajlar[i] != m {
+                mesajlar[i] = m
+                gunluk("guncelle \(m.id) gecici=\(m.gecici ?? false)")
+            }
+        }
         let ek = yeni.filter { !varOlan.contains($0.id) }
         guard !ek.isEmpty else { return }
         mesajlar.append(contentsOf: ek)

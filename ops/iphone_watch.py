@@ -68,7 +68,6 @@ def bildir(metin, duzeldi=False):
     Wi-Fi'da değil, sorun yok). Kayıt Nabız'da sarı nokta olur, Telegram'a düşmez.
     Eskisi: ops/send_telegram.py alt süreci."""
     try:
-        sys.path.insert(0, BASE)
         from ghost import alarm
         if duzeldi:
             alarm.kapat("iphone", "durum")
@@ -101,7 +100,6 @@ def asc_profil():
     except ImportError:
         return None, "PyJWT yok"
     try:
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from ghost import vekil     # sır vekili kuruluysa JWT'yi vekil imzalar (Faz 2)
         if vekil.aktif(None, "ASC_KEY_PATH"):
             hdr = {}

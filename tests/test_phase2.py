@@ -1,30 +1,11 @@
 import unittest
 
 from tests import common  # noqa: F401
-from ghost import engines, notify
-
-
-class TestEngines(unittest.TestCase):
-    def test_available_is_list(self):
-        av = engines.available()
-        self.assertIsInstance(av, list)
-        # claude bu ortamda kurulu değil olabilir — yapı doğru olsun yeter
-        for item in av:
-            self.assertEqual(len(item), 3)
-
-    def test_catalog_shapes(self):
-        for name, binary, cmd, note in engines.CATALOG:
-            self.assertTrue("{prompt}" in " ".join(cmd))
-            self.assertTrue(name and binary and note)
-
-    def test_run_no_engines_graceful(self):
-        # prefer edilen kurulu değilse bile çökmemeli
-        out, eng, err = engines.run("merhaba", prefer="olmayan_motor", timeout=5)
-        self.assertIsInstance(out, str)
+from ghost import motor, notify
 
 
 class TestCostLimitSiniri(unittest.TestCase):
-    """Maliyet/kota sınırı yedek motoru TETİKLEMEMELİ (2026-08-24 kararı)."""
+    """Maliyet/kota sınırı ayrı sınıf (2026-08-24 kararı); yedek motor Faz 2.9'dan beri hiç yok."""
 
     def test_limit_metinleri_yakalanir(self):
         for metin in [
@@ -35,9 +16,9 @@ class TestCostLimitSiniri(unittest.TestCase):
             "HTTP 402 Payment Required",
             "⚠️ Hata: kullanım sınırı doldu",
         ]:
-            self.assertTrue(engines.is_cost_limit(metin), metin)
+            self.assertTrue(motor.is_cost_limit(metin), metin)
 
-    def test_gercek_arizalar_failover_tetikler(self):
+    def test_gercek_arizalar_sinir_sayilmaz(self):
         for metin in [
             "⏱ Zaman aşımı (120 sn) — işi böl.",
             "⚠️ Çalıştırma hatası: FileNotFoundError('claude')",
@@ -47,7 +28,7 @@ class TestCostLimitSiniri(unittest.TestCase):
             "",
             None,
         ]:
-            self.assertFalse(engines.is_cost_limit(metin), metin)
+            self.assertFalse(motor.is_cost_limit(metin), metin)
 
 
 class TestNotifyFallback(unittest.TestCase):

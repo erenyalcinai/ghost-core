@@ -12,7 +12,6 @@ import sys
 import tempfile
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BASE)
 
 CSS = """body{font-family:-apple-system,'Helvetica Neue',Arial,sans-serif;font-size:12.5pt;line-height:1.45;margin:28px 34px;color:#111}
 h1{font-size:20pt;margin:0 0 10px}h2{font-size:15pt;margin:18px 0 6px}h3{font-size:13pt}

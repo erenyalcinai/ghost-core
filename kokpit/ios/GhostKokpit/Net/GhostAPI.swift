@@ -94,11 +94,12 @@ final class GhostAPI {
     }
 
     /// since = -1 → en son `limit` satır. durum: bilinen meşguliyet imzası; değişince erken döner.
-    func outbox(since: Int, limit: Int = 50, bekle: Int = 25, durum: String? = nil) async throws -> OutboxZarf {
+    func outbox(since: Int, limit: Int = 50, bekle: Int = 25, durum: String? = nil, gts: Double = 0) async throws -> OutboxZarf {
         var q = [URLQueryItem(name: "since", value: String(since)),
                  URLQueryItem(name: "limit", value: String(limit)),
                  URLQueryItem(name: "bekle", value: String(bekle))]
         if let d = durum { q.append(URLQueryItem(name: "durum", value: d)) }
+        if gts > 0 { q.append(URLQueryItem(name: "gts", value: String(format: "%.3f", gts))) }   // Faz 2.7: bu andan sonra güncellenen balonlar
         return try await istek("GET", "/v1/outbox", sorgu: q, uzun: true)
     }
 

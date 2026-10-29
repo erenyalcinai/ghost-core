@@ -39,7 +39,7 @@ persona, hafıza) ARKAYA koyar (`ghost/cc_komutlar.prompt_kur`; sohbet + iş yol
   available"); /clear ve /model Ghost'un oturum yönetimiyle çakışır → Ghost'unki geçerli.
 - `/compact` deneysel: Ghost'un `/tazele`si konuyu devrederek yapar, tercih o.
 - Kaldırılanlar (ölü): `/mail` (giden posta yok), `/bounty`, `/hunt`, `/tara`, `/survivor`, `/coz`
-  (economy stand-down). `/denetle`, `/hedef`, `/kazanc` duruyor.
+  (economy stand-down); `/denetle`, `/kazanc` 2026-10-29 arşivle gitti (dal arsiv/economy-2026-10-29). `/hedef` duruyor.
 
 ## Ayarlar (.env)
 - `JARVIS_POOL` paralel iş sayısı (varsayılan 3)

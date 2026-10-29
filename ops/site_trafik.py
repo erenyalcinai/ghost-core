@@ -15,8 +15,6 @@ Ortam: POSTHOG_HOST, POSTHOG_API_KEY, POSTHOG_PROJECT_ID (secrets.env).
 import json, os, sys, urllib.request
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _BASE not in sys.path:
-    sys.path.insert(0, _BASE)
 from ghost import sahip  # noqa: E402  (profil: ops/sahip.json)
 
 SITELER = sahip.trafik_siteleri()   # ops/sahip.json "trafik": true olan alanlar
@@ -50,8 +48,6 @@ BOT_SEHIR = {"Council Bluffs", "Ashburn", "Eatonton", "North Charleston", "Board
 
 
 def sorgu(hogql):
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from ghost import vekil     # sır vekili kuruluysa kimliği vekil ekler (Faz 2)
     pid = os.environ["POSTHOG_PROJECT_ID"]
     body = json.dumps({"query": {"kind": "HogQLQuery", "query": hogql}}).encode()

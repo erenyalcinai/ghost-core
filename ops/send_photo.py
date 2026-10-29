@@ -3,67 +3,15 @@
 
 Kullanım: python3 ops/send_photo.py <görsel_yolu> ["opsiyonel açıklama"]
 Ghost tarayıcı ekran görüntülerini böyle gösterir.
-"""
-import json
+Faz 2.9: multipart gönderim + kokpit dökümü ghost/notify.medya'da (tek yer)."""
 import os
 import sys
-import urllib.request
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ghost import notify  # noqa: E402
 
-ENV = {}
-with (open(os.path.join(BASE, ".env"), encoding="utf-8") if os.path.exists(os.path.join(BASE, ".env")) else open(os.devnull)) as f:
-    for line in f:
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            ENV[k] = v.strip()
-
-if ENV.get("TELEGRAM_OWNER_ID", "").strip().isdigit():
-    CHAT_ID = ENV["TELEGRAM_OWNER_ID"].strip()
-else:
-    with open(os.path.join(BASE, "ops", "owner.json"), encoding="utf-8") as f:
-        CHAT_ID = str(json.load(f)["id"])
-
-sys.path.insert(0, BASE)
-from ghost import vekil  # noqa: E402  sır vekili kuruluysa anahtar bu süreçte yok (Faz 2)
-path = sys.argv[1]
-caption = sys.argv[2] if len(sys.argv) > 2 else ""
-
-# multipart/form-data elle kur (sadece stdlib)
-boundary = "----ghost" + os.urandom(8).hex()
-with open(path, "rb") as f:
-    photo = f.read()
-fname = os.path.basename(path)
-
-parts = []
-parts.append(("chat_id", None, CHAT_ID))
-if caption:
-    parts.append(("caption", None, caption))
-parts.append(("photo", fname, photo))
-
-body = b""
-for name, filename, data in parts:
-    body += ("--%s\r\n" % boundary).encode()
-    if filename:
-        body += ('Content-Disposition: form-data; name="%s"; filename="%s"\r\n'
-                 % (name, filename)).encode()
-        body += b"Content-Type: application/octet-stream\r\n\r\n"
-        body += data if isinstance(data, bytes) else data.encode()
-    else:
-        body += ('Content-Disposition: form-data; name="%s"\r\n\r\n' % name).encode()
-        body += data.encode()
-    body += b"\r\n"
-body += ("--%s--\r\n" % boundary).encode()
-
-req = urllib.request.Request(
-    vekil.url("telegram", "/sendPhoto", ENV), data=body,
-    headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
-resp = json.loads(urllib.request.urlopen(req, timeout=60).read())
-print("gönderildi" if resp.get("ok") else "hata: %s" % resp)
-try:  # kokpit dökümü: aynı görsel uygulamanın Sohbet'inde de görünsün (ghost/channels.py)
-    sys.path.insert(0, BASE)
-    from ghost import channels
-    channels.app_medya(path, caption)
-except Exception:
-    pass
+if __name__ == "__main__":
+    path = sys.argv[1]
+    caption = sys.argv[2] if len(sys.argv) > 2 else ""
+    resp = notify.medya("photo", path, caption)
+    print("gönderildi" if resp.get("ok") else "hata: %s" % resp)

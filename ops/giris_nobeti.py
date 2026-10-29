@@ -33,8 +33,6 @@ DESEN = re.compile(r"Accepted (?P<yontem>\S+) for (?P<kul>\S+) from (?P<ip>[0-9a
 # (Sahip: "neden sürekli SSH girişi uyarısı geliyor?"). Anahtar YubiKey kapısının ardındaki
 # Mac'te durur; IP değişse de (Sahip seyahatte) kimlik anahtardır, ağ değil.
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _BASE not in sys.path:
-    sys.path.insert(0, _BASE)
 from ghost import sahip  # noqa: E402
 
 GHOST_ROOT_PARMAKLAR = set(sahip.ssh_parmak_izleri())   # ops/sahip.json "ssh_parmak_izleri"

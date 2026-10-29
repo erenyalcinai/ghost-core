@@ -140,7 +140,7 @@ class H(BaseHTTPRequestHandler):
         return self._json(503, {"hata": "%s görüntüsü yok — uzuv uykuda ya da tünel kapalı" % ad})
 
     # ------------------------------------------------------------ SSE
-    def _sse(self, since_olay, since_outbox, since_sahne):
+    def _sse(self, since_olay, since_outbox, since_sahne, since_g=0.0):
         """text/event-stream: sohbet olayları + döküm + sahne değişimi tek akışta.
         En çok SSE_SURE sn açık kalır; istemci son id'lerle yeniden bağlanır."""
         self.send_response(200)
@@ -156,6 +156,8 @@ class H(BaseHTTPRequestHandler):
 
         son = time.time() + SSE_SURE
         ping = time.time()
+        if not since_g:
+            since_g = kokpit.outbox_son_guncelleme()   # geçmiş güncellemeler yeniden akmasın
         yaz("merhaba", {"olay": since_olay, "outbox": since_outbox, "sahne": since_sahne})
         while time.time() < son:
             yeni = False
@@ -163,6 +165,10 @@ class H(BaseHTTPRequestHandler):
                 since_olay = max(since_olay, ev["id"]); yaz("olay", ev); yeni = True
             for m in kokpit.outbox_oku(since_outbox, 50):
                 since_outbox = max(since_outbox, m["id"]); yaz("mesaj", m); yeni = True
+            for m in kokpit.outbox_guncellenenler(since_g, 20):   # Faz 2.7: ilk satır balonu sonuçla doldu → aynı id yeniden
+                yaz("mesaj", m); yeni = True
+            if yeni:
+                since_g = max(since_g, kokpit.outbox_son_guncelleme())
             sh = sahne.oku()
             if int(sh.get("seq") or 0) != since_sahne:
                 since_sahne = int(sh.get("seq") or 0); yaz("sahne", sh); yeni = True
@@ -236,9 +242,10 @@ class H(BaseHTTPRequestHandler):
                     rows = kokpit.outbox_oku(0, limit, once=int(once))
                     return self._json(200, {"mesajlar": rows, "son": kokpit.outbox_son(),
                                             "mesgul": akis.sohbet_durumu()})
-                rows, mesgul = _outbox_bekle(since, limit, bekle, q.get("durum", [""])[0])
+                gts = float(q.get("gts", ["0"])[0] or 0)             # Faz 2.7: bu andan sonra güncellenen satırlar da gelir
+                rows, mesgul, g_rows, g_son = _outbox_bekle(since, limit, bekle, q.get("durum", [""])[0], gts)
                 son = rows[-1]["id"] if rows else max(since, kokpit.outbox_son())
-                return self._json(200, {"mesajlar": rows, "son": son, "mesgul": mesgul})
+                return self._json(200, {"mesajlar": rows + g_rows, "son": son, "mesgul": mesgul, "gts": g_son})
             if u.path.startswith("/v1/medya/"):
                 oid = u.path.rsplit("/", 1)[1]
                 m = kokpit.medya_yol(int(oid)) if oid.isdigit() else None
@@ -588,15 +595,22 @@ def _mesgul_imza(m):
     return "%d|%s" % (1 if m.get("aktif") else 0, m.get("ozet", ""))
 
 
-def _outbox_bekle(since, limit, bekle, durum_imza):
+def _outbox_bekle(since, limit, bekle, durum_imza, gts=0.0):
     """Uzun yoklama: yeni döküm satırı YA DA sohbet meşguliyeti (aktif/özet) istemcinin
     bildiğinden farklıysa hemen döner; yoksa `bekle` sn tutar. (rows, mesgul)."""
     son = time.time() + max(0, min(float(bekle or 0), 60))
+    g_son = max(kokpit.outbox_son_guncelleme(), time.time())   # damga: bundan sonrası 'yeni güncelleme'
+    # gts=0 (uygulama açılışı / öne gelişten sonraki İLK yoklama): eskiden güncellemeler bu yoklama boyunca hiç
+    # bakılmıyordu → ilk satır balonu 25 sn'ye kadar dolu görünmüyordu (2026-10-29, Sahip "hemen güncellenmiyor").
+    # Geçmiş yeniden akmaz (damga = şimdi), ama bu yoklama SIRASINDA dolan balon hemen döner.
+    if not gts:
+        gts = g_son
     while True:
         rows = kokpit.outbox_oku(since, limit)
         m = akis.sohbet_durumu()
-        if rows or time.time() >= son or (durum_imza and _mesgul_imza(m) != durum_imza):
-            return rows, m
+        g_rows = kokpit.outbox_guncellenenler(gts, 20)
+        if rows or g_rows or time.time() >= son or (durum_imza and _mesgul_imza(m) != durum_imza):
+            return rows, m, g_rows, max(g_son, kokpit.outbox_son_guncelleme())
         time.sleep(0.5)
 
 

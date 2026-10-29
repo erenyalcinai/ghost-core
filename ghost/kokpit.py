@@ -45,7 +45,9 @@ CREATE TABLE IF NOT EXISTS kokpit_nonces(nonce TEXT PRIMARY KEY, ts REAL);
 _EK_SUTUNLAR = (("apns_token", "TEXT"), ("apns_env", "TEXT"),   # Faz 2 (push)
                 ("la_start_token", "TEXT"))                       # Live Activity push-to-start
 _EK_OUTBOX = (("medya", "TEXT"),    # Faz 4: Ghost'un/sahibin görseli, videosu, sesi, belgesi (JSON)
-              ("kanal", "TEXT"))    # Faz 1.13 (2026-10-29): satır hangi kanaldan (kokpit|telegram|…) — teslim ölçüsü
+              ("kanal", "TEXT"),    # Faz 1.13 (2026-10-29): satır hangi kanaldan (kokpit|telegram|…) — teslim ölçüsü
+              ("gecici", "INTEGER"),   # Faz 2.7: 1 = ilk satır (geçici balon), sonuç gelince 0 + metin güncellenir
+              ("guncelleme", "REAL"))  # Faz 2.7: son güncelleme anı (epoch); istemci `gts` ile yalnız değişenleri çeker
 MEDYA_DIZIN = "kokpit_medya"        # ops/ altında; kaynak dosya buraya KOPYALANIR (özgünü silinebilir)
 MEDYA_TAVAN = 200 * 1024 * 1024     # dizin bu boyutu aşınca en eski dosyalar budanır
 SCHEMA += """
@@ -155,7 +157,7 @@ def medya_sakla(yol, ad=None, tur=None, kopyala=True):
         return None
 
 
-def outbox_yaz(metin, kaynak="ghost", butonlar=None, medya=None, kanal=None):
+def outbox_yaz(metin, kaynak="ghost", butonlar=None, medya=None, kanal=None, gecici=False):
     """Döküme bir satır ekle. Asla fırlatmaz — köprünün send()'ini düşürmesin.
     medya: dosya yolu (kopyalanır) ya da medya_sakla() sözlüğü. kanal: verilmezse channels.son_kanal()."""
     if kanal is None:
@@ -179,9 +181,9 @@ def outbox_yaz(metin, kaynak="ghost", butonlar=None, medya=None, kanal=None):
             medya = medya_sakla(medya)
         c = _db()
         cur = c.execute(
-            "INSERT INTO kokpit_outbox(ts, kaynak, metin, butonlar, medya, kanal) VALUES(?,?,?,?,?,?)",
+            "INSERT INTO kokpit_outbox(ts, kaynak, metin, butonlar, medya, kanal, gecici) VALUES(?,?,?,?,?,?,?)",
             (_now(), kaynak, metin or "", _butonlar_json(butonlar),
-             json.dumps(medya, ensure_ascii=False) if medya else None, kanal or ""))
+             json.dumps(medya, ensure_ascii=False) if medya else None, kanal or "", 1 if gecici else 0))
         rid = cur.lastrowid
         if rid % 200 == 0:  # ara sıra buda
             c.execute("DELETE FROM kokpit_outbox WHERE id < ?", (rid - OUTBOX_TUT,))
@@ -192,7 +194,39 @@ def outbox_yaz(metin, kaynak="ghost", butonlar=None, medya=None, kanal=None):
         return None
 
 
-def _satir(i, ts, kaynak, metin, but, med):
+def outbox_guncelle(rid, metin, butonlar=None):
+    """Faz 2.7: var olan döküm satırının metnini (ve butonlarını) değiştir — ilk satır balonu sonuçla dolar.
+    gecici→0, guncelleme=şimdi; istemci aynı id'yi yerinde değiştirir. → True/False. Asla fırlatmaz."""
+    try:
+        c = _db()
+        n = c.execute("UPDATE kokpit_outbox SET metin=?, butonlar=COALESCE(?, butonlar), gecici=0, guncelleme=? WHERE id=?",
+                      (metin or "", _butonlar_json(butonlar) if butonlar else None, time.time(), int(rid))).rowcount
+        c.commit()
+        c.close()
+        return n > 0
+    except Exception:
+        return False
+
+
+def outbox_guncellenenler(since_ts, limit=20):
+    """guncelleme > since_ts olan satırlar (artan) — SSE/yoklama bunları aynı `mesaj` olayıyla yeniden verir."""
+    if not since_ts:
+        return []
+    c = _db()
+    rows = c.execute("SELECT id, ts, kaynak, metin, butonlar, medya, gecici FROM kokpit_outbox WHERE guncelleme > ? "
+                     "ORDER BY guncelleme LIMIT ?", (float(since_ts), int(limit))).fetchall()
+    c.close()
+    return [_satir(*r) for r in rows]
+
+
+def outbox_son_guncelleme():
+    c = _db()
+    r = c.execute("SELECT COALESCE(MAX(guncelleme),0) FROM kokpit_outbox").fetchone()[0]
+    c.close()
+    return float(r or 0)
+
+
+def _satir(i, ts, kaynak, metin, but, med, gecici=0):
     m = None
     if med:
         try:
@@ -201,7 +235,7 @@ def _satir(i, ts, kaynak, metin, but, med):
         except Exception:
             m = None
     return {"id": i, "ts": ts, "kaynak": kaynak, "metin": metin,
-            "butonlar": json.loads(but) if but else None, "medya": m}
+            "butonlar": json.loads(but) if but else None, "medya": m, "gecici": bool(gecici)}
 
 
 def outbox_oku(since=0, limit=50, once=None):
@@ -209,7 +243,7 @@ def outbox_oku(since=0, limit=50, once=None):
     satırlık dökümü baştan yüklemesin). once verilirse id < once olan son `limit`
     satır ("daha eski" sayfası). Her durumda artan sırada döner."""
     c = _db()
-    sel = "SELECT id, ts, kaynak, metin, butonlar, medya FROM kokpit_outbox "
+    sel = "SELECT id, ts, kaynak, metin, butonlar, medya, gecici FROM kokpit_outbox "
     if once is not None:
         rows = c.execute(sel + "WHERE id < ? ORDER BY id DESC LIMIT ?",
                          (int(once), int(limit))).fetchall()[::-1]

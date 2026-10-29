@@ -13,8 +13,6 @@ import os
 import subprocess
 import sys
 import time
-import urllib.parse
-import urllib.request
 
 # Depo kökünü yola ekle: launchd/systemd bu betiği KENDİ çalışma dizininden
 # koşuyor (WorkingDirectory yok) → `import ghost` çöküyordu. Kanıt (2026-08-15,
@@ -55,8 +53,7 @@ if os.path.exists(_ENV_PATH):
 
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
-from ghost import vekil  # noqa: E402  sır vekili (Faz 2)
-API = vekil.url("telegram", "", ENV)
+from ghost import notify, vekil  # noqa: E402  sır vekili (Faz 2); Telegram gönderimi tek yerde (Faz 2.9)
 _env = dict(os.environ)
 _env["PATH"] = _env.get("PATH", "") + ":/usr/local/bin:/opt/homebrew/bin:/usr/bin"
 # secrets.env de env'e (beyin probu CLAUDE_CODE_OAUTH_TOKEN'a muhtaç — yoksa
@@ -87,13 +84,12 @@ def owner_id():
 
 
 def tg_send(text):
-    oid = owner_id()
-    if not oid:
+    """Faz 2.9: gönderim tek yerde (ghost/notify.py); dokum=False = eski ham yol (kokpit/apns kopyası yok)."""
+    if not owner_id():
         return
-    data = urllib.parse.urlencode({"chat_id": oid, "text": text}).encode()
-    req = urllib.request.Request(API + "/sendMessage", data=data)
     try:
-        urllib.request.urlopen(req, timeout=30).read()
+        if not notify.telegram(text, ENV, dokum=False):
+            log("telegram gönderilemedi")
     except Exception as e:
         log("telegram hata: %r" % e)
 
@@ -817,11 +813,8 @@ def main():
         problems.append("⏳ İş #%s %d dakikadır takılı." % (jid, mins))
     brain = brain_reachable()
     if brain is False:
-        alt = [n for n, _c, _n in __import__("ghost.engines", fromlist=["x"]).available()
-               if n != "claude"]
         problems.append("🧠 Beyin (Claude) YANIT VERMİYOR — auth/API/limit? "
-                        + ("Yedek motor: %s" % ", ".join(alt) if alt
-                           else "Yedek motor YOK (tek beyin)."))
+                        "Yedek motor YOK (tek beyin; codex yalnız üçüncü göz, Faz 2.9).")
     # Bayat kod: köprü ayakta ama diskteki koddan ESKİ bir süreç koşuyor.
     # Köprü BOŞTAYSA (çocuk oturum yok, koşan iş yok) ve bayatlık ≥10 dk sürdüyse
     # kendiliğinden yenilenir (bkz. bayat_iyilestir_mi); meşgulse yalnız uyarır.
@@ -904,6 +897,27 @@ def main():
                 log("etki kartı güncellendi: %s" % dok)
         except Exception as e:
             log("etki hata: %r" % e)
+        try:  # Mağaza yorumlarına cevap organı (Faz 2.3, 2026-10-29): saatte bir cevapsız yorum → taslak + onay-komut kartı (günde ≤5)
+            import yorum_cevap
+            _acilan = yorum_cevap.tick()
+            if _acilan:
+                log("yorum cevap kartı açıldı: %s" % ", ".join("%s:%s→%s" % a for a in _acilan))
+        except Exception as e:
+            log("yorum cevap hata: %r" % e)
+        try:  # Haftalık GÜNDEM (Faz 2.2, 2026-10-29): 24 sa sessizlik → aktif; Pazar ≥20:30 gündem kartı; Cuma ≥18:00 karne
+            from ghost import gundem
+            _g = gundem.tick()
+            if _g:
+                log("gündem: %s" % ", ".join(_g))
+        except Exception as e:
+            log("gündem hata: %r" % e)
+        try:  # Tek Gün kartı (Faz 2.8, 2026-10-29): sabah parçaları tek mesaj — telefon ilk hareket edince ya da 09:00
+            from ghost import gun_karti
+            _m = gun_karti.tick()
+            if _m:
+                log("tek gün kartı gönderildi (%d karakter)" % len(_m))
+        except Exception as e:
+            log("tek gün kartı hata: %r" % e)
         try:  # Haftalık sentez dosyası (dossier/sentez/*.md, Faz 1.11) → Masa "Raporlar" kartı; özerk iş Masa'ya yazamaz, burası yazar
             import glob as _glob
             from ghost import masa as _masa, durum as _durum

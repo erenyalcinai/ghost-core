@@ -79,8 +79,6 @@ def _gh_token():
     if tok and tok != "vekil":
         return tok
     try:  # sır vekili (Faz 2): git ~/.gitconfig insteadOf ile vekilden geçer, kimliği vekil ekler
-        import sys as _sys
-        _sys.path.insert(0, BASE)
         from ghost import vekil
         if vekil.aktif(None, "GHOST_GITHUB_TOKEN"):
             return None

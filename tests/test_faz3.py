@@ -159,8 +159,8 @@ class GocmusKomutlar(unittest.TestCase):
 
     def test_hepsi_defterde(self):
         for c in ("/help", "/mcp", "/new", "/tazele", "/model", "/guard", "/sesli", "/ogren", "/motorlar",
-                  "/departmanlar", "/rapor", "/is", "/iş", "/kazanc",
-                  "/denetle", "/hedef", "/varlik", "/hafiza",
+                  "/departmanlar", "/rapor", "/is", "/iş",
+                  "/hedef", "/varlik", "/hafiza",
                   "/izle", "/hatirlat", "/gorev", "/araclar", "/job", "/mac", "/cc", "/arastir",
                   "/fleet", "/istihbarat", "/denetim", "/deploy", "/sahne", "/kanal", "/istekler"):
             self.assertIsNotNone(komutlar.bul(c), c)

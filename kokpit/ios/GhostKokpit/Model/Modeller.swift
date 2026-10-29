@@ -288,6 +288,7 @@ struct Mesaj: Decodable, Identifiable, Equatable {   // Equatable: balon yeniden
     var kaynak: String?          // ghost | sahip
     var butonlar: [[Buton]]?
     var medya: Medya?
+    var gecici: Bool?            // Faz 2.7: ilk satır balonu — sonuç gelince aynı id metinle dolar
     var sahipten: Bool { (kaynak ?? "").lowercased() == "sahip" }
 }
 
@@ -377,7 +378,7 @@ struct Bolge: Decodable, Identifiable {
 
 struct BolgelerZarf: Decodable { var bolgeler: [Bolge]; var seq: Int?; var tavan: Int? }
 struct DuyuDurum: Decodable { var acik: Bool?; var ozet: DuyuOzet? }
-struct OutboxZarf: Decodable { var mesajlar: [Mesaj]; var son: Int?; var mesgul: Mesgul? }
+struct OutboxZarf: Decodable { var mesajlar: [Mesaj]; var son: Int?; var mesgul: Mesgul?; var gts: Double? }   // gts: Faz 2.7 güncelleme damgası
 struct KomutlarZarf: Decodable { var komutlar: [Komut] }
 struct SitelerZarf: Decodable { var siteler: [Site] }
 

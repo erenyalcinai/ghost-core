@@ -32,7 +32,6 @@ import urllib.parse
 
 OPS = os.path.dirname(os.path.abspath(__file__))
 BASE = os.path.dirname(OPS)
-sys.path.insert(0, BASE)
 sys.path.insert(0, OPS)
 
 from ghost import dis_veri  # noqa: E402

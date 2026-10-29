@@ -180,9 +180,9 @@ class KopruMcpKopyasi(unittest.TestCase):
         with open(kaynak, "w") as f:
             json.dump({"mcpServers": {"posthog": {"type": "http", "url": "https://mcp.posthog.com/mcp?readonly=1&mode=cli",
                                                   "headers": {"Authorization": "Bearer phx_gercek"}}}}, f)
-        with mock.patch.object(tb, "OPS", d), mock.patch.dict(tb.MCP_CONFIGS, {"posthog": kaynak}, clear=True), \
+        with mock.patch.dict(tb.MCP_CONFIGS, {"posthog": kaynak}, clear=True), \
                 mock.patch.object(gv, "kurulu", lambda: True), mock.patch.object(gv, "_erisilir", lambda: True):
-            tb._mcp_vekile_cevir()
+            tb._mcp_vekile_cevir(d)      # Faz 2.9: motor._mcp_vekile_cevir(ops) — kopya dizini parametre
             hedef = tb.MCP_CONFIGS["posthog"]
         self.assertEqual(hedef, os.path.join(d, "mcp_vekil", "mcp-posthog.json"))
         cfg = json.load(open(hedef))["mcpServers"]["posthog"]

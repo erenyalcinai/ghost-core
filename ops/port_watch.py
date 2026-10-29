@@ -29,8 +29,6 @@ import re
 import signal
 import subprocess
 import time
-import urllib.parse
-import urllib.request
 
 import heartbeat   # aynı dizin (ops) — sys.path[0] betiğin dizini
 
@@ -59,9 +57,7 @@ with (open(os.path.join(BASE, ".env"), encoding="utf-8") if os.path.exists(os.pa
             k, v = line.split("=", 1)
             ENV[k] = v.strip()
 
-__import__("sys").path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ghost import durum, vekil  # noqa: E402  sır vekili (Faz 2); durum tablosu (Faz 1.9)
-API = vekil.url("telegram", "", ENV)
+from ghost import durum, notify  # noqa: E402  durum tablosu (Faz 1.9); Telegram tek yerde (Faz 2.9)
 
 
 def log(msg):
@@ -80,13 +76,12 @@ def owner_id():
 
 
 def tg_send(text):
-    oid = owner_id()
-    if not oid:
+    """Faz 2.9: gönderim tek yerde (ghost/notify.py); dokum=False = eski ham yol (kokpit/apns kopyası yok)."""
+    if not owner_id():
         log("sahip yok, mesaj atlanıyor")
         return
-    data = urllib.parse.urlencode({"chat_id": oid, "text": text}).encode()
-    req = urllib.request.Request(API + "/sendMessage", data=data)
-    urllib.request.urlopen(req, timeout=30).read()
+    if not notify.telegram(text, ENV, dokum=False):
+        log("telegram gönderilemedi")
 
 
 def disa_acik(adres):
