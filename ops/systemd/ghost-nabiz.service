@@ -1,0 +1,15 @@
+[Unit]
+Description=Ghost nabız birimi (monitör/zamanlayıcı/hedef/kural tick'leri — bus üreticisi, köprüden ayrı; Faz 3.1)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ghost/jarvis
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m ghost.nabiz kos
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

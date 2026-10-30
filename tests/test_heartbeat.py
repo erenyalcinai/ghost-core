@@ -97,7 +97,7 @@ class HeartbeatTest(unittest.TestCase):
                "port_watch": 10 * 60, "tunnel_watch": 60, "giris": 5 * 60, "knowsync": 15 * 60, "acik_nabiz": 30 * 60,
                "chatgpt_export": 30 * 60, "gmail_is_nabzi": 4 * 3600, "sms_watch": 6 * 3600,
                "iphone_watch": 6 * 3600, "listen": 6 * 3600, "brief": 24 * 3600, "yedek": 24 * 3600,
-               "weekly": 7 * 86400}
+               "weekly": 7 * 86400, "nabiz": 60}
 
     def test_saglikli_nobetci_asla_alarm_vermez(self):
         """Eşik periyottan küçük/yakınsa, sorunsuz koşan nöbetçi bağırır."""

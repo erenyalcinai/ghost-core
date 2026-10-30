@@ -131,6 +131,7 @@ class TickIzolasyonu(unittest.TestCase):
                 kosan.append(self.ad)
         mgr = _Mgr()
         with mock.patch.object(tb, "ROLE", "vps"), \
+                mock.patch.object(tb.nabiz, "canli", lambda: False), \
                 mock.patch.object(tb, "monitors", _Mod("monitors", patla=True)), \
                 mock.patch.object(tb, "schedule", _Mod("schedule")), \
                 mock.patch.object(tb, "goals", _Mod("goals")), \
@@ -141,6 +142,30 @@ class TickIzolasyonu(unittest.TestCase):
             mgr.gec_sonuclari_teslim = lambda: kosan.append("gec")
             tb.tick(tb.Kopru(111, {}, mgr, 0))
         self.assertEqual(kosan, ["gec", "istek", "kokpit", "schedule", "goals", "kurallar"])
+
+    def test_nabiz_birimi_canliyken_kopru_tick_atmaz(self):
+        """Faz 3.1: damga tazeyse dört tick köprüde KOŞMAZ (birim onları atıyor); sahne eşitleme sürer."""
+        kosan = []
+
+        class _Mod:
+            def __init__(self, ad):
+                self.ad = ad
+
+            def tick(self):
+                kosan.append(self.ad)
+        mgr = _Mgr()
+        with mock.patch.object(tb, "ROLE", "vps"), \
+                mock.patch.object(tb.nabiz, "canli", lambda: True), \
+                mock.patch.object(tb, "monitors", _Mod("monitors")), \
+                mock.patch.object(tb, "schedule", _Mod("schedule")), \
+                mock.patch.object(tb, "goals", _Mod("goals")), \
+                mock.patch.object(tb, "kurallar", _Mod("kurallar")), \
+                mock.patch.object(tb, "freeze_uygula", lambda m: None), \
+                mock.patch.object(tb, "check_requests", lambda m: kosan.append("istek")), \
+                mock.patch.object(tb, "check_kokpit", lambda m: kosan.append("kokpit")):
+            mgr.gec_sonuclari_teslim = lambda: kosan.append("gec")
+            tb.tick(tb.Kopru(111, {}, mgr, 0))
+        self.assertEqual(kosan, ["gec", "istek", "kokpit"])
 
 
 if __name__ == "__main__":

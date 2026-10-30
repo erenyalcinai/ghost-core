@@ -48,7 +48,7 @@ _EK_OUTBOX = (("medya", "TEXT"),    # Faz 4: Ghost'un/sahibin görseli, videosu,
               ("kanal", "TEXT"),    # Faz 1.13 (2026-10-29): satır hangi kanaldan (kokpit|telegram|…) — teslim ölçüsü
               ("gecici", "INTEGER"),   # Faz 2.7: 1 = ilk satır (geçici balon), sonuç gelince 0 + metin güncellenir
               ("guncelleme", "REAL"))  # Faz 2.7: son güncelleme anı (epoch); istemci `gts` ile yalnız değişenleri çeker
-MEDYA_DIZIN = "kokpit_medya"        # ops/ altında; kaynak dosya buraya KOPYALANIR (özgünü silinebilir)
+MEDYA_DIZIN = "kokpit_medya"        # ~/.ghost altında (config.veri_dizin); kaynak dosya buraya KOPYALANIR (özgünü silinebilir)
 MEDYA_TAVAN = 200 * 1024 * 1024     # dizin bu boyutu aşınca en eski dosyalar budanır
 SCHEMA += """
 CREATE TABLE IF NOT EXISTS kokpit_etkinlik(
@@ -136,7 +136,7 @@ def _medya_buda(d):
 
 def medya_sakla(yol, ad=None, tur=None, kopyala=True):
     """Bir dosyayı döküm medyası yap → {"tur","ad","boyut","mime","yol"} ya da None.
-    kopyala=True: ops/kokpit_medya/ altına kopyalanır (özgün dosya geçici olabilir:
+    kopyala=True: ~/.ghost/kokpit_medya/ altına kopyalanır (özgün dosya geçici olabilir:
     send_voice mp3'ü siler, Mac ekran görüntüleri /tmp'de). Asla fırlatmaz."""
     try:
         if not yol or not os.path.isfile(yol):
@@ -144,7 +144,7 @@ def medya_sakla(yol, ad=None, tur=None, kopyala=True):
         ad = ad or os.path.basename(yol)
         hedef = yol
         if kopyala:
-            d = _dir(MEDYA_DIZIN)
+            d = config.veri_dizin(MEDYA_DIZIN)
             guvenli = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in ad)[-80:] or "dosya"
             hedef = os.path.join(d, "%s-%s-%s" % (time.strftime("%Y%m%d-%H%M%S"),
                                                   os.urandom(3).hex(), guvenli))

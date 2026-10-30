@@ -12,7 +12,7 @@ MİMARİ İLKE — Masa bir YAYIN KATMANIDIR, çalışma ağacı değil:
     Ghost aynı dosyayı yeniden yayınlar.
   * sahibin eklediği şeyler (not, fotoğraf, belge, klasör) Masa'da yaşar; Ghost onları GİRDİ
     olarak görür (sahibin paylaşımı gibi): `yeni` ile okur, sohbet bağlamına tek satır düşer.
-  * Depo: ghost.db `masa_kart` (ağaç: ebeveyn) + `ops/masa_dosya/` (kopya; budanmaz, Masa
+  * Depo: ghost.db `masa_kart` (ağaç: ebeveyn) + `~/.ghost/masa_dosya/` (kopya; budanmaz, Masa
     kalıcıdır). Her değişiklik `seq` artırır; uygulama uzun yoklamayla yeniler.
 
 App B modeli: kart = kap. Türler: klasor · not (markdown) · rapor (Ghost'un yayınladığı
@@ -52,7 +52,7 @@ TURLER = ("klasor", "not", "rapor", "sahne", "gorsel", "dosya", "baglanti")
 YAZARLAR = ("ghost", "sahip")
 AD_TAVAN = 120
 ICERIK_TAVAN = 400_000          # markdown/JSON karakter
-DOSYA_DIZIN = "masa_dosya"      # ops/ altında; kaynak KOPYALANIR, budanmaz
+DOSYA_DIZIN = "masa_dosya"      # ~/.ghost altında (config.veri_dizin); kaynak KOPYALANIR, budanmaz
 DOSYA_UYARI = 500 * 1024 * 1024
 ONIZLEME = 160
 KOK_KLASORLER = sahip.masa_kok()   # ops/sahip.json "masa_kok" (açık çekirdek: koddan çıktı)
@@ -96,9 +96,7 @@ def _now():
 
 
 def _dir():
-    p = os.path.join(config.OPS, DOSYA_DIZIN)
-    os.makedirs(p, exist_ok=True)
-    return p
+    return config.veri_dizin(DOSYA_DIZIN)
 
 
 def _seq_artir(c):
@@ -303,7 +301,7 @@ def kart_ekle(tur, ad, ebeveyn=None, icerik=None, yazar="ghost", kaynak=None,
 
 
 def dosya_ekle(ad, veri, ebeveyn=None, yazar="sahip", kaynak=None, mime=None):
-    """Ham bayt → ops/masa_dosya/ kopyası + gorsel/dosya kaydı."""
+    """Ham bayt → ~/.ghost/masa_dosya/ kopyası + gorsel/dosya kaydı."""
     from ghost import kokpit
     if not veri:
         raise MasaHata("dosya boş")
@@ -677,10 +675,10 @@ def hazirla():
 
 
 def _paylasimlari_ice_al(hedef):
-    """ops/kokpit_paylasim/ (Share Extension, 2026-09) → Paylaşımlar klasörü; sahibin kaydı,
+    """~/.ghost/kokpit_paylasim/ (Share Extension, 2026-09) → Paylaşımlar klasörü; sahibin kaydı,
     o gün Ghost görmüştü → gorulme dolu (yeni listesine düşmez). Her dosya kendi bağlantısıyla
     (uzun açık yazma işlemi başka bağlantıyı kilitlemesin)."""
-    d = os.path.join(config.OPS, "kokpit_paylasim")
+    d = os.path.join(config.veri_kok(), "kokpit_paylasim")
     if hedef is None or not os.path.isdir(d):
         return 0
     ice = 0
@@ -712,7 +710,7 @@ def durum():
     try:
         n = c.execute("SELECT durum, tur, yazar, COUNT(*) FROM masa_kart GROUP BY durum, tur, yazar").fetchall()
         boyut = 0
-        d = os.path.join(config.OPS, DOSYA_DIZIN)
+        d = os.path.join(config.veri_kok(), DOSYA_DIZIN)
         if os.path.isdir(d):
             boyut = sum(os.path.getsize(os.path.join(d, f)) for f in os.listdir(d))
         return {"seq": seq(), "sayim": [dict(durum=r[0], tur=r[1], yazar=r[2], n=r[3]) for r in n],

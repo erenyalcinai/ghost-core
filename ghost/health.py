@@ -68,9 +68,10 @@ def servisler():
                 out.append((u, r.stdout.strip() or "bilinmiyor"))
             env = dict(os.environ)
             env.setdefault("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())
-            r = subprocess.run(["systemctl", "--user", "is-active", "ghost-api"],
-                               capture_output=True, text=True, timeout=5, env=env)
-            out.append(("ghost-api", r.stdout.strip() or "bilinmiyor"))
+            for u in ("ghost-api", "ghost-nabiz", "ghost-sohbet"):     # kullanıcı birimleri (Faz 3.1 nabız, 3.2 sohbet)
+                r = subprocess.run(["systemctl", "--user", "is-active", u],
+                                   capture_output=True, text=True, timeout=5, env=env)
+                out.append((u, r.stdout.strip() or "bilinmiyor"))
     except Exception:
         pass
     return out

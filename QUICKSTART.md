@@ -66,8 +66,10 @@ To keep it running, install it as a user service:
 ```bash
 mkdir -p ~/.config/systemd/user
 sed "s|/home/ghost/jarvis|$PWD|g" ops/systemd/ghost-api.service > ~/.config/systemd/user/ghost-api.service
+sed "s|/home/ghost/jarvis|$PWD|g" ops/systemd/ghost-nabiz.service > ~/.config/systemd/user/ghost-nabiz.service
+sed "s|/home/ghost/jarvis|$PWD|g" ops/systemd/ghost-sohbet.service > ~/.config/systemd/user/ghost-sohbet.service
 # write a ghost-bridge.service the same way pointing at ops/telegram_bridge.py
-systemctl --user daemon-reload && systemctl --user enable --now ghost-bridge ghost-api
+systemctl --user daemon-reload && systemctl --user enable --now ghost-bridge ghost-api ghost-nabiz ghost-sohbet
 ```
 
 Add `ops/selfcheck.py` on a 15-minute timer; it revives the bridge, renews it when the code

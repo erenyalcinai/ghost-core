@@ -1,0 +1,17 @@
+[Unit]
+Description=Ghost sohbet sunucusu (kalıcı Claude sohbet süreci köprüden bağımsız; köprü Unix soketinden konuşur; Faz 3.2)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ghost/jarvis
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m ghost.sohbet_sunucu kos
+Restart=always
+RestartSec=5
+# stop: süren tur varsa claude çocuğu da bu cgroup'ta ölür — selfcheck yalnız BOŞTAYKEN yeniler
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

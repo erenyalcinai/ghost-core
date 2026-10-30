@@ -71,6 +71,9 @@ WATCHERS = {
     "brief":        ("sabah brifingi (günlük 08:04)",         30 * 3600),
     "yedek":        ("hafıza dış yedeği (günlük)",            30 * 3600),
     "weekly":       ("haftalık sentez (Pazar 20:07)",         7 * 86400 + 8 * 3600),
+    # Faz 3.1 (2026-10-30): nabız birimi (ghost-nabiz) dakikada bir damgalar; 10 dk sessizlik = birim düşük
+    # (köprü 120 sn'de yedek yola geçer, Nabız yine de göstersin).
+    "nabiz":        ("nabız birimi (tick döngüsü, 1 dk)",     10 * 60),
     # "defter" (günlük defter taslağı, 21:40) 2026-09-09'da KALDIRILDI — Sahip:
     # "artık günlük defter taslağına gerek yok". Cron da silindi.
 }

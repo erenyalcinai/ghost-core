@@ -70,6 +70,80 @@ def _hiz_asildi(did):
         return len(q) > HIZ_DAKIKA
 
 
+
+# ---------------------------------------------------------------- ROTA TABLOSU (Faz 3.1 8a, 2026-10-30)
+# (yöntem, yol, eşleme, kimlik, işleyici, açıklama). Eşleme "tam" = yol birebir; "onek" = yol '<' karakterine
+# kadarki önekle başlar. Kimlik "cihaz" = cihaz anahtarı + HMAC (_auth); "acik" = kimliksiz; "ses" = ElevenLabs
+# paylaşılan sır (işleyici kendi doğrular). Sıra önemlidir (tam eşleşmeler kendi öneklerinden önce).
+# docs/kokpit.md'deki uç tablosu buradan üretilir: `python3 -m ghost.api rotalar` (tests/test_api_rotalar.py drift'i yakalar).
+ROTALAR = (
+    ("GET", "/v1/ping", "tam", "acik", "g_ping", "sunucu sürümü/saat (Kokpit 'hangi kodla konuşuyorum')"),
+    ("GET", "/v1/acik/nabiz", "tam", "acik", "g_acik_nabiz", "sahip.kim Ghost kartı — herkese açık, içeriksiz"),
+    ("GET", "/v1/nabiz", "tam", "cihaz", "g_nabiz", "health.nabiz(): servisler, nöbetçi damgaları, uzuvlar, iş havuzu, kota, freeze"),
+    ("GET", "/v1/ses/token", "tam", "cihaz", "g_ses_token", "Echo (ElevenLabs) konuşma jetonu"),
+    ("GET", "/v1/kararlar", "tam", "cihaz", "g_kararlar", "bekleyen onay/karar kartları (pending.json)"),
+    ("GET", "/v1/outbox", "tam", "cihaz", "g_outbox", "birleşik döküm; ?since&limit&bekle&once&gts&durum (uzun yoklama + güncellenen balonlar)"),
+    ("GET", "/v1/medya/<id>", "onek", "cihaz", "g_medya", "döküm medyası (imzalı; yol DB'den)"),
+    ("GET", "/v1/duyular", "tam", "cihaz", "g_duyular", "duyular şalteri + özet (uygulama kendi durumunu görsün)"),
+    ("GET", "/v1/gorevler", "tam", "cihaz", "g_gorevler", "telefona yazılacak bekleyen işler (hatırlatıcı/etkinlik)"),
+    ("GET", "/v1/bolgeler", "tam", "cihaz", "g_bolgeler", "coğrafi tetik tanımları (seq değişince uygulama yeniden kaydeder)"),
+    ("GET", "/v1/komutlar", "tam", "cihaz", "g_komutlar", "slash komut defteri (ghost + claude grubu)"),
+    ("GET", "/v1/siteler", "tam", "cihaz", "g_siteler", "siteler + canlılık (uptime_state) + başlık/proje"),
+    ("GET", "/v1/akis", "tam", "cihaz", "g_akis", "zaman çizelgesi; ?limit&once&kaynak"),
+    ("GET", "/v1/olaylar", "tam", "cihaz", "g_olaylar", "olay akışı; ?since&limit&bekle"),
+    ("GET", "/v1/sse", "tam", "cihaz", "g_sse", "tek SSE akışı (olay + döküm + sahne); ?olay&outbox&sahne"),
+    ("GET", "/v1/masa", "tam", "cihaz", "g_masa", "Masa ağacı (önizleme); ?since&bekle uzun yoklama, ?dolap=1"),
+    ("GET", "/v1/masa/<id>[/dosya|/pdf]", "onek", "cihaz", "g_masa_kart", "tek kart (içerik/çocuklar); /dosya ham dosya; /pdf dışa aktarım"),
+    ("GET", "/v1/sahne", "tam", "cihaz", "g_sahne", "anlık sahne; ?seq tarihçeden, ?since&bekle uzun yoklama"),
+    ("GET", "/v1/sahne/gecmis", "tam", "cihaz", "g_sahne_gecmis", "son sahneler listesi"),
+    ("GET", "/v1/sahne/mac.jpg", "tam", "cihaz", "g_sahne_mac", "Mac ekranından kare; ?boy"),
+    ("GET", "/v1/sahne/telefon.jpg", "tam", "cihaz", "g_sahne_telefon", "telefon ekranından kare"),
+    ("GET", "/v1/sahne/telefon.mjpeg", "tam", "cihaz", "g_sahne_telefon_akis", "telefon MJPEG akışı (9100 rölesinin kimlikli proxy'si)"),
+    ("GET", "/v1/cihazlar", "tam", "cihaz", "g_cihazlar", "eşlenmiş cihazlar + 'ben'"),
+    ("POST", "/v1/eslesme", "tam", "acik", "p_eslesme", "tek kullanımlık kodla cihaz eşleme → device_id + key (1 sn yavaşlatma)"),
+    ("POST", "/v1/ses/arac/<ad>", "onek", "ses", "p_ses_arac", "Echo'nun webhook aracı (X-Ghost-Ses paylaşılan sır)"),
+    ("POST", "/v1/mesaj", "tam", "cihaz", "p_mesaj", "sahibin mesajı → kokpit_inbox (köprü Telegram'daki gibi işler); FREEZE'de yalnız /unfreeze,/durum"),
+    ("POST", "/v1/duyular", "tam", "cihaz", "p_duyular", "konum/takvim/telefon duyuları (kısmi); şalter kapalıysa 403"),
+    ("POST", "/v1/gunluk", "tam", "cihaz", "p_gunluk", "uygulama teşhis satırları → ops/kokpit_gunluk.log"),
+    ("POST", "/v1/apns", "tam", "cihaz", "p_apns", "APNs cihaz token kaydı"),
+    ("POST", "/v1/etkinlik", "tam", "cihaz", "p_etkinlik", "Live Activity start/update token'ı"),
+    ("POST", "/v1/eylem", "tam", "cihaz", "p_eylem", "sahne butonu/formu → köprüye [Sahne eylem]"),
+    ("POST", "/v1/paylas", "tam", "cihaz", "p_paylas", "Share Extension: JSON metin/URL ya da ham dosya gövdesi; ?ad&not&grup&sira&toplam"),
+    ("POST", "/v1/masa", "tam", "cihaz", "p_masa", "Masa'ya kart ekle {tur, ad, ebeveyn?, icerik?}"),
+    ("POST", "/v1/masa/<id>|dosya", "onek", "cihaz", "p_masa", "/dosya?ad&ebeveyn ham gövde; /<id> {eylem: duzenle|adlandir|tasi|sirala|dolap|geri|sil|ilet}"),
+    ("POST", "/v1/gorevler/<id>", "onek", "cihaz", "p_gorev_sonuc", "telefona yazma sonucu {ok, mesaj, yerel_id} → haber_ver"),
+    ("POST", "/v1/bolge", "tam", "cihaz", "p_bolge", "bölge giriş/çıkış olayı → Ghost düşünür + kural tetiği"),
+    ("POST", "/v1/kararlar/<id>", "onek", "cihaz", "p_karar", "{karar: onay|ret} → kokpit_kararlar kuyruğu"),
+)
+HAM_GOVDE = ("/v1/paylas", "/v1/masa/dosya")   # JSON değilse ham dosya gövdesi kabul eden uçlar
+
+
+def _onek(yol):
+    return yol.split("<", 1)[0]
+
+
+def rota_bul(yontem, path):
+    """Tablodan ilk eşleşen satır ya da None. 'onek' satırı: path önekle başlar (önek '/' ile bittiği için
+    '/v1/masa' '/v1/masa/<id>' satırına düşmez)."""
+    for r in ROTALAR:
+        if r[0] != yontem:
+            continue
+        if r[2] == "tam":
+            if path == r[1]:
+                return r
+        elif path.startswith(_onek(r[1])):
+            return r
+    return None
+
+
+def rotalar_markdown():
+    """docs/kokpit.md uç tablosu (ROTALAR:BASLA/BIT işaretleri arasına). Tek kaynak bu tablo."""
+    satirlar = ["| Yöntem | Yol | Kimlik | Ne yapar |", "|---|---|---|---|"]
+    for yontem, yol, _es, kimlik, _isl, aciklama in ROTALAR:
+        satirlar.append("| %s | `%s` | %s | %s |" % (yontem, yol, kimlik, aciklama.replace("|", "\\|")))
+    return "\n".join(satirlar) + "\n"
+
+
 class H(BaseHTTPRequestHandler):
     server_version = "ghost-api/1"
 
@@ -163,9 +237,12 @@ class H(BaseHTTPRequestHandler):
             yeni = False
             for ev in akis.olaylar(since_olay, 100):
                 since_olay = max(since_olay, ev["id"]); yaz("olay", ev); yeni = True
+            yazilan = set()
             for m in kokpit.outbox_oku(since_outbox, 50):
-                since_outbox = max(since_outbox, m["id"]); yaz("mesaj", m); yeni = True
+                since_outbox = max(since_outbox, m["id"]); yaz("mesaj", m); yeni = True; yazilan.add(m["id"])
             for m in kokpit.outbox_guncellenenler(since_g, 20):   # Faz 2.7: ilk satır balonu sonuçla doldu → aynı id yeniden
+                if m["id"] in yazilan:                            # 2026-10-30: aynı turda yeni+güncel → tek kopya
+                    continue
                 yaz("mesaj", m); yeni = True
             if yeni:
                 since_g = max(since_g, kokpit.outbox_son_guncelleme())
@@ -200,203 +277,231 @@ class H(BaseHTTPRequestHandler):
             return None
         return cihaz
 
-    # ------------------------------------------------------------ GET
-    def do_GET(self):
-        u = urlparse(self.path)
-        q = parse_qs(u.query)
-        if u.path == "/v1/ping":
-            try:  # Faz 1.13: sunucu sürümü (git kısa sha + commit zamanı) — Kokpit "hangi kodla konuşuyorum" görsün
-                from ghost import surum as _surum
-                sb = _surum.bilgi()
-            except Exception:
-                sb = {}
-            return self._json(200, {"ok": True, "at": time.strftime("%F %T"), "surum": sb.get("surum", "?"),
-                                    "build": sb.get("build", 0), "surum_zaman": sb.get("zaman", "")})
-        if u.path == "/v1/acik/nabiz":        # sahip.kim Ghost kartı — herkese açık, kimliksiz, içeriksiz (2026-10-23)
-            return self._acik_nabiz()
-        cihaz = self._auth("GET", b"")
-        if not cihaz:
-            return
+    # ------------------------------------------------------------ yönlendirme (Faz 3.1 8a: rota tablosu)
+    def _rota_kos(self, yontem, u, q, body=b"", veri=None, ham=None):
+        """ROTALAR'dan eşleşen işleyiciyi bul, kimliği uygula, çağır. Eşleşme yoksa yine kimlik istenir
+        (404 kimliksize uç adı sızdırmaz — eski davranış)."""
+        r = rota_bul(yontem, u.path)
+        cihaz = None
+        if r is None or r[3] == "cihaz":
+            cihaz = self._auth(yontem, body)
+            if not cihaz:
+                return
+        if r is None:
+            return self._json(404, {"hata": "yok"})
+        isleyici = getattr(self, "_" + r[4])
         try:
-            if u.path == "/v1/nabiz":
-                return self._json(200, health.nabiz())
-            if u.path == "/v1/ses/token":      # ses ajanı (ElevenLabs) konuşma jetonu — ajan private
-                from ghost import ses_ajani
-                try:                            # 2026-10-29: Echo kullanım sayacı (2 hafta 0 ise raf — denetim 06 #12)
-                    from ghost import metrik
-                    metrik.sayac("echo_token")
-                except Exception:
-                    pass
-                tok, hata = ses_ajani.token()
-                if not tok:
-                    return self._json(503, {"hata": hata})
-                return self._json(200, {"token": tok})
-            if u.path == "/v1/kararlar":
-                return self._json(200, {"kararlar": kokpit.bekleyen_kararlar()})
-            if u.path == "/v1/outbox":
-                since = int(q.get("since", ["0"])[0] or 0)       # -1 → en son `limit` satır
-                limit = min(int(q.get("limit", ["50"])[0] or 50), 200)
-                bekle = float(q.get("bekle", ["0"])[0] or 0)
-                once = q.get("once", [""])[0]
-                if once:                                          # "daha eski" sayfası, beklemez
-                    rows = kokpit.outbox_oku(0, limit, once=int(once))
-                    return self._json(200, {"mesajlar": rows, "son": kokpit.outbox_son(),
-                                            "mesgul": akis.sohbet_durumu()})
-                gts = float(q.get("gts", ["0"])[0] or 0)             # Faz 2.7: bu andan sonra güncellenen satırlar da gelir
-                rows, mesgul, g_rows, g_son = _outbox_bekle(since, limit, bekle, q.get("durum", [""])[0], gts)
-                son = rows[-1]["id"] if rows else max(since, kokpit.outbox_son())
-                return self._json(200, {"mesajlar": rows + g_rows, "son": son, "mesgul": mesgul, "gts": g_son})
-            if u.path.startswith("/v1/medya/"):
-                oid = u.path.rsplit("/", 1)[1]
-                m = kokpit.medya_yol(int(oid)) if oid.isdigit() else None
-                if not m:
-                    return self._json(404, {"hata": "medya yok"})
-                yol, mime, ad = m
-                with open(yol, "rb") as f:
-                    veri = f.read()
-                self.send_response(200)
-                self.send_header("Content-Type", mime)
-                self.send_header("Content-Length", str(len(veri)))
-                self.send_header("Content-Disposition", "inline; filename=\"%s\"" % ad.replace('"', ""))
-                self.send_header("Cache-Control", "private, max-age=86400")   # dosya değişmez
-                self.end_headers()
-                self.wfile.write(veri)
-                return
-            if u.path == "/v1/duyular":
-                return self._json(200, {"acik": duyular.acik(), "ozet": duyular.ozet(),
-                                        "bayat": duyular.BAYAT})
-            if u.path == "/v1/gorevler":     # Faz 6: telefona yazılacak işler
-                return self._json(200, {"gorevler": gorevler.bekleyenler()})
-            if u.path == "/v1/bolgeler":     # coğrafi tetik tanımları (seq değişince yeniden kaydet)
-                d = bolgeler.oku()
-                return self._json(200, {"bolgeler": d.get("bolgeler", []),
-                                        "seq": int(d.get("seq") or 0), "tavan": bolgeler.TAVAN})
-            if u.path == "/v1/komutlar":
-                return self._json(200, {"komutlar": _komutlar()})
-            if u.path == "/v1/siteler":
-                out = []
-                for s in health._siteler():
-                    baslik, proje = SITE_META.get(s["ad"], ("", ""))
-                    out.append(dict(s, baslik=baslik, proje=proje))
-                return self._json(200, {"siteler": out})
-            if u.path == "/v1/akis":
-                limit = int(q.get("limit", ["60"])[0] or 60)
-                once = (q.get("once", [""])[0] or None)
-                kay = [k for k in (q.get("kaynak", [""])[0] or "").split(",") if k]
-                rows = akis.zaman_cizelgesi(limit, once, kay or None)
-                return self._json(200, {"akis": rows, "once": rows[-1]["ts"] if rows else None})
-            if u.path == "/v1/olaylar":
-                since = int(q.get("since", ["0"])[0] or 0)
-                limit = min(int(q.get("limit", ["100"])[0] or 100), 500)
-                bekle = float(q.get("bekle", ["0"])[0] or 0)
-                rows = akis.olaylar_bekle(since, limit, bekle)
-                son = rows[-1]["id"] if rows else max(since, akis.olay_son())
-                return self._json(200, {"olaylar": rows, "son": son})
-            if u.path == "/v1/sse":
-                try:
-                    return self._sse(int(q.get("olay", ["0"])[0] or 0),
-                                     int(q.get("outbox", ["0"])[0] or 0),
-                                     int(q.get("sahne", ["-1"])[0] or -1))
-                except (BrokenPipeError, ConnectionResetError):
-                    return                      # istemci kapattı — normal
-            if u.path == "/v1/masa":
-                # Masa (2026-10-04): ortak kalıcı içerik alanı. Tek istekte düz ağaç (içerik yerine
-                # önizleme); since+bekle uzun yoklama; dolap=1 → kaldırılanlar.
-                since = int(q.get("since", ["-1"])[0] or -1)
-                bekle = float(q.get("bekle", ["0"])[0] or 0)
-                s = masa.bekle(since, bekle) if bekle and since >= 0 else masa.seq()
-                dolap = q.get("dolap", [""])[0] == "1"
-                return self._json(200, {"seq": s, "kartlar": masa.agac("dolap" if dolap else "masa"),
-                                        "dolap_sayisi": 0 if dolap else len(masa.agac("dolap"))})
-            if u.path.startswith("/v1/masa/"):
-                parca = u.path.split("/")[3:]
-                if not parca or not parca[0].isdigit():
-                    return self._json(404, {"hata": "yok"})
-                kid = int(parca[0])
-                if len(parca) > 1 and parca[1] == "pdf":   # Faz 1.13b: kartı PDF (Chromium yoksa HTML) olarak indir/paylaş
-                    import importlib.util as _ilu
-                    from urllib.parse import quote as _quote
-                    _spec = _ilu.spec_from_file_location("md_pdf", os.path.join(config.BASE, "ops", "md_pdf.py"))
-                    _mod = _ilu.module_from_spec(_spec)
-                    _spec.loader.exec_module(_mod)
-                    r = _mod.masa_pdf(kid)
-                    if not r:
-                        return self._json(404, {"hata": "kart yok ya da metin değil"})
-                    veri, mime, ad = r
-                    self.send_response(200)
-                    self.send_header("Content-Type", mime)
-                    self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % _quote(ad))
-                    self.send_header("Content-Length", str(len(veri)))
-                    self.end_headers()
-                    self.wfile.write(veri)
-                    return
-                if len(parca) > 1 and parca[1] == "dosya":
-                    d = masa.dosya_yol(kid)
-                    if not d:
-                        return self._json(404, {"hata": "dosya yok"})
-                    yol_, mime, ad = d
-                    with open(yol_, "rb") as f:
-                        veri = f.read()
-                    self.send_response(200)
-                    self.send_header("Content-Type", mime)
-                    self.send_header("Content-Length", str(len(veri)))
-                    self.send_header("Content-Disposition", "inline; filename=\"%s\"" % ad.replace('"', ""))
-                    self.send_header("Cache-Control", "private, max-age=86400")
-                    self.end_headers()
-                    self.wfile.write(veri)
-                    return
-                k = masa.oku(kid)
-                if not k:
-                    return self._json(404, {"hata": "kayıt yok"})
-                if k["tur"] == "sahne":
-                    try:
-                        k["bilesenler"] = json.loads(k.get("icerik") or "[]")
-                    except Exception:
-                        k["bilesenler"] = []
-                    k["icerik"] = None
-                k["yol"] = masa.yol(kid)
-                k["cocuklar"] = masa.cocuklar(kid) if k["tur"] == "klasor" else []
-                return self._json(200, k)
-            if u.path == "/v1/sahne":
-                if q.get("seq"):                      # tarihçeden belirli sahne
-                    d = sahne.oku_seq(int(q["seq"][0] or 0))
-                    return self._json(200, d) if d else self._json(404, {"hata": "sahne yok"})
-                since = int(q.get("since", ["-1"])[0] or -1)
-                bekle = float(q.get("bekle", ["0"])[0] or 0)
-                return self._json(200, sahne.bekle(since, bekle) if bekle else sahne.oku())
-            if u.path == "/v1/sahne/gecmis":
-                return self._json(200, {"gecmis": sahne.gecmis(), "simdi": int(sahne.oku().get("seq") or 0)})
-            if u.path == "/v1/sahne/mac.jpg":
-                k = canli.mac_kare(boy=canli.boy_sinirla(q.get("boy", [""])[0]))
-                return self._ham(200, k[0], k[1]) if k else self._uzuv_uykuda("Mac")
-            if u.path == "/v1/sahne/telefon.jpg":
-                k = canli.telefon_kare()
-                return self._ham(200, k, "image/jpeg") if k else self._uzuv_uykuda("telefon")
-            if u.path == "/v1/sahne/telefon.mjpeg":
-                a = canli.telefon_akis()
-                if not a:
-                    return self._uzuv_uykuda("telefon")
-                ct, gen = a
-                self.send_response(200)
-                self.send_header("Content-Type", ct)
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Accel-Buffering", "no")
-                self.end_headers()
-                try:
-                    for parca in gen:
-                        self.wfile.write(parca)
-                        self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError, OSError):
-                    pass
-                return
-            if u.path == "/v1/cihazlar":
-                return self._json(200, {"cihazlar": kokpit.cihazlar(), "ben": cihaz["id"]})
+            if yontem == "GET":
+                return isleyici(cihaz, u, q)
+            return isleyici(cihaz, u, q, veri, body, ham)
         except (BrokenPipeError, ConnectionResetError):
             return
         except Exception as e:
             self.log_message("hata %s: %r", u.path, e)
             return self._json(500, {"hata": "sunucu hatası"})
-        self._json(404, {"hata": "yok"})
+
+    # ------------------------------------------------------------ GET
+    def do_GET(self):
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+        return self._rota_kos("GET", u, q)
+
+    def _g_ping(self, cihaz, u, q):
+        try:  # Faz 1.13: sunucu sürümü (git kısa sha + commit zamanı) — Kokpit "hangi kodla konuşuyorum" görsün
+            from ghost import surum as _surum
+            sb = _surum.bilgi()
+        except Exception:
+            sb = {}
+        return self._json(200, {"ok": True, "at": time.strftime("%F %T"), "surum": sb.get("surum", "?"),
+                                "build": sb.get("build", 0), "surum_zaman": sb.get("zaman", "")})
+
+    def _g_acik_nabiz(self, cihaz, u, q):
+        return self._acik_nabiz()
+
+    def _g_nabiz(self, cihaz, u, q):
+        return self._json(200, health.nabiz())
+
+    def _g_ses_token(self, cihaz, u, q):
+        from ghost import ses_ajani
+        try:                            # 2026-10-29: Echo kullanım sayacı (2 hafta 0 ise raf — denetim 06 #12)
+            from ghost import metrik
+            metrik.sayac("echo_token")
+        except Exception:
+            pass
+        tok, hata = ses_ajani.token()
+        if not tok:
+            return self._json(503, {"hata": hata})
+        return self._json(200, {"token": tok})
+
+    def _g_kararlar(self, cihaz, u, q):
+        return self._json(200, {"kararlar": kokpit.bekleyen_kararlar()})
+
+    def _g_outbox(self, cihaz, u, q):
+        since = int(q.get("since", ["0"])[0] or 0)       # -1 → en son `limit` satır
+        limit = min(int(q.get("limit", ["50"])[0] or 50), 200)
+        bekle = float(q.get("bekle", ["0"])[0] or 0)
+        once = q.get("once", [""])[0]
+        if once:                                          # "daha eski" sayfası, beklemez
+            rows = kokpit.outbox_oku(0, limit, once=int(once))
+            return self._json(200, {"mesajlar": rows, "son": kokpit.outbox_son(),
+                                    "mesgul": akis.sohbet_durumu()})
+        gts = float(q.get("gts", ["0"])[0] or 0)             # Faz 2.7: bu andan sonra güncellenen satırlar da gelir
+        rows, mesgul, g_rows, g_son = _outbox_bekle(since, limit, bekle, q.get("durum", [""])[0], gts)
+        son = rows[-1]["id"] if rows else max(since, kokpit.outbox_son())
+        return self._json(200, {"mesajlar": rows + g_rows, "son": son, "mesgul": mesgul, "gts": g_son})
+
+    def _dosya_gonder(self, veri, mime, ad, ek="inline"):
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(veri)))
+        self.send_header("Content-Disposition", "%s; filename=\"%s\"" % (ek, ad.replace('"', "")))
+        self.send_header("Cache-Control", "private, max-age=86400")   # dosya değişmez
+        self.end_headers()
+        self.wfile.write(veri)
+
+    def _g_medya(self, cihaz, u, q):
+        oid = u.path.rsplit("/", 1)[1]
+        m = kokpit.medya_yol(int(oid)) if oid.isdigit() else None
+        if not m:
+            return self._json(404, {"hata": "medya yok"})
+        yol, mime, ad = m
+        with open(yol, "rb") as f:
+            veri = f.read()
+        return self._dosya_gonder(veri, mime, ad)
+
+    def _g_duyular(self, cihaz, u, q):
+        return self._json(200, {"acik": duyular.acik(), "ozet": duyular.ozet(),
+                                "bayat": duyular.BAYAT})
+
+    def _g_gorevler(self, cihaz, u, q):     # Faz 6: telefona yazılacak işler
+        return self._json(200, {"gorevler": gorevler.bekleyenler()})
+
+    def _g_bolgeler(self, cihaz, u, q):     # coğrafi tetik tanımları (seq değişince yeniden kaydet)
+        d = bolgeler.oku()
+        return self._json(200, {"bolgeler": d.get("bolgeler", []),
+                                "seq": int(d.get("seq") or 0), "tavan": bolgeler.TAVAN})
+
+    def _g_komutlar(self, cihaz, u, q):
+        return self._json(200, {"komutlar": _komutlar()})
+
+    def _g_siteler(self, cihaz, u, q):
+        out = []
+        for s in health._siteler():
+            baslik, proje = SITE_META.get(s["ad"], ("", ""))
+            out.append(dict(s, baslik=baslik, proje=proje))
+        return self._json(200, {"siteler": out})
+
+    def _g_akis(self, cihaz, u, q):
+        limit = int(q.get("limit", ["60"])[0] or 60)
+        once = (q.get("once", [""])[0] or None)
+        kay = [k for k in (q.get("kaynak", [""])[0] or "").split(",") if k]
+        rows = akis.zaman_cizelgesi(limit, once, kay or None)
+        return self._json(200, {"akis": rows, "once": rows[-1]["ts"] if rows else None})
+
+    def _g_olaylar(self, cihaz, u, q):
+        since = int(q.get("since", ["0"])[0] or 0)
+        limit = min(int(q.get("limit", ["100"])[0] or 100), 500)
+        bekle = float(q.get("bekle", ["0"])[0] or 0)
+        rows = akis.olaylar_bekle(since, limit, bekle)
+        son = rows[-1]["id"] if rows else max(since, akis.olay_son())
+        return self._json(200, {"olaylar": rows, "son": son})
+
+    def _g_sse(self, cihaz, u, q):
+        return self._sse(int(q.get("olay", ["0"])[0] or 0),
+                         int(q.get("outbox", ["0"])[0] or 0),
+                         int(q.get("sahne", ["-1"])[0] or -1))
+
+    def _g_masa(self, cihaz, u, q):
+        # Masa (2026-10-04): ortak kalıcı içerik alanı. Tek istekte düz ağaç (içerik yerine
+        # önizleme); since+bekle uzun yoklama; dolap=1 → kaldırılanlar.
+        since = int(q.get("since", ["-1"])[0] or -1)
+        bekle = float(q.get("bekle", ["0"])[0] or 0)
+        s = masa.bekle(since, bekle) if bekle and since >= 0 else masa.seq()
+        dolap = q.get("dolap", [""])[0] == "1"
+        return self._json(200, {"seq": s, "kartlar": masa.agac("dolap" if dolap else "masa"),
+                                "dolap_sayisi": 0 if dolap else len(masa.agac("dolap"))})
+
+    def _g_masa_kart(self, cihaz, u, q):
+        parca = u.path.split("/")[3:]
+        if not parca or not parca[0].isdigit():
+            return self._json(404, {"hata": "yok"})
+        kid = int(parca[0])
+        if len(parca) > 1 and parca[1] == "pdf":   # Faz 1.13b: kartı PDF (Chromium yoksa HTML) olarak indir/paylaş
+            import importlib.util as _ilu
+            from urllib.parse import quote as _quote
+            _spec = _ilu.spec_from_file_location("md_pdf", os.path.join(config.BASE, "ops", "md_pdf.py"))
+            _mod = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            r = _mod.masa_pdf(kid)
+            if not r:
+                return self._json(404, {"hata": "kart yok ya da metin değil"})
+            veri, mime, ad = r
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % _quote(ad))
+            self.send_header("Content-Length", str(len(veri)))
+            self.end_headers()
+            self.wfile.write(veri)
+            return
+        if len(parca) > 1 and parca[1] == "dosya":
+            d = masa.dosya_yol(kid)
+            if not d:
+                return self._json(404, {"hata": "dosya yok"})
+            yol_, mime, ad = d
+            with open(yol_, "rb") as f:
+                veri = f.read()
+            return self._dosya_gonder(veri, mime, ad)
+        k = masa.oku(kid)
+        if not k:
+            return self._json(404, {"hata": "kayıt yok"})
+        if k["tur"] == "sahne":
+            try:
+                k["bilesenler"] = json.loads(k.get("icerik") or "[]")
+            except Exception:
+                k["bilesenler"] = []
+            k["icerik"] = None
+        k["yol"] = masa.yol(kid)
+        k["cocuklar"] = masa.cocuklar(kid) if k["tur"] == "klasor" else []
+        return self._json(200, k)
+
+    def _g_sahne(self, cihaz, u, q):
+        if q.get("seq"):                      # tarihçeden belirli sahne
+            d = sahne.oku_seq(int(q["seq"][0] or 0))
+            return self._json(200, d) if d else self._json(404, {"hata": "sahne yok"})
+        since = int(q.get("since", ["-1"])[0] or -1)
+        bekle = float(q.get("bekle", ["0"])[0] or 0)
+        return self._json(200, sahne.bekle(since, bekle) if bekle else sahne.oku())
+
+    def _g_sahne_gecmis(self, cihaz, u, q):
+        return self._json(200, {"gecmis": sahne.gecmis(), "simdi": int(sahne.oku().get("seq") or 0)})
+
+    def _g_sahne_mac(self, cihaz, u, q):
+        k = canli.mac_kare(boy=canli.boy_sinirla(q.get("boy", [""])[0]))
+        return self._ham(200, k[0], k[1]) if k else self._uzuv_uykuda("Mac")
+
+    def _g_sahne_telefon(self, cihaz, u, q):
+        k = canli.telefon_kare()
+        return self._ham(200, k, "image/jpeg") if k else self._uzuv_uykuda("telefon")
+
+    def _g_sahne_telefon_akis(self, cihaz, u, q):
+        a = canli.telefon_akis()
+        if not a:
+            return self._uzuv_uykuda("telefon")
+        ct, gen = a
+        self.send_response(200)
+        self.send_header("Content-Type", ct)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            for parca in gen:
+                self.wfile.write(parca)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
+    def _g_cihazlar(self, cihaz, u, q):
+        return self._json(200, {"cihazlar": kokpit.cihazlar(), "ben": cihaz["id"]})
 
     def _masa_yaz(self, cihaz, path, veri, ham, q):
         """Masa yazma uçları — uygulamadan gelen her şey yazar=sahip; izinler ghost/masa.py'de.
@@ -466,7 +571,7 @@ class H(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         ct = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         # /v1/paylas: JSON değilse ham dosya gövdesi (görsel, PDF, metin, her tür belge)
-        ham_gorsel = u.path in ("/v1/paylas", "/v1/masa/dosya") and ct and ct != "application/json"
+        ham_gorsel = u.path in HAM_GOVDE and ct and ct != "application/json"
         body = self._body(PAYLAS_MAX if ham_gorsel else BODY_MAX)
         if body is None:
             return self._json(413, {"hata": "gövde büyük"})
@@ -476,119 +581,125 @@ class H(BaseHTTPRequestHandler):
                 veri = json.loads(body.decode("utf-8")) if body else {}
             except Exception:
                 return self._json(400, {"hata": "json değil"})
-        if u.path == "/v1/eslesme":
-            time.sleep(1.0)  # kaba kuvvete karşı yavaşlat (6 hane, 10 dk, tek kod)
-            r = kokpit.esle(str(veri.get("kod", "")), veri.get("ad", ""))
-            if not r:
-                governance.audit("api", "eslesme", governance.READ, "başarısız kod")
-                return self._json(403, {"hata": "kod geçersiz"})
-            governance.audit("api", "eslesme", governance.READ, "cihaz eşlendi: %s" % r[0])
-            return self._json(200, {"device_id": r[0], "key": r[1]})
-        if u.path.startswith("/v1/ses/arac/"):
-            # Ses ajanının webhook aracı: çağıran ElevenLabs, cihaz imzası yok. Paylaşılan
-            # sır başlığı (GHOST_SES_SECRET) sabit zamanlı karşılaştırılır; yanlışsa 401.
-            import hmac as _hmac
-            from ghost import ses_ajani
-            beklenen = ses_ajani.ses_sirri()
-            gelen = self.headers.get("X-Ghost-Ses") or ""
-            if not beklenen or not _hmac.compare_digest(gelen, beklenen):
-                self.log_message("ses aracı sır reddi %s", u.path[:60])
-                return self._json(401, {"hata": "sır yanlış"})
-            ad = u.path.rsplit("/", 1)[-1][:32]
-            try:
-                out = ses_ajani.arac_calistir(ad, veri if isinstance(veri, dict) else {})
-            except Exception as e:
-                return self._json(500, {"metin": "araç hatası: %s" % e})
-            governance.audit("api", "ses_arac", governance.READ, "%s" % ad)
-            return self._json(200, out)
-        cihaz = self._auth("POST", body)
-        if not cihaz:
-            return
+        return self._rota_kos("POST", u, q, body, veri, body if ham_gorsel else None)
+
+    def _p_eslesme(self, cihaz, u, q, veri, body, ham):
+        time.sleep(1.0)  # kaba kuvvete karşı yavaşlat (6 hane, 10 dk, tek kod)
+        r = kokpit.esle(str(veri.get("kod", "")), veri.get("ad", ""))
+        if not r:
+            governance.audit("api", "eslesme", governance.READ, "başarısız kod")
+            return self._json(403, {"hata": "kod geçersiz"})
+        governance.audit("api", "eslesme", governance.READ, "cihaz eşlendi: %s" % r[0])
+        return self._json(200, {"device_id": r[0], "key": r[1]})
+
+    def _p_ses_arac(self, cihaz, u, q, veri, body, ham):
+        # Ses ajanının webhook aracı: çağıran ElevenLabs, cihaz imzası yok. Paylaşılan
+        # sır başlığı (GHOST_SES_SECRET) sabit zamanlı karşılaştırılır; yanlışsa 401.
+        import hmac as _hmac
+        from ghost import ses_ajani
+        beklenen = ses_ajani.ses_sirri()
+        gelen = self.headers.get("X-Ghost-Ses") or ""
+        if not beklenen or not _hmac.compare_digest(gelen, beklenen):
+            self.log_message("ses aracı sır reddi %s", u.path[:60])
+            return self._json(401, {"hata": "sır yanlış"})
+        ad = u.path.rsplit("/", 1)[-1][:32]
         try:
-            if u.path == "/v1/mesaj":
-                metin = (veri.get("metin") or "").strip()
-                if not metin:
-                    return self._json(400, {"hata": "metin boş"})
-                if governance.is_frozen() and metin.split(None, 1)[0].lower() not in (
-                        "/unfreeze", "/freeze", "/durum", "/saglik", "/help"):
-                    return self._json(423, {"hata": "FREEZE aktif — yalnız /unfreeze, /durum"})
-                try:  # imzalı istek: gerçek onay kapısı (ghost/sahne.py GERÇEK ONAY KAYDI)
-                    sahne.sahip_onayi_kaydet(metin, "kokpit-mesaj")
-                except Exception:
-                    pass
-                mid = kokpit.outbox_yaz(metin, "sahip")
-                channels.son_kanal_ayarla("kokpit")      # cevap uygulamaya push olsun
-                kokpit.mesaj_kuyrukla(metin, cihaz["id"], sesli=bool(veri.get("sesli")),
-                                      imza=(cihaz.get("inbox_imza"), cihaz.get("inbox_ts"))
-                                      if cihaz.get("inbox_imza") else None)
-                return self._json(200, {"ok": True, "id": mid})
-            if u.path == "/v1/duyular":
-                # Ana şalter kapalıysa 403: uygulama bunu görüp göndermeyi durdurur
-                # (izin telefonda açık kalsa bile veri akmaz).
-                if not duyular.acik():
-                    return self._json(403, {"hata": "duyular kapalı", "acik": False})
-                guncel = duyular.yaz(veri, cihaz["id"])
-                return self._json(200, {"ok": True, "guncel": guncel})
-            if u.path == "/v1/gunluk":       # uygulama içi teşhis günlüğü (kaydırma/klavye olayları)
-                _gunluk_yaz(cihaz["id"], veri.get("satirlar") or [])
-                return self._json(200, {"ok": True})
-            if u.path == "/v1/apns":
-                ok = kokpit.apns_kaydet(cihaz["id"], veri.get("token", ""), veri.get("env", "development"))
-                return self._json(200 if ok else 400, {"ok": ok})
-            if u.path == "/v1/etkinlik":   # Live Activity token'ları (start | update)
-                jid = veri.get("jid")
-                ok = kokpit.la_token_kaydet(cihaz["id"], veri.get("tur", ""), veri.get("token", ""),
-                                            int(jid) if str(jid).isdigit() else None)
-                return self._json(200 if ok else 400, {"ok": ok})
-            if u.path == "/v1/eylem":
-                eid = str(veri.get("id") or "").strip()[:64]
-                if not eid:
-                    return self._json(400, {"hata": "id boş"})
-                if governance.is_frozen():
-                    return self._json(423, {"hata": "FREEZE aktif"})
-                channels.son_kanal_ayarla("kokpit")
-                metin = sahne.eylem(eid, veri.get("veri"), veri.get("alanlar"), cihaz["id"])
-                return self._json(200, {"ok": True, "metin": metin})
-            if u.path == "/v1/paylas":
-                return self._paylas(cihaz, veri, body if ham_gorsel else None, q)
-            if u.path == "/v1/masa" or u.path.startswith("/v1/masa/"):
-                return self._masa_yaz(cihaz, u.path, veri, body if ham_gorsel else None, q)
-            if u.path.startswith("/v1/gorevler/"):
-                gid = u.path.rsplit("/", 1)[1]
-                if not gid.isdigit():
-                    return self._json(400, {"hata": "id sayı değil"})
-                g = gorevler.sonuclandir(gid, bool(veri.get("ok")), veri.get("mesaj", ""),
-                                         veri.get("yerel_id", ""), cihaz["id"])
-                if not g:
-                    # Zaten sonuçlanmış: ikinci deneme sessizce yutulur (çift yazım olmaz).
-                    return self._json(200, {"ok": True, "yinelenen": True})
-                gorevler.haber_ver(g)
-                return self._json(200, {"ok": True, "durum": g["durum"]})
-            if u.path == "/v1/bolge":        # bölgeye giriş/çıkış — Ghost'u DÜŞÜNDÜRÜR
-                metin = bolgeler.olay(veri.get("ad", ""), veri.get("olay", ""), cihaz["id"])
-                if not metin:
-                    # bilinmeyen bölge ya da soğuma penceresi: sessiz, hata değil
-                    return self._json(200, {"ok": True, "yutuldu": True})
-                kokpit.outbox_yaz("📍 " + metin.split(" Bu bir otomatik")[0].replace("[Bölge] ", ""), "ghost")
-                channels.son_kanal_ayarla("kokpit")
-                kokpit.mesaj_kuyrukla(metin, cihaz["id"])
-                try:  # kural motoru (2026-10-26): bolge:<ad> tetiği, bölge mesajına EK
-                    from ghost import kurallar
-                    kurallar.tetikle("bolge", veri.get("ad", ""), {"olay": veri.get("olay", "")})
-                except Exception:
-                    pass
-                return self._json(200, {"ok": True})
-            if u.path.startswith("/v1/kararlar/"):
-                pid = u.path.rsplit("/", 1)[1]
-                karar = veri.get("karar")
-                if karar not in ("onay", "ret") or not (4 <= len(pid) <= 16):
-                    return self._json(400, {"hata": "karar onay|ret"})
-                kokpit.karar_kuyrukla(pid, karar == "onay", cihaz["id"])
-                return self._json(200, {"ok": True})
+            out = ses_ajani.arac_calistir(ad, veri if isinstance(veri, dict) else {})
         except Exception as e:
-            self.log_message("hata %s: %r", u.path, e)
-            return self._json(500, {"hata": "sunucu hatası"})
-        self._json(404, {"hata": "yok"})
+            return self._json(500, {"metin": "araç hatası: %s" % e})
+        governance.audit("api", "ses_arac", governance.READ, "%s" % ad)
+        return self._json(200, out)
+
+    def _p_mesaj(self, cihaz, u, q, veri, body, ham):
+        metin = (veri.get("metin") or "").strip()
+        if not metin:
+            return self._json(400, {"hata": "metin boş"})
+        if governance.is_frozen() and metin.split(None, 1)[0].lower() not in (
+                "/unfreeze", "/freeze", "/durum", "/saglik", "/help"):
+            return self._json(423, {"hata": "FREEZE aktif — yalnız /unfreeze, /durum"})
+        try:  # imzalı istek: gerçek onay kapısı (ghost/sahne.py GERÇEK ONAY KAYDI)
+            sahne.sahip_onayi_kaydet(metin, "kokpit-mesaj")
+        except Exception:
+            pass
+        mid = kokpit.outbox_yaz(metin, "sahip")
+        channels.son_kanal_ayarla("kokpit")      # cevap uygulamaya push olsun
+        kokpit.mesaj_kuyrukla(metin, cihaz["id"], sesli=bool(veri.get("sesli")),
+                              imza=(cihaz.get("inbox_imza"), cihaz.get("inbox_ts"))
+                              if cihaz.get("inbox_imza") else None)
+        return self._json(200, {"ok": True, "id": mid})
+
+    def _p_duyular(self, cihaz, u, q, veri, body, ham):
+        # Ana şalter kapalıysa 403: uygulama bunu görüp göndermeyi durdurur
+        # (izin telefonda açık kalsa bile veri akmaz).
+        if not duyular.acik():
+            return self._json(403, {"hata": "duyular kapalı", "acik": False})
+        guncel = duyular.yaz(veri, cihaz["id"])
+        return self._json(200, {"ok": True, "guncel": guncel})
+
+    def _p_gunluk(self, cihaz, u, q, veri, body, ham):       # uygulama içi teşhis günlüğü (kaydırma/klavye olayları)
+        _gunluk_yaz(cihaz["id"], veri.get("satirlar") or [])
+        return self._json(200, {"ok": True})
+
+    def _p_apns(self, cihaz, u, q, veri, body, ham):
+        ok = kokpit.apns_kaydet(cihaz["id"], veri.get("token", ""), veri.get("env", "development"))
+        return self._json(200 if ok else 400, {"ok": ok})
+
+    def _p_etkinlik(self, cihaz, u, q, veri, body, ham):   # Live Activity token'ları (start | update)
+        jid = veri.get("jid")
+        ok = kokpit.la_token_kaydet(cihaz["id"], veri.get("tur", ""), veri.get("token", ""),
+                                    int(jid) if str(jid).isdigit() else None)
+        return self._json(200 if ok else 400, {"ok": ok})
+
+    def _p_eylem(self, cihaz, u, q, veri, body, ham):
+        eid = str(veri.get("id") or "").strip()[:64]
+        if not eid:
+            return self._json(400, {"hata": "id boş"})
+        if governance.is_frozen():
+            return self._json(423, {"hata": "FREEZE aktif"})
+        channels.son_kanal_ayarla("kokpit")
+        metin = sahne.eylem(eid, veri.get("veri"), veri.get("alanlar"), cihaz["id"])
+        return self._json(200, {"ok": True, "metin": metin})
+
+    def _p_paylas(self, cihaz, u, q, veri, body, ham):
+        return self._paylas(cihaz, veri, ham, q)
+
+    def _p_masa(self, cihaz, u, q, veri, body, ham):
+        return self._masa_yaz(cihaz, u.path, veri, ham, q)
+
+    def _p_gorev_sonuc(self, cihaz, u, q, veri, body, ham):
+        gid = u.path.rsplit("/", 1)[1]
+        if not gid.isdigit():
+            return self._json(400, {"hata": "id sayı değil"})
+        g = gorevler.sonuclandir(gid, bool(veri.get("ok")), veri.get("mesaj", ""),
+                                 veri.get("yerel_id", ""), cihaz["id"])
+        if not g:
+            # Zaten sonuçlanmış: ikinci deneme sessizce yutulur (çift yazım olmaz).
+            return self._json(200, {"ok": True, "yinelenen": True})
+        gorevler.haber_ver(g)
+        return self._json(200, {"ok": True, "durum": g["durum"]})
+
+    def _p_bolge(self, cihaz, u, q, veri, body, ham):        # bölgeye giriş/çıkış — Ghost'u DÜŞÜNDÜRÜR
+        metin = bolgeler.olay(veri.get("ad", ""), veri.get("olay", ""), cihaz["id"])
+        if not metin:
+            # bilinmeyen bölge ya da soğuma penceresi: sessiz, hata değil
+            return self._json(200, {"ok": True, "yutuldu": True})
+        kokpit.outbox_yaz("📍 " + metin.split(" Bu bir otomatik")[0].replace("[Bölge] ", ""), "ghost")
+        channels.son_kanal_ayarla("kokpit")
+        kokpit.mesaj_kuyrukla(metin, cihaz["id"])
+        try:  # kural motoru (2026-10-26): bolge:<ad> tetiği, bölge mesajına EK
+            from ghost import kurallar
+            kurallar.tetikle("bolge", veri.get("ad", ""), {"olay": veri.get("olay", "")})
+        except Exception:
+            pass
+        return self._json(200, {"ok": True})
+
+    def _p_karar(self, cihaz, u, q, veri, body, ham):
+        pid = u.path.rsplit("/", 1)[1]
+        karar = veri.get("karar")
+        if karar not in ("onay", "ret") or not (4 <= len(pid) <= 16):
+            return self._json(400, {"hata": "karar onay|ret"})
+        kokpit.karar_kuyrukla(pid, karar == "onay", cihaz["id"])
+        return self._json(200, {"ok": True})
 
 
 def _mesgul_imza(m):
@@ -609,6 +720,10 @@ def _outbox_bekle(since, limit, bekle, durum_imza, gts=0.0):
         rows = kokpit.outbox_oku(since, limit)
         m = akis.sohbet_durumu()
         g_rows = kokpit.outbox_guncellenenler(gts, 20)
+        # 2026-10-30 (Sahip "mesaj bazen iki kere görünüyor"): satır hem YENİ (id > since) hem az önce GÜNCELLENMİŞ ise
+        # (uygulama turun ortasında arkadaydı) iki listede de geliyordu → istemci aynı id'yi iki balon yapıyordu. Tek kopya.
+        yeni_idler = {r["id"] for r in rows}
+        g_rows = [g for g in g_rows if g["id"] not in yeni_idler]
         if rows or g_rows or time.time() >= son or (durum_imza and _mesgul_imza(m) != durum_imza):
             return rows, m, g_rows, max(g_son, kokpit.outbox_son_guncelleme())
         time.sleep(0.5)
@@ -641,9 +756,8 @@ def _inbox_imza(cihaz, metin):
 
 def _paylas_kaydet(cihaz, veri, ham, q):
     """Share Extension: metin/URL JSON ile, görsel ham gövdeyle gelir.
-    Görsel ops/kokpit_paylasim/'a yazılır; köprüye "[Paylaşım] …" mesajı düşer."""
-    d = os.path.join(config.OPS, "kokpit_paylasim")
-    os.makedirs(d, exist_ok=True)
+    Görsel ~/.ghost/kokpit_paylasim/'a yazılır; köprüye "[Paylaşım] …" mesajı düşer."""
+    d = config.veri_dizin("kokpit_paylasim")
     if ham is not None:
         if not ham:
             return None, "dosya boş"
@@ -694,4 +808,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "rotalar":
+        sys.stdout.write(rotalar_markdown())
+    else:
+        main()

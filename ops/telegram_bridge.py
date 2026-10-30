@@ -62,9 +62,11 @@ from ghost.tools import registry as tool_registry  # noqa: E402
 from ghost import continuity  # noqa: E402
 from ghost import akis, apns, bus, channels, health, kokpit, komutlar  # noqa: E402  (kokpit + Faz 3 omurga)
 from ghost import kesik_mesaj
+from ghost import sohbet_istemci  # noqa: E402  (Faz 3.2: Claude sohbet süreci ghost-sohbet biriminde; yoksa eski yol)
 from ghost import kalici_oturum, kota, metrik  # noqa: E402  (2026-09-07: tek süreç çok tur + abonelik kotası; 2026-10-29: ölçü)
 from ghost import modeller  # noqa: E402  (2026-10-01: takma ad → en güncel tam kimlik)
 from ghost import kurallar  # noqa: E402  (2026-10-26: olay → kural motoru; Masa gelen kutusu tick'i)
+from ghost import nabiz  # noqa: E402  (Faz 3.1: dört tick ayrı birimde; köprü yalnız yedek yol)
 
 
 def _with_memory(text):
@@ -890,8 +892,9 @@ class Manager:
         self.chat_resumed = bool(self.chat_sid)
         # Kalıcı sohbet süreci (tek süreç çok tur) — yalnız sohbet işçisi kullanır.
         # Model/oturum değişince (/model, /new, /tazele) run_claude kendisi yeniler.
-        self.kalici = (kalici_oturum.KaliciOturum(CLAUDE, CLAUDE_ARGS, cwd=BASE,
-                                                  env=_env, log=log)
+        # Faz 3.2 (2026-10-30): ghost-sohbet sunucusu varsa süreç ORADA (köprü restart'ı turu kesmez),
+        # yoksa eski yol — süreç köprünün çocuğu. Arayüz aynı (sohbet_istemci.KaliciIstemci).
+        self.kalici = (sohbet_istemci.kalici_sec(CLAUDE, CLAUDE_ARGS, BASE, _env, log)
                        if KALICI else None)
         if self.kalici is not None:
             self.kalici.on_gec_sonuc = self._gec_yanit
@@ -956,9 +959,10 @@ class Manager:
                               "history": [list(x) for x in self.history[-8:]]})
 
     # ---- sohbet şeridi (sıralı, bağlam sürer) ----
-    def chat(self, text, spoken=False, deneme=0):
+    def chat(self, text, spoken=False, deneme=0, tur_id=None):
         # deneme>0: köprü restart'ında yeniden kuyruğa alınan kesik mesaj (kesik_mesaj).
-        self.chat_q.put((text, spoken, deneme))
+        # tur_id (Faz 3.2): sohbet sunucusunda SÜREN/bitmiş tura bağlan — mesaj yeniden koşmaz.
+        self.chat_q.put((text, spoken, deneme, tur_id))
 
     def gec_sonuclari_teslim(self):
         """Ana döngüden: kalıcı süreç boştayken gelen `result` satırlarını (Ghost'un
@@ -985,10 +989,14 @@ class Manager:
             item = self.chat_q.get()
             text, spoken = item[0], item[1]
             deneme = item[2] if len(item) > 2 else 0
+            bagla = item[3] if len(item) > 3 else None
             # Mesajı diske yaz: köprü bu turun ortasında ölürse (apt/needrestart,
             # kendi restart'ı, OOM) açılışta yeniden kuyruğa alınır — cevap
             # sessizce kaybolmaz (2026-09-26, bkz. ghost/kesik_mesaj.py).
-            kesik_mesaj.basladi(text, spoken, deneme)
+            # Faz 3.2: kayıt tur kimliği taşır; sohbet sunucusu varsa yeni köprü mesajı yeniden koşturmaz,
+            # sunucudaki tura bağlanır (bagla). Kimlik sunucudaki turla aynıdır (_tur_hazirla).
+            tur_id = self._tur_hazirla(bagla)
+            kesik_mesaj.basladi(text, spoken, deneme, tur_id)
             try:
                 self._chat_one(text, spoken)
             except Exception as e:
@@ -1001,6 +1009,15 @@ class Manager:
                     _sessiz("_chat_worker@1205", _e)
             finally:
                 kesik_mesaj.bitti()
+
+    def _tur_hazirla(self, bagla=None):
+        """Faz 3.2: bu turun kimliği. Uzak sunucuda bagla verilmişse o tura bağlanılır (yeni istem gitmez);
+        değilse yeni kimlik sunucuya da verilir ki açılışta kesik kayıtla eşleşsin. Yerel süreçte yalnız kimlik."""
+        tur_id = bagla or sohbet_istemci.tur_kimligi()
+        if getattr(self.kalici, "uzak", False):
+            self.kalici.bagla_id = bagla
+            self.kalici.tur_id = None if bagla else tur_id
+        return tur_id
 
     def _ilk_satir_gonder(self, metin):
         """Faz 2.7: turun ilk cümlesi hemen gider (Telegram + Kokpit gecici balon); sonuç aynı balona yazılır."""
@@ -1126,6 +1143,9 @@ class Manager:
                     continuity.oturum_basladi(self.chat_sid)
                 except Exception as e:
                     log("süreklilik çıpası kurulamadı: %r" % e)
+                # Faz 3.2: yeni oturum kimliği TUR BAŞINDA diske — köprü tur ortasında yeniden başlarsa
+                # sunucudaki tura doğru kimlikle bağlanır (tur sonunda yazılsaydı eski sid'e dönerdi).
+                self._save_chat()
             ham = text  # Claude Code komutu mu diye bakılacak (prompt_kur) — sarmalanmadan önce
             if rotate_note:
                 text = ("[OTURUM TAZELENDİ — %s. Önceki sohbetin son "
@@ -2195,7 +2215,8 @@ def basla():
     mgr = Manager(owner, state) if owner else None  # olay/cron için erken başlat
     # Kapanışta kalıcı sohbet sürecini de kapat: kendi oturumunda (setsid) koşar,
     # ebeveyn ölünce Mac'te yetim kalabilir (VPS'te systemd cgroup'u zaten süpürür).
-    if mgr is not None and mgr.kalici is not None:
+    # Faz 3.2: sohbet sunucusu (uzak) kullanılıyorsa süreç köprüyle KAPANMAZ — bu birimin varlık sebebi.
+    if mgr is not None and mgr.kalici is not None and not getattr(mgr.kalici, "uzak", False):
         def _kapanis(signum=None, frame=None):
             try:
                 mgr.kalici.kapat("köprü kapanıyor")
@@ -2237,26 +2258,7 @@ def basla():
         kesik = None
         log("kesik mesaj devralma hata: %r" % e)
     if kesik and mgr is not None:
-        ozet = kesik["text"].replace(kesik_mesaj.ONEK, "").strip().splitlines()
-        ozet = (ozet[-1] if ozet else "")[:80]
-        if kesik["vazgec"]:
-            log("kesik mesaj bırakıldı (%s, %d sn): %s" % (kesik["neden"], kesik["yas"], ozet))
-            try:
-                send(owner, "♻️ Yeniden başladım. Cevapsız kalan mesajın %s — "
-                     "tekrar yazarsan alırım: “%s”" % (
-                         "iki kez kesildi, döngüye girmiyorum"
-                         if kesik["neden"] == "deneme" else "2 saatten eski, tekrar koşmadım",
-                         ozet))
-            except Exception as _e:
-                _sessiz("basla.kesik_vazgec", _e)
-        else:
-            log("kesik mesaj yeniden kuyrukta (%d sn önce): %s" % (kesik["yas"], ozet))
-            try:
-                send(owner, "♻️ Köprü cevabın ortasında yeniden başlamıştı; mesajını "
-                     "yeniden alıyorum: “%s”" % ozet)
-            except Exception as _e:
-                _sessiz("basla.kesik_devam", _e)
-            mgr.chat(kesik["text"], spoken=kesik["spoken"], deneme=kesik["deneme"])
+        _kesik_devral(mgr, owner, kesik)
     try:  # telefonda "/" yazınca otomatik tamamlama menüsü
         api("setMyCommands", commands=json.dumps(
             [{"command": c, "description": d} for c, d in komut_listesi()]))
@@ -2267,6 +2269,45 @@ def basla():
     log("köprü(v3.0/%s) başladı; sahip=%s | havuz=%d | whisper=%s | çekirdek=ghost/"
         % (ROLE, owner, POOL_SIZE, bool(find_whisper() and find_model_file())))
     return Kopru(owner, state, mgr, offset)
+
+
+def _kesik_devral(mgr, owner, kesik):
+    """Açılışta kesik sohbet mesajı. Faz 3.2: sohbet sunucusunda aynı tur SÜRÜYOR ya da sonucu bekliyorsa mesaj
+    yeniden KOŞMAZ, o tura bağlanılır (cevap kaybı 0, çift koşma 0; vazgeç kuralından önce bakılır — bağlanmak koşmak
+    değildir). Değilse eski yol: bir kez yeniden kuyruk ya da vazgeç. Döner: 'bagla' | 'tekrar' | 'vazgec'."""
+    ham = kesik.get("ham") or kesik["text"].replace(kesik_mesaj.ONEK, "")
+    ozet = ham.strip().splitlines()
+    ozet = (ozet[-1] if ozet else "")[:80]
+    k = getattr(mgr, "kalici", None)
+    tid = kesik.get("tur_id")
+    try:
+        bagla = bool(tid and getattr(k, "uzak", False) and k.devralinabilir(tid))
+    except Exception as e:
+        log("kesik devralma sorgusu hata: %r" % e)
+        bagla = False
+    if bagla:
+        log("kesik mesaj: sohbet sunucusundaki tura bağlanılıyor (%s, %d sn): %s" % (tid[:12], kesik["yas"], ozet))
+        mgr.chat(ham, spoken=kesik["spoken"], deneme=kesik["deneme"], tur_id=tid)
+        return "bagla"
+    if kesik["vazgec"]:
+        log("kesik mesaj bırakıldı (%s, %d sn): %s" % (kesik["neden"], kesik["yas"], ozet))
+        try:
+            send(owner, "♻️ Yeniden başladım. Cevapsız kalan mesajın %s — "
+                 "tekrar yazarsan alırım: “%s”" % (
+                     "iki kez kesildi, döngüye girmiyorum"
+                     if kesik["neden"] == "deneme" else "2 saatten eski, tekrar koşmadım",
+                     ozet))
+        except Exception as _e:
+            _sessiz("basla.kesik_vazgec", _e)
+        return "vazgec"
+    log("kesik mesaj yeniden kuyrukta (%d sn önce): %s" % (kesik["yas"], ozet))
+    try:
+        send(owner, "♻️ Köprü cevabın ortasında yeniden başlamıştı; mesajını "
+             "yeniden alıyorum: “%s”" % ozet)
+    except Exception as _e:
+        _sessiz("basla.kesik_devam", _e)
+    mgr.chat(kesik["text"], spoken=kesik["spoken"], deneme=kesik["deneme"])
+    return "tekrar"
 
 
 def tick(k):
@@ -2283,12 +2324,14 @@ def tick(k):
                 fn(mgr)
             except Exception as e:
                 log("%s hata: %r" % (ad, e))
-    if ROLE == "vps":  # monitör + zamanlayıcı + hedefler: batondan bağımsız, birbirinden izole
-        for ad, mod in (("monitors", monitors), ("schedule", schedule), ("goals", goals), ("kurallar", kurallar)):
-            try:
-                mod.tick()
-            except Exception as e:
-                log("tick hata[%s]: %r" % (ad, e))
+    if ROLE == "vps":  # monitör + zamanlayıcı + hedefler + kurallar: batondan bağımsız, birbirinden izole
+        # Faz 3.1 (2026-10-30): dört tick artık ghost-nabiz biriminde (ghost/nabiz.py). Damga tazeyse köprü
+        # dokunmaz; birim susarsa (120 sn) aynı dosya kilidi altında YEDEK yol burada koşar — çift tick yok.
+        try:
+            nabiz.kopru_tick((("monitors", monitors), ("schedule", schedule), ("goals", goals),
+                              ("kurallar", kurallar)), log)
+        except Exception as e:
+            log("tick hata[nabiz]: %r" % e)
         try:
             from ghost import sahne as _sahne_t
             _sahne_t.servis_esitle()       # 4. tur K1: kart eşitleme yalnız köprüden

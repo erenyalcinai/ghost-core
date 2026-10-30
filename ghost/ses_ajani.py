@@ -120,6 +120,10 @@ def ses_sirri():
     s = (env.get("GHOST_SES_SECRET") or "").strip()
     if s:
         return s
+    if os.environ.get("GHOST_TEST") == "1":
+        # Test izolasyonu (2026-10-30): API sözleşme testi bu ucu çağırınca sır dosyası arşiv test ağacına
+        # yazılıyor, test_mcp_yonlendirme "kurulu makine" sanıp düşüyordu → push kapısı 2 saat kapalı kaldı.
+        return "test-ses-sirri"
     s = _secrets.token_hex(24)
     with open(os.path.join(config.BASE, "secrets.env"), "a", encoding="utf-8") as f:
         f.write("\n# Ses ajanı webhook başlığı (X-Ghost-Ses), ghost/ses_ajani.py üretti\nGHOST_SES_SECRET=%s\n" % s)

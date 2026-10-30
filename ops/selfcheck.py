@@ -174,6 +174,15 @@ def cleanup():
                 log("kırpıldı: %s" % os.path.basename(p))
         except OSError:
             pass
+    # Faz 3.11 ön adım (denetim 03 4b, 2026-10-30): ops/mac-queue/done 473 bitmiş iş dosyası, GC yoktu — 30 gün.
+    done_cutoff = time.time() - 30 * 86400
+    for p in glob.glob(os.path.join(OPS, "mac-queue", "done", "*")):
+        try:
+            if os.path.isfile(p) and os.path.getmtime(p) < done_cutoff:
+                os.remove(p)
+                removed += 1
+        except OSError:
+            pass
     if removed:
         log("temizlik: %d eski dosya silindi" % removed)
 
@@ -544,6 +553,9 @@ def vekil_yerinde():
     return None
 
 
+NABIZ_VPS = "ghost-nabiz"      # kullanıcı systemd birimi: nabız (monitör/zamanlayıcı/hedef/kural tick'leri, Faz 3.1)
+
+
 def api_bayat_yenile(kod_ts):
     """Kokpit API (ghost.api) bayat kodla koşuyorsa hemen yenile.
 
@@ -552,11 +564,38 @@ def api_bayat_yenile(kod_ts):
     gitmedi, Sahip "gerçek kota gözükmüyor" dedi. API durumsuz ve istek başına
     kısa; köprüden farklı olarak boşta olmasını beklemeye gerek yok (3 sn kesinti,
     uygulama yeniden dener). Yalnız VPS."""
+    return _kullanici_birimi_bayat_yenile(kod_ts, API_VPS, "Kokpit API")
+
+
+def nabiz_bayat_yenile(kod_ts):
+    """Nabız birimi (ghost.nabiz) bayat kodla koşuyorsa yenile (Faz 3.1). Durumsuz: tur arası yeniden
+    başlatma kayıp vermez (vadeler DB'de); 5 sn boşlukta köprü yedek yola bile geçmez (eşik 120 sn)."""
+    return _kullanici_birimi_bayat_yenile(kod_ts, NABIZ_VPS, "Nabız birimi")
+
+
+SOHBET_VPS = "ghost-sohbet"    # kullanıcı systemd birimi: kalıcı Claude sohbet süreci (Faz 3.2)
+
+
+def sohbet_bayat_yenile(kod_ts):
+    """Sohbet sunucusu (ghost.sohbet_sunucu) bayat kodla koşuyorsa ve BOŞTAYSA yenile. Yenileme claude sürecini
+    kapatır (sonraki tur --resume ile açar, transcript diskte); tur ortasında ya da teslim edilmemiş sonuç varken
+    ASLA — Faz 3.2'nin amacı o cevabı yaşatmak."""
+    try:
+        from ghost import sohbet_istemci
+        d = sohbet_istemci.sunucu_durumu()
+        if d and (d.get("mesgul") or d.get("bekleyen")):
+            return None
+    except Exception:
+        pass
+    return _kullanici_birimi_bayat_yenile(kod_ts, SOHBET_VPS, "Sohbet sunucusu")
+
+
+def _kullanici_birimi_bayat_yenile(kod_ts, birim, etiket):
     if IS_MAC:
         return None
     try:
         env = _user_env()
-        r = subprocess.run(["systemctl", "--user", "show", API_VPS, "-p", "MainPID", "--value"],
+        r = subprocess.run(["systemctl", "--user", "show", birim, "-p", "MainPID", "--value"],
                            capture_output=True, text=True, timeout=10, env=env)
         pid = int(r.stdout.strip() or 0)
         if not pid:
@@ -564,14 +603,14 @@ def api_bayat_yenile(kod_ts):
         surec_ts = _surec_ts(pid)
         if not bayat_kod(kod_ts, surec_ts):
             return None
-        r = subprocess.run(["systemctl", "--user", "restart", API_VPS],
+        r = subprocess.run(["systemctl", "--user", "restart", birim],
                            capture_output=True, text=True, timeout=30, env=env)
         ok = r.returncode == 0
-        log("Kokpit API bayat kod (süreç %s) → yenilendi: %s" % (
-            time.strftime("%d %b %H:%M", time.localtime(surec_ts)), "tamam" if ok else r.stderr[-200:]))
-        return ("♻️ Kokpit API bayat koddaydı → yenilendi: %s" % ("tamam" if ok else "BAŞARISIZ, elle bak"))
+        log("%s bayat kod (süreç %s) → yenilendi: %s" % (
+            etiket, time.strftime("%d %b %H:%M", time.localtime(surec_ts)), "tamam" if ok else r.stderr[-200:]))
+        return ("♻️ %s bayat koddaydı → yenilendi: %s" % (etiket, "tamam" if ok else "BAŞARISIZ, elle bak"))
     except Exception as e:
-        log("Kokpit API bayat denetimi hata: %r" % e)
+        log("%s bayat denetimi hata: %r" % (etiket, e))
         return None
 
 
@@ -847,6 +886,12 @@ def main():
             log("bayat kod sürüyor (süreç %s) — uyarı susturuldu, saatte bir"
                 % time.strftime("%d %b %H:%M", time.localtime(surec_ts)))
     sorun = api_bayat_yenile(kod_ts)
+    if sorun:
+        problems.append(sorun)
+    sorun = nabiz_bayat_yenile(kod_ts)
+    if sorun:
+        problems.append(sorun)
+    sorun = sohbet_bayat_yenile(kod_ts)
     if sorun:
         problems.append(sorun)
     sorun = hook_bayat_uyar(kod_ts)

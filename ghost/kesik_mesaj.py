@@ -30,14 +30,15 @@ def _dosya():
     return os.path.join(config.OPS, "sohbet_kesik.json")
 
 
-def basladi(text, spoken=False, deneme=0):
-    """Sohbet işçisi bir mesaja başlıyor: diske yaz (atomik)."""
+def basladi(text, spoken=False, deneme=0, tur_id=None):
+    """Sohbet işçisi bir mesaja başlıyor: diske yaz (atomik). tur_id (Faz 3.2): sohbet sunucusundaki turun
+    kimliği — köprü yeniden başlarsa mesajı baştan koşturmak yerine o tura bağlanır (sohbet_istemci.devralinabilir)."""
     try:
         yol = _dosya()
         tmp = yol + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"text": text, "spoken": bool(spoken), "deneme": int(deneme),
-                       "ts": int(time.time())}, f, ensure_ascii=False)
+                       "tur_id": tur_id, "ts": int(time.time())}, f, ensure_ascii=False)
         os.replace(tmp, yol)
     except Exception:
         pass
@@ -57,8 +58,9 @@ def devral(simdi=None):
     """Köprü AÇILIŞINDA çağrılır. Dosyayı okur ve siler.
 
     None → kesik mesaj yok. Yoksa sözlük:
-      {"vazgec": False, "text": ONEK+metin, "spoken", "deneme": n+1, "yas": sn}
+      {"vazgec": False, "text": ONEK+metin, "spoken", "deneme": n+1, "yas": sn, "tur_id", "ham": öneksiz metin}
       {"vazgec": True,  "neden": "deneme"|"bayat", "text": ham metin, ...}
+    Faz 3.2: çağıran önce `tur_id` ile sohbet sunucusuna bağlanmayı dener; olmazsa bu sözlükle eski yol.
     """
     yol = _dosya()
     try:
@@ -76,7 +78,8 @@ def devral(simdi=None):
     if not text:
         return None
     deneme = int(k.get("deneme") or 0)
-    out = {"text": text, "spoken": bool(k.get("spoken")), "deneme": deneme, "yas": yas}
+    out = {"text": text, "spoken": bool(k.get("spoken")), "deneme": deneme, "yas": yas,
+           "tur_id": k.get("tur_id"), "ham": text[len(ONEK):] if text.startswith(ONEK) else text}
     if deneme >= MAX_DENEME:
         out.update(vazgec=True, neden="deneme")
         return out

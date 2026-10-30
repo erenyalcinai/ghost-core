@@ -36,6 +36,8 @@ for line in sys.stdin:
     n += 1
     if msg == "uyu":
         time.sleep(30)
+    if msg == "uyu-kisa":
+        time.sleep(1.5)
     if msg == "öl":
         sys.exit(3)
     print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "cevap %d: %s" % (n, msg)}]}}), flush=True)

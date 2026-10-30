@@ -31,6 +31,27 @@ def __getattr__(name):
     raise AttributeError("module %r has no attribute %r" % (__name__, name))
 
 
+def veri_kok():
+    """Kullanıcı verisi kökü (Faz 3.1 / denetim 03 4c+6c): repo dizini kod + yapılandırma, veri `~/.ghost`.
+    GHOST_VERI ezer; testte (GHOST_OPS) geçici ops dizini (gerçek ~/.ghost'a dokunulmaz)."""
+    if os.environ.get("GHOST_VERI"):
+        return os.environ["GHOST_VERI"]
+    if os.environ.get("GHOST_OPS"):
+        return _ops()
+    return os.path.join(os.path.expanduser("~"), ".ghost")
+
+
+# Kullanıcı verisi dizinleri (ops/ altından ~/.ghost'a taşındı, 2026-10-30; ops/<ad> → symlink, eski yollar yaşar)
+VERI_DIZINLERI = ("kokpit_medya", "kokpit_paylasim", "masa_dosya", "browser-profile")
+
+
+def veri_dizin(ad):
+    """~/.ghost/<ad> (yoksa oluşturur)."""
+    p = os.path.join(veri_kok(), ad)
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
 def _parse_env_file(path):
     out = {}
     try:
