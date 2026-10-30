@@ -10,13 +10,7 @@ struct SimdiBolumu: View {
     @EnvironmentObject var oturum: Oturum
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("masa.simdi.acik") private var acik = true
-    @State private var sahne: SahneZarf?
-    @State private var hata: String?
-    @State private var eski: SahneZarf?
-    @State private var gecmis: [SahneGecmisOge] = []
-
-    private var gosterilen: SahneZarf? { eski ?? sahne }
-    private var bos: Bool { (gosterilen?.bilesenler ?? []).isEmpty }
+    @StateObject private var model = SahneModel()     // Faz 3.12 8b: durum/yoklama Model'de, görünüm çizer
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -25,23 +19,23 @@ struct SimdiBolumu: View {
                     withAnimation(.easeInOut(duration: 0.2)) { acik.toggle() }
                 } label: {
                     HStack(spacing: 6) {
-                        BolumBaslik(metin: baslik)
+                        BolumBaslik(metin: model.baslik)
                         Image(systemName: acik ? "chevron.down" : "chevron.right")
                             .font(.caption.weight(.semibold)).foregroundStyle(Renk.ikincil).padding(.top, 6)
                     }
                 }
                 .buttonStyle(.plain)
                 Menu {
-                    if gecmis.isEmpty { Text("Önceki sahne yok") }
-                    ForEach(gecmis.reversed()) { g in
-                        Button { Task { await eskiyiAc(g.seq) } } label: {
+                    if model.gecmis.isEmpty { Text("Önceki sahne yok") }
+                    ForEach(model.gecmis.reversed()) { g in
+                        Button { Task { await model.eskiyiAc(g.seq) } } label: {
                             Label("\((g.baslik ?? "").isEmpty ? "Sahne" : g.baslik!) · \((g.ts ?? "").suffix(8).prefix(5))",
                                   systemImage: "rectangle.on.rectangle")
                         }
                     }
-                    if eski != nil {
+                    if model.eski != nil {
                         Divider()
-                        Button("Şimdiye dön") { withAnimation { eski = nil } }
+                        Button("Şimdiye dön") { withAnimation { model.simdiyeDon() } }
                     }
                 } label: {
                     Image(systemName: "clock.arrow.circlepath").font(.footnote).foregroundStyle(Renk.ikincil).padding(.top, 6)
@@ -50,21 +44,21 @@ struct SimdiBolumu: View {
                 .accessibilityLabel("Önceki sahneler")
             }
             if acik {
-                if let h = hata {
+                if let h = model.hata {
                     Text(h).font(.footnote).foregroundStyle(Renk.uyari).kart()
                 }
-                if let e = eski {
+                if let e = model.eski {
                     HStack(spacing: 8) {
                         Image(systemName: "clock.arrow.circlepath").foregroundStyle(Renk.uyari)
-                        Text("Önceki sahne · seq \(e.seq)" + ((sahne?.seq ?? 0) > e.seq ? " · yeni sahne var" : ""))
+                        Text("Önceki sahne · seq \(e.seq)" + (model.yeniSahneVar ? " · yeni sahne var" : ""))
                             .font(.footnote).foregroundStyle(Renk.metin)
                         Spacer()
-                        Button("Şimdiye dön") { withAnimation { eski = nil } }
+                        Button("Şimdiye dön") { withAnimation { model.simdiyeDon() } }
                             .font(.footnote.weight(.medium)).foregroundStyle(Renk.metin)
                     }
                     .kart()
                 }
-                if let s = gosterilen, !s.bilesenler.isEmpty {
+                if let s = model.gosterilen, !s.bilesenler.isEmpty {
                     ForEach(Array(s.bilesenler.enumerated()), id: \.offset) { _, b in
                         BilesenView(b: b)
                     }
@@ -74,7 +68,7 @@ struct SimdiBolumu: View {
                 } else {
                     HStack(spacing: 8) {
                         Image(systemName: "rectangle.dashed").foregroundStyle(Renk.ikincil)
-                        Text(sahne == nil ? "Bağlanıyor…" : "Sahne boş — Ghost tablo, diff ya da canlı ekran gösterince burada belirir.")
+                        Text(model.sahne == nil ? "Bağlanıyor…" : "Sahne boş — Ghost tablo, diff ya da canlı ekran gösterince burada belirir.")
                             .font(.footnote).foregroundStyle(Renk.ikincil)
                     }
                     .kart()
@@ -83,56 +77,8 @@ struct SimdiBolumu: View {
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
-            await dongu()
-        }
-    }
-
-    private var baslik: String {
-        let b = gosterilen?.baslik ?? ""
-        return b.isEmpty || bos ? "Şimdi" : "Şimdi · " + b
-    }
-
-    @MainActor
-    private func eskiyiAc(_ seq: Int) async {
-        do {
-            let z = try await oturum.api.sahneSeq(seq)
-            withAnimation { eski = (z.seq == sahne?.seq) ? nil : z }
-        } catch {
-            hata = "Önceki sahne okunamadı: " + error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func gecmisiYenile() async {
-        if let g = try? await oturum.api.sahneGecmis() { gecmis = g.gecmis }
-    }
-
-    @MainActor
-    private func dongu() async {
-        await yenile(bekle: 0)
-        await gecmisiYenile()
-        while !Task.isCancelled {
-            let t = Date()
-            await yenile(bekle: 25)
-            if Date().timeIntervalSince(t) < 1 { try? await Task.sleep(for: .seconds(1)) }
-        }
-    }
-
-    @MainActor
-    private func yenile(bekle: Int) async {
-        do {
-            let z = try await oturum.api.sahne(since: sahne?.seq ?? -1, bekle: bekle)
-            if z.seq != sahne?.seq {
-                sahne = z
-                await gecmisiYenile()           // yeni sahne = önceki tarihçeye girdi
-            }
-            hata = nil
-        } catch is CancellationError {
-        } catch APIHata.yetkisiz {
-        } catch {
-            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return }
-            hata = "Bağlantı: " + error.localizedDescription
-            try? await Task.sleep(for: .seconds(3))
+            model.baglan(oturum.api)
+            await model.dongu()
         }
     }
 }
@@ -311,26 +257,10 @@ struct BilesenView: View {
         .kart()
     }
 
-    private struct Nokta2D: Identifiable {
-        let id: String; let seri: String; let x: String; let y: Double; let sira: Int
-    }
-
-    private var noktalar: [Nokta2D] {
-        var out: [Nokta2D] = []
-        for (si, s) in (b.seriler ?? []).enumerated() {
-            let ad = s.ad ?? "seri \(si + 1)"
-            for (i, y) in s.degerler.enumerated() {
-                let x = (b.etiketler ?? []).indices.contains(i) ? b.etiketler![i] : String(i + 1)
-                out.append(Nokta2D(id: "\(si)-\(i)", seri: ad, x: x, y: y, sira: i))
-            }
-        }
-        return out
-    }
-
     private var grafik: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let t = b.baslik { BolumBaslik(metin: t) }
-            Chart(noktalar) { n in
+            Chart(b.grafikNoktalari) { n in
                 if b.tip == "cubuk" {
                     BarMark(x: .value("x", n.x), y: .value("y", n.y))
                         .foregroundStyle(by: .value("seri", n.seri))

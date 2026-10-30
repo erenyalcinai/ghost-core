@@ -25,6 +25,9 @@ struct NabizView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     ozetSerit
+                    if let u = oturum.apiUyari {        // 8c: sözleşme sürümü uyuşmazlığı
+                        Text(u).font(.footnote).foregroundStyle(Renk.uyari).kart()
+                    }
                     if let n = nabiz {
                         bekleyen(n)
                         bugun(n)

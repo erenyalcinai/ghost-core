@@ -150,7 +150,15 @@ def adaylar():
 
 
 def mac_isi_var_mi():
-    """Kuyrukta bekleyen/koşan iş varsa oturumlara dokunma."""
+    """Kuyrukta bekleyen/koşan iş varsa oturumlara dokunma. Faz 3.11: birincil kuyruk veriyolu
+    (type=job hedef=mac pending|claimed); eski ops/mac-queue/*.json dosyaları da sayılır (geriye dönük)."""
+    try:
+        from ghost import bus
+        say = bus.is_say("mac")
+        if say.get("pending") or say.get("claimed"):
+            return True
+    except Exception as e:
+        log("bus iş sayımı hata: %r" % e)
     return bool(glob.glob(os.path.join(QUEUE, "*.json")))
 
 

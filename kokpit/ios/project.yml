@@ -51,8 +51,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
         ENABLE_PREVIEWS: YES
-        MARKETING_VERSION: "0.15"
-        CURRENT_PROJECT_VERSION: "25"
+        MARKETING_VERSION: "0.16"
+        CURRENT_PROJECT_VERSION: "26"
         # Dış paket: yalnız ElevenLabs (ses ajanı). Gerisi Foundation/SwiftUI/CryptoKit/Security.
         OTHER_LDFLAGS: ""
 

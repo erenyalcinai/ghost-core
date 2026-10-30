@@ -135,6 +135,7 @@ struct AyarlarView: View {
                     bilgiSatiri("Sunucu", oturum.taban.host ?? oturum.taban.absoluteString)
                     bilgiSatiri("Cihaz", oturum.api.kimlik?.deviceID ?? "—")
                     bilgiSatiri("Sürüm", AyarlarView.surum)
+                    bilgiSatiri("API", "\(GhostAPI.apiSurum)" + (oturum.apiUyari == nil ? "" : " · uyumsuz"))
                     Button(role: .destructive) { sifirlaSor = true } label: {
                         Label("Eşlemeyi sıfırla", systemImage: "xmark.shield")
                     }

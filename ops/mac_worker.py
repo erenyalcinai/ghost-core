@@ -46,7 +46,11 @@ for _dosya in (".env", "secrets.env"):
 
 VPS = os.environ.get("GHOST_VPS") or "ghost@" + ENV.get("GHOST_VPS_IP", "203.0.113.10")
 SSH_KEY = os.path.join(HOME, ".ssh", "ghost_runtime")  # ghost-only anahtar
-RQUEUE = "/home/ghost/jarvis/ops/mac-queue"
+RQUEUE = "/home/ghost/jarvis/ops/mac-queue"           # ESKİ dosya kuyruğu — yalnız geriye dönük okunur (Faz 3.11)
+# Faz 3.11 (2026-10-30): birincil kuyruk VPS ghost.db olay veriyolu (type=job, hedef=mac). İşçi SSH ile
+# `python3 -m ghost.bus mac-claim` (atomik sahiplenme, JSON) → koşar → `mac-bitir <id> [done|failed]` (sonuç stdin).
+# VPS'te eski bus (CLI'siz) varsa çıktı boş döner → sessizce dosya kuyruğuna düşülür (strangler).
+BUS_CLI = "cd /home/ghost/jarvis && python3 -m ghost.bus"
 CLAUDE = ENV.get("CLAUDE_BIN", "/usr/local/bin/claude")
 
 
@@ -84,6 +88,95 @@ def ssh_write(remote, data, timeout=60):
         input=data, text=True, capture_output=True, timeout=timeout)
 
 
+def ssh_girdi(cmd, data, timeout=60):
+    """VPS'te komut koştur, data'yı stdin'den ver (bus mac-bitir)."""
+    return subprocess.run(SSH + [cmd], input=data, text=True, capture_output=True, timeout=timeout)
+
+
+# ---- veriyolu kuyruğu (Faz 3.11) ----
+def _bus_claim():
+    """Sıradaki Mac işini VPS veriyolundan atomik sahiplen → {"id","payload",...} ya da None.
+    VPS'e ulaşılamıyorsa istisna yukarı (çağıran turu bitirir); boş/eski bus → None."""
+    r = ssh(BUS_CLI + " mac-claim", timeout=30)
+    out = (r.stdout or "").strip()
+    if r.returncode != 0 or not out:
+        return None
+    try:
+        ev = json.loads(out.splitlines()[-1])
+    except ValueError:
+        log("bus mac-claim çıktısı okunamadı: %s" % out[:120])
+        return None
+    return ev if isinstance(ev, dict) and ev.get("id") else None
+
+
+def _bus_bitir(is_id, sonuc, durum="done"):
+    try:
+        r = ssh_girdi("%s mac-bitir %d %s" % (BUS_CLI, int(is_id), durum), sonuc or "", timeout=60)
+        if r.returncode != 0:
+            log("bus mac-bitir #%s rc=%d: %s" % (is_id, r.returncode, (r.stderr or "")[:160]))
+    except Exception as e:
+        log("bus mac-bitir #%s hata: %r" % (is_id, e))
+
+
+def _bus_geri(is_id):
+    try:
+        ssh("%s mac-geri %d" % (BUS_CLI, int(is_id)), timeout=30)
+    except Exception as e:
+        log("bus mac-geri #%s hata: %r" % (is_id, e))
+
+
+def _sonuc_govde(jid, prompt, result):
+    return ("# Mac işi #%s\n# %s\n\n## İstek\n%s\n\n## Sonuç\n%s\n"
+            % (jid, time.strftime("%F %T"), prompt[:2000], (result or "")[:200000]))
+
+
+class _BusIs:
+    """Veriyolundan alınan iş: sonuç `events.sonuc` sütununa, durum done|failed."""
+    kaynak = "bus"
+
+    def __init__(self, ev):
+        self.jid = ev["id"]
+        self.job = dict(ev.get("payload") or {})
+        self.job.setdefault("id", self.jid)
+        self.bitti = False
+
+    def sonuc_yaz(self, prompt, result):     # ÖNCE kayıt: Telegram düşse de sonuç VPS'te
+        _bus_bitir(self.jid, _sonuc_govde(self.jid, prompt, result), "done")
+        self.bitti = True
+
+    def bitir(self, durum="done"):
+        if not self.bitti:
+            _bus_bitir(self.jid, "", durum)
+            self.bitti = True
+
+    def sil(self):                          # geçersiz iş kaydı
+        _bus_bitir(self.jid, "(geçersiz iş yükü)", "failed")
+
+    def geri_birak(self):                   # henüz KOŞMADI → pending'e döner
+        _bus_geri(self.jid)
+
+
+class _DosyaIs:
+    """Eski ops/mac-queue/<id>.json işi (geriye dönük): claimed_ → done/ arşivi + .sonuc.md."""
+    kaynak = "dosya"
+
+    def __init__(self, job, path, claimed, name):
+        self.job, self.path, self.claimed, self.name = job, path, claimed, name
+        self.jid = job.get("id", "?")
+
+    def sonuc_yaz(self, prompt, result):
+        _sonuc_yaz(self.jid, self.name, prompt, result)
+
+    def bitir(self, durum="done"):
+        _finish(self.claimed, self.name)
+
+    def sil(self):
+        ssh("rm -f %s" % self.claimed)
+
+    def geri_birak(self):
+        ssh("mv %s %s 2>/dev/null" % (self.claimed, self.path))
+
+
 def _sonuc_yaz(jid, name, prompt, result):
     """İş sonucunu VPS'e geri yaz.
 
@@ -93,8 +186,7 @@ def _sonuc_yaz(jid, name, prompt, result):
     yapıştırmasını beklemek zorunda kalınca ortaya çıktı. Sonuç artık diskte:
     Ghost okuyabilir, geçmiş Telegram akışında kaybolmaz.
     """
-    govde = ("# Mac işi #%s\n# %s\n\n## İstek\n%s\n\n## Sonuç\n%s\n"
-             % (jid, time.strftime("%F %T"), prompt[:2000], (result or "")[:200000]))
+    govde = _sonuc_govde(jid, prompt, result)
     hedef = "%s/done/%s.sonuc.md" % (RQUEUE, name[:-5] if name.endswith(".json") else name)
     try:
         r = ssh_write(hedef, govde)
@@ -317,18 +409,35 @@ def poll_once(quiet=False):
         return False
     if _dondu():          # FREEZE: yeni iş ALINMAZ, kuyrukta bekler (/unfreeze ile akar)
         return False
+    did = False
+    # 1) Birincil: VPS olay veriyolu (Faz 3.11). Sahiplenme VPS'te atomik; tur başına tavan.
+    for _ in range(20):
+        try:
+            ev = _bus_claim()
+        except Exception:
+            return did  # VPS'e ulaşılamıyor (ağ yok) — sessiz geç
+        if not ev:
+            break
+        h = _BusIs(ev)
+        try:
+            did = _run_job(h.job, h, quiet) or did
+        except Exception as e:
+            # İş henüz koşmadıysa geri bırak (güvenli yeniden deneme); koşan işi _run_job kendi kapatır.
+            log("iş hatası (bus #%s): %r — kuyruğa geri bırakılıyor" % (h.jid, e))
+            h.geri_birak()
+            break
+    # 2) Geriye dönük: ops/mac-queue/<id>.json dosya kuyruğu (yeni yazan yok; boşalınca sökülür).
     try:
         # Yalnız sayı-adlı iş dosyaları: claimed_*.json bu desene UYMAZ —
         # yarıda kalan iş bir sonraki turda yeniden çalıştırılmaz (deploy
         # gibi yıkıcı işlerin çift koşması burada engelleniyor).
         r = ssh("ls %s/[0-9]*.json 2>/dev/null" % RQUEUE)
     except Exception:
-        return False  # VPS'e ulaşılamıyor (ağ yok) — sessiz geç
+        return did  # VPS'e ulaşılamıyor (ağ yok) — sessiz geç
     files = [l.strip() for l in r.stdout.splitlines() if l.strip().endswith(".json")]
     if not files:
-        return False
+        return did
     files.sort(key=jkey)
-    did = False
     for path in files:
         name = os.path.basename(path)
         claimed = "%s/claimed_%s" % (RQUEUE, name)
@@ -341,13 +450,19 @@ def poll_once(quiet=False):
         if mv.returncode != 0 or not mv.stdout.strip():
             continue
         try:
-            did = _run_job(mv.stdout, path, claimed, name, quiet) or did
+            job = json.loads(mv.stdout)
+        except Exception:
+            ssh("rm -f %s" % claimed)
+            continue
+        h = _DosyaIs(job, path, claimed, name)
+        try:
+            did = _run_job(job, h, quiet) or did
         except Exception as e:
             # İş henüz koşmadıysa geri bırak (güvenli yeniden deneme);
             # _run_job koşan işi kendi içinde arşivler, buraya düşmez.
             log("iş hatası (%s): %r — kuyruğa geri bırakılıyor" % (name, e))
             try:
-                ssh("mv %s %s 2>/dev/null" % (claimed, path))
+                h.geri_birak()
             except Exception:
                 pass
     return did
@@ -358,22 +473,21 @@ def _finish(claimed, name):
     ssh("mv %s %s/done/%s 2>/dev/null || rm -f %s" % (claimed, RQUEUE, name, claimed))
 
 
-def _run_job(raw, path, claimed, name, quiet):
-    """Tek işi çalıştır. İş fiilen koştuysa istisnayı YUTAR (çift koşma olmasın);
-    koşmadan hata olursa yukarı fırlatır (çağıran geri bırakır)."""
-    try:
-        job = json.loads(raw)
-    except Exception:
-        ssh("rm -f %s" % claimed)
+def _run_job(job, h, quiet):
+    """Tek işi çalıştır. `job` iş yükü (dict), `h` kaynak tutamacı (_BusIs | _DosyaIs: sonuc_yaz/bitir/sil/
+    geri_birak). İş fiilen koştuysa istisnayı YUTAR (çift koşma olmasın); koşmadan hata olursa yukarı
+    fırlatır (çağıran geri bırakır)."""
+    if not isinstance(job, dict):
+        h.sil()
         return False
-    jid, prompt = job.get("id", "?"), job.get("prompt", "")
+    jid, prompt = job.get("id", h.jid), job.get("prompt", "")
     if job.get("reset"):
         try:
             os.remove(SESSION_FILE)
         except OSError:
             pass
         send_telegram("🖥 Mac oturumu sıfırlandı (temiz bağlam).")
-        _finish(claimed, name)
+        h.bitir()
         log("Mac oturumu sıfırlandı")
         return True
     if job.get("kind") == "shell":
@@ -396,14 +510,14 @@ def _run_job(raw, path, claimed, name, quiet):
         sure = time.time() - t0
         # Diske TAM çıktı, Telegram'a kırpılmış: telefonda okunuyor.
         tam = "$ %s\n(rc=%d, %.1f sn)\n\n%s" % (cmd, rc, sure, cikti or "(boş)")
-        _sonuc_yaz(jid, name, cmd, tam[:20000])
+        h.sonuc_yaz(cmd, tam[:20000])
         kisa = cikti if len(cikti) <= 2500 else cikti[:2500] + "\n… (tamamı diskte)"
         # sessiz: rutin yoklamalar sahibin telefonunu titretmesin. İz kaybolmaz —
         # sonuç diske yazılır, VPS tarafında audit'e düşer.
         if not quiet and not job.get("sessiz"):
             send_telegram("🖥 Mac komutu (rc=%d, %.1f sn):\n$ %s\n\n%s"
                           % (rc, sure, cmd[:200], kisa or "(boş)"))
-        _finish(claimed, name)
+        h.bitir()
         log("shell #%s rc=%d (%.1fs): %s" % (jid, rc, sure, cmd[:80]))
         return True
     if job.get("rc"):
@@ -442,15 +556,15 @@ def _run_job(raw, path, claimed, name, quiet):
                           (sname, ("\n📱 " + url) if url else " — uygulamada görünecek"))
         except Exception as e:
             send_telegram("⚠️ Oturum başlatılamadı: %r" % e)
-        _finish(claimed, name)
+        h.bitir()
         log("rc oturum #%s" % jid)
         return True
     log("Mac işi #%s: %s" % (jid, prompt[:80]))
     if not quiet:
         send_telegram("🖥 Mac işi başladı...")
     result = run_local(prompt)
-    # Sonucu ÖNCE diske yaz: Telegram düşerse bile kayıt kalsın.
-    _sonuc_yaz(jid, name, prompt, result)
+    # Sonucu ÖNCE kaydet (veriyolu sütunu / diskteki .sonuc.md): Telegram düşerse bile kayıt kalsın.
+    h.sonuc_yaz(prompt, result)
     # İş KOŞTU — bundan sonra ne olursa olsun kuyruğa geri dönmemeli
     # (çift çalıştırma yasağı). Sonuç iletilemezse logla ve arşivle.
     try:
@@ -459,9 +573,9 @@ def _run_job(raw, path, claimed, name, quiet):
                 % (jid, result[:500]))
     finally:
         try:
-            _finish(claimed, name)
+            h.bitir()
         except Exception as e:
-            log("arşivleme hatası (%s): %r" % (name, e))
+            log("arşivleme hatası (#%s): %r" % (jid, e))
         log("Mac işi #%s tamam" % jid)
         # İş bitti → hafıza senkronunu tetikle (damgayı sil; ≤30sn'de senkron olur).
         # Olay-bazlı senkron: öğrenilen şey periyot beklemeden karşıya geçer.
@@ -670,6 +784,21 @@ def reclaim_stale():
     """Claim'lenip yarıda kalmış işleri arşivle + haber ver. Bilerek yeniden
     ÇALIŞTIRMIYORUZ: iş komutu yıkıcı olabilir (deploy) ve ne kadarının
     koştuğu bilinmez — karar sahibe bırakılır."""
+    try:  # veriyolu (Faz 3.11): 90 dk'dır claimed kalan Mac işleri VPS'te failed olur, burada haber verilir
+        r = ssh(BUS_CLI + " mac-bayat 90", timeout=30)
+        for satir in (r.stdout or "").splitlines():
+            satir = satir.strip()
+            if not satir.startswith("{"):
+                continue
+            try:
+                b = json.loads(satir)
+            except ValueError:
+                continue
+            log("yetim bus işi failed: #%s" % b.get("id"))
+            send_telegram("⚠️ Bir Mac işi yarıda kalmış (#%s: %s). Güvenlik için yeniden çalıştırmadım — "
+                          "gerekirse /mac ile tekrar ver." % (b.get("id"), str(b.get("prompt", ""))[:80]))
+    except Exception:
+        pass
     try:
         r = ssh("find %s -maxdepth 1 -name 'claimed_*.json' -mmin +90" % RQUEUE)
         for p in [l.strip() for l in r.stdout.splitlines() if l.strip()]:

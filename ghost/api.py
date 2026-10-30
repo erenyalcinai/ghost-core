@@ -27,6 +27,10 @@ BODY_MAX = 64 * 1024
 PAYLAS_MAX = 1800 * 1024   # /v1/paylas ham görsel (nginx client_max_body_size 2m)
 SSE_SURE = 75              # SSE bağlantı ömrü (nginx proxy_read_timeout 90 sn'nin altında)
 HIZ_DAKIKA = 240          # cihaz başına dakikada istek tavanı (uzun yoklama dahil)
+# Faz 3.12 (8c, 2026-10-30): API sözleşme sürümü. Her yanıtta `X-Ghost-API` başlığı + /v1/ping gövdesinde `api`.
+# Uygulama kendi bildiği sürümle karşılaştırır (GhostAPI.apiSurum); uyuşmazsa Nabız'da tek satır uyarı.
+# Sözleşme kıran değişiklikte (uç kalkar, anahtar anlam değiştirir) bu sayı artar; eklemeler artırmaz.
+API_SURUM = 1
 _hiz = {}
 _hiz_lock = threading.Lock()
 
@@ -146,6 +150,11 @@ def rotalar_markdown():
 
 class H(BaseHTTPRequestHandler):
     server_version = "ghost-api/1"
+
+    def end_headers(self):
+        """Tek kapı: JSON/ham/SSE/dosya — her yanıt sözleşme sürümünü taşır (8c)."""
+        self.send_header("X-Ghost-API", str(API_SURUM))
+        super().end_headers()
 
     def log_message(self, fmt, *a):  # journal'a kısa satır
         sys.stderr.write("%s %s\n" % (time.strftime("%F %T"), fmt % a))
@@ -313,7 +322,7 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             sb = {}
         return self._json(200, {"ok": True, "at": time.strftime("%F %T"), "surum": sb.get("surum", "?"),
-                                "build": sb.get("build", 0), "surum_zaman": sb.get("zaman", "")})
+                                "build": sb.get("build", 0), "surum_zaman": sb.get("zaman", ""), "api": API_SURUM})
 
     def _g_acik_nabiz(self, cihaz, u, q):
         return self._acik_nabiz()

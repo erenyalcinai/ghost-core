@@ -183,6 +183,13 @@ def cleanup():
                 removed += 1
         except OSError:
             pass
+    try:  # Faz 3.11 (2026-10-30): biten job/request olayları 30 gün sonra silinir (chat olaylarına dokunmaz)
+        from ghost import bus as _bus
+        n = _bus.gc()
+        if n:
+            log("temizlik: veriyolundan %d biten iş/istek olayı silindi" % n)
+    except Exception as e:
+        log("bus gc hata: %r" % e)
     if removed:
         log("temizlik: %d eski dosya silindi" % removed)
 

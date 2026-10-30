@@ -1258,10 +1258,21 @@ class Manager:
                                  args=(self.chat_id, res), daemon=True).start()
 
     # ---- iş havuzu (paralel, bağımsız) ----
-    def enqueue_job(self, text, kind="iş", model=None):
+    def enqueue_job(self, text, kind="iş", model=None, bus_id=None, ust_id=None):
+        """Faz 3.11 (2026-10-30): iş önce olay veriyoluna (type=job, hedef=vps) yazılır, bellek kuyruğu yalnız
+        sıralama. Restart'ta bus'ta pending kalan iş açılışta geri alınır (_bekleyen_isleri_yukle) — önceden
+        kuyruktaki iş 'kesildi' olup kayboluyordu. bus_id verilirse (açılış geri alımı) yeni kayıt açılmaz;
+        ust_id = türetildiği request olayı (iz)."""
         jid = self._new_id()
+        model = model or self.state.get("model", DEFAULT_MODEL)
+        if bus_id is None:
+            try:
+                bus_id = bus.is_ekle(text, kind=kind, hedef="vps", source="bridge", model=model, ust_id=ust_id)
+            except Exception as e:      # veriyolu yazılamazsa iş yine koşar (bellek kuyruğu), yalnız iz eksik
+                log("iş #%s bus kaydı yazılamadı: %r" % (jid, e))
+                bus_id = None
         self._set(jid, status="kuyrukta", kind=kind, prompt=text[:200],
-                  started=time.strftime("%F %T"))
+                  started=time.strftime("%F %T"), bus_id=bus_id)
         # Denetim etiketi işin KENDİSİNİ sınıflasın: başa eklenen ÖZERK MOD
         # kalkanı "silme, deploy, push" kelimeleriyle her özerk işi yanlışlıkla
         # "spend" etiketletiyordu (kapıyı etkilemez, günlüğü kirletiyordu).
@@ -1269,8 +1280,18 @@ class Manager:
                 if text.startswith(AUTONOMOUS_GUARD) else text)
         governance.audit("bridge", "job.enqueue", governance.classify(core),
                          "#%d %s: %s" % (jid, kind, core[:150]))
-        self.job_q.put((jid, text, model or self.state.get("model", DEFAULT_MODEL)))
+        self.job_q.put((jid, text, model))
         return jid
+
+    def _bus_isaret(self, jid, durum):
+        """İşin veriyolu kaydını claimed|done|failed yap (Faz 3.11). Kayıt yoksa sessiz."""
+        bid = self.jobs.get(jid, {}).get("bus_id")
+        if not bid:
+            return
+        try:
+            bus.mark(bid, durum)
+        except Exception as e:
+            log("iş #%s bus işareti (%s) yazılamadı: %r" % (jid, durum, e))
 
     def _job_worker(self):
         while True:
@@ -1289,8 +1310,10 @@ class Manager:
 
     def _job_one(self, jid, text, model):
             if self.jobs.get(jid, {}).get("status") == "iptal":
+                self._bus_isaret(jid, "failed")
                 return
             self._set(jid, status="çalışıyor")
+            self._bus_isaret(jid, "claimed")     # koşuyor: restart'ta yeniden ALINMAZ (yan etkili iş iki kez koşmaz)
             try:  # kilit ekranı / Dynamic Island'da iş kartı (Live Activity, push-to-start)
                 apns.etkinlik_baslat(jid, self.jobs[jid].get("department")
                                      or self.jobs[jid].get("kind", "iş"),
@@ -1330,6 +1353,7 @@ class Manager:
                 log("iş #%d FREEZE/iptal ile kesildi" % jid)
             dur = int(time.time() - t0)
             if self.jobs.get(jid, {}).get("status") == "iptal":
+                self._bus_isaret(jid, "failed")
                 send(self.chat_id, "🛑 İş iptal edildi (%s)."
                      % self.jobs[jid].get("kind", ""))
                 return
@@ -1366,6 +1390,7 @@ class Manager:
             self._set(jid, status=durum, ended=time.strftime("%F %T"),
                       **({"verify": karar} if karar else {}),
                       **({"hata": (res or "")[:500]} if err else {}))
+            self._bus_isaret(jid, "failed" if err else "done")
             governance.audit("bridge", "job.finish", governance.READ,
                              "#%d %s %s (%ds)" % (jid, kind,
                                                   "hata" if err else durum, dur))
@@ -1430,6 +1455,7 @@ class Manager:
         if not j or j.get("status") not in AKTIF_DURUMLAR:
             return "#%d zaten aktif değil." % jid
         self._set(jid, status="iptal")
+        self._bus_isaret(jid, "failed")      # kuyruktaysa restart'ta geri alınmasın
         p = self.procs.get(jid)
         if p:
             _kill(p)
@@ -1447,12 +1473,11 @@ class Manager:
 
     # ---- Mac-yerel iş kuyruğu (Mac işçisi çeker) ----
     def queue_mac(self, text, reset=False, rc=False):
-        jid = self._new_id()
-        job = {"id": jid, "prompt": text, "chat_id": self.chat_id,
-               "ts": time.strftime("%F %T"), "reset": reset, "rc": rc}
-        with open(os.path.join(MAC_QUEUE, "%d.json" % jid), "w", encoding="utf-8") as f:
-            json.dump(job, f)
-        return jid
+        """Faz 3.11 (2026-10-30): Mac işi de olay veriyolunda (type=job, hedef=mac); Mac işçisi SSH ile
+        `python3 -m ghost.bus mac-claim` der. ops/mac-queue/*.json dosyası artık YAZILMAZ (işçi eski dizini
+        bir süre daha okur — strangler). Kimlik events.id."""
+        return bus.is_ekle(text, kind="mac", hedef="mac", source="bridge",
+                           meta={"reset": reset, "rc": rc, "chat_id": self.chat_id})
 
     # ---- onay kapısı ----
     def _save_pending(self):
@@ -1908,13 +1933,45 @@ def _reconcile_jobs():
             try:
                 save_json(path, j)
                 orphaned.append((fn.replace(".json", ""),
-                                 j.get("department") or j.get("kind", "iş")))
+                                 j.get("department") or j.get("kind", "iş"), j.get("bus_id")))
             except Exception as _e:
                 _sessiz("_reconcile_jobs@2112", _e)
     if orphaned:
         log("restart uzlaşması: %d yetim iş kesildi (%s)"
             % (len(orphaned), ", ".join("#%s" % o[0] for o in orphaned)))
     return orphaned
+
+
+def _bekleyen_isleri_yukle(mgr):
+    """Faz 3.11 (2026-10-30): açılışta veriyolunda pending kalan vps işleri bellek kuyruğuna GERİ al
+    (önceden restart = kuyruktaki iş kaybı). Önceki süreç koşarken kesilenler (claimed) failed olur —
+    yan etkili iş iki kez koşmaz, sahibe 'kesildi' listesinde görünür. [(yeni_jid, bus_id)] döner."""
+    geri = []
+    if governance.is_frozen():      # dondurulmuşken kuyruğa alınmaz; FREEZE kalkınca freeze_uygula geri alır
+        try:
+            n = len(bus.bekleyen_isler("vps"))
+        except Exception:
+            n = 0
+        if n:
+            log("FREEZE: veriyolunda %d vps işi bekliyor (unfreeze'de alınır)" % n)
+        return geri
+    try:
+        for ev in bus.bayat_isler("vps", -5):
+            log("iş olayı #%s önceki köprüde koşarken kesildi → failed" % ev["id"])
+        for ev in bus.bekleyen_isler("vps"):
+            p = ev.get("payload") or {}
+            if not p.get("prompt"):
+                bus.mark(ev["id"], "failed")
+                continue
+            jid = mgr.enqueue_job(p["prompt"], kind=p.get("kind") or ev.get("kind") or "iş",
+                                  model=p.get("model"), bus_id=ev["id"])
+            geri.append((jid, ev["id"]))
+    except Exception as e:
+        log("bekleyen iş geri alma hata: %r" % e)
+    if geri:
+        log("restart: %d kuyruktaki iş veriyolundan geri alındı (%s)"
+            % (len(geri), ", ".join("#%s" % g[0] for g in geri)))
+    return geri
 
 
 def _karar_uygula(mgr, pid, ok, via="telegram"):
@@ -2016,8 +2073,9 @@ def check_kokpit(mgr):
             log("kokpit grup hatası: %r" % e)
 
 
-def _istek_isle(mgr, req):
-    """Bir otomatik isteği işe çevir (dosya ya da olay veriyolu — tek yol).
+def _istek_isle(mgr, req, ust_id=None):
+    """Bir otomatik isteği işe çevir (dosya ya da olay veriyolu — tek yol). ust_id = request olayının
+    kimliği → iş kaydına iz (Faz 3.11).
     Onay KAYNAKTAN BAĞIMSIZ: dış kaynaklı (gate) VEYA özerk fark etmez — prompt
     PERMANENT/SPEND sınıfına düşüyorsa onaya gider. "classify" alanı varsa
     sınıflandırma onun üstünde koşar: prompt'a gömülü GÜVENİLMEYEN dış içerik
@@ -2039,7 +2097,7 @@ def _istek_isle(mgr, req):
         # tam sandbox'a alınamıyor (Claude auth tam env'e muhtaç), o yüzden
         # davranışsal kısıt enjekte edilir — onay kapısının üstüne ek fren.
         guarded = AUTONOMOUS_GUARD + prompt
-        mgr.enqueue_job(guarded, kind=kind, model=req.get("model"))
+        mgr.enqueue_job(guarded, kind=kind, model=req.get("model"), **({"ust_id": ust_id} if ust_id else {}))
         ann = req.get("announce")
         if ann:
             send(mgr.chat_id, ann)
@@ -2056,6 +2114,12 @@ def freeze_uygula(mgr):
     Açılışta FREEZE zaten varsa da uygulanır (önceki süreçten kalan iş koşmasın)."""
     simdi = governance.is_frozen()
     once, _FREEZE_ONCEKI[0] = _FREEZE_ONCEKI[0], simdi
+    if once and not simdi:      # FREEZE kalktı (Faz 3.11): dondurulmuşken veriyolunda bekleyen vps işleri kuyruğa
+        try:
+            _bekleyen_isleri_yukle(mgr)
+        except Exception as e:
+            log("unfreeze: bekleyen iş geri alma hata: %r" % e)
+        return None
     if not simdi or once:
         return None
     n = 0
@@ -2110,7 +2174,7 @@ def check_requests(mgr):
         if not ev:
             break
         try:
-            _istek_isle(mgr, ev["payload"])
+            _istek_isle(mgr, ev["payload"], ust_id=ev["id"])
             bus.mark(ev["id"], "done")
         except Exception as e:
             log("istek #%s hata: %r" % (ev["id"], e))
@@ -2242,12 +2306,20 @@ def basla():
     # kuyrukta' kalan kayıtlar restart'ta yetim kaldı (deploy/çökme). Hayalet
     # 'takılı iş' alarmını önlemek için 'kesildi' işaretle ve sahibe haber ver.
     orphaned = _reconcile_jobs()
-    if orphaned and owner:
+    geri = _bekleyen_isleri_yukle(mgr) if mgr is not None else []     # Faz 3.11: kuyruktakiler geri
+    geri_bus = {b for _, b in geri}
+    orphaned = [o for o in orphaned if not (len(o) > 2 and o[2] in geri_bus)]   # geri alınan 'kesildi' sayılmaz
+    if (orphaned or geri) and owner:
         try:
-            api("sendMessage", chat_id=owner, text=(
-                "♻️ Yeniden başladım. Restart sırasında %d iş yarıda kaldı "
-                "(kesildi işaretlendi): %s\nGerekeni tekrar başlatabilirsin."
-                % (len(orphaned), ", ".join(o[1] for o in orphaned[:5]))))
+            parca = []
+            if orphaned:
+                parca.append("Restart sırasında %d iş yarıda kaldı (kesildi işaretlendi): %s\n"
+                             "Gerekeni tekrar başlatabilirsin."
+                             % (len(orphaned), ", ".join(o[1] for o in orphaned[:5])))
+            if geri:
+                parca.append("%d kuyruktaki iş yeniden kuyruğa alındı (%s)."
+                             % (len(geri), ", ".join("#%s" % g[0] for g in geri[:5])))
+            api("sendMessage", chat_id=owner, text="♻️ Yeniden başladım. " + " ".join(parca))
         except Exception as _e:
             _sessiz("basla.orphaned", _e)
     # Kesik sohbet mesajı: önceki köprü bir cevabın ortasında öldüyse (apt/needrestart

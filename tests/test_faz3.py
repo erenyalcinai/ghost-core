@@ -118,7 +118,7 @@ class KopruTuketici(unittest.TestCase):
     class Mgr:
         chat_id = 1
         def __init__(self): self.isler, self.bekleyen = [], []
-        def enqueue_job(self, text, kind="iş", model=None): self.isler.append((text, kind, model))
+        def enqueue_job(self, text, kind="iş", model=None, **kw): self.isler.append((text, kind, model))   # ust_id (Faz 3.11)
         def add_pending(self, text, kind, model=None, **kw): self.bekleyen.append((text, kind)); return "p1"
 
     def test_bus_istegi_ise_donusur(self):

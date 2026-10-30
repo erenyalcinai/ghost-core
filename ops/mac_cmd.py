@@ -15,9 +15,13 @@ Kullanım:
     python3 ops/mac_cmd.py --bekleme 300 --zaman 240 "uzun-komut"
 
 Varsayılan SESSİZ: sonuç bana döner, sahibin telefonu titremez. İz kaybolmaz —
-komut audit'e yazılır, tam çıktı ops/mac-queue/done/<id>.sonuc.md'de durur.
+komut audit'e yazılır, tam çıktı veriyolunda durur (`python3 -m ghost.bus oku <id>`).
 Mac kapalıysa iş kuyrukta bekler; --bekleme dolunca "kuyrukta" deyip çıkar
 (iş İPTAL OLMAZ, Mac uyanınca koşar).
+
+Faz 3.11 (2026-10-30): kuyruk artık ops/mac-queue/<id>.json dosyası DEĞİL, ghost.db olay veriyolu
+(ghost/bus.py type=job hedef=mac) — köprünün /mac işiyle aynı sıra; Mac işçisi `mac-claim` ile çeker,
+sonucu `mac-bitir` ile `events.sonuc` sütununa yazar. Kimlik events.id.
 """
 import json
 import os
@@ -26,8 +30,9 @@ import time
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPS = os.path.join(BASE, "ops")
-QUEUE = os.path.join(OPS, "mac-queue")
 AUDIT = os.path.join(OPS, "audit.jsonl")
+sys.path.insert(0, BASE)
+from ghost import bus  # noqa: E402
 
 
 def _audit(detay):
@@ -41,48 +46,29 @@ def _audit(detay):
 
 
 def calistir(cmd, bekleme=180, zaman=120, cwd=None, sessiz=True):
-    """Komutu kuyruğa koy, sonucu bekle. (metin, bitti_mi) döner."""
-    # 2026-10-28 (Codex bulgu 4): kimlik 100 ms'lik zamandan geliyordu, aynı dilimdeki iki çağrı aynı dosyayı
-    # 'w' ile açıp birbirini eziyordu (veri kaybı). Şimdi: ms çözünürlük, dosya önce geçici ada yazılır,
-    # hedefe `link` ile atomik ve TEK SAHİPLİ taşınır (hedef varsa kimlik bir artar). İşçi yalnız
-    # [0-9]*.json bekler, yarım yazılmış dosya hiç görmez.
-    os.makedirs(QUEUE, exist_ok=True)
-    jid = int(time.time() * 1000) % 2147483647
-    job = {"id": jid, "kind": "shell", "cmd": cmd, "timeout": zaman,
-           "sessiz": sessiz, "prompt": cmd, "chat_id": "",
-           "ts": time.strftime("%F %T"), "reset": False, "rc": False}
+    """Komutu veriyolu kuyruğuna koy (type=job hedef=mac kind=shell), sonucu bekle. (metin, bitti_mi) döner.
+    Kimlik SQLite autoincrement — 2026-10-28'deki (Codex bulgu 4) aynı-dilim çakışması yapısal olarak yok."""
+    meta = {"cmd": cmd, "timeout": zaman, "sessiz": sessiz, "chat_id": "", "reset": False, "rc": False}
     if cwd:
-        job["cwd"] = cwd
-    gecici = os.path.join(QUEUE, ".%d-%d.json.tmp" % (jid, os.getpid()))
-    while True:
-        job["id"] = jid
-        with open(gecici, "w", encoding="utf-8") as f:
-            json.dump(job, f, ensure_ascii=False)
-        try:
-            os.link(gecici, os.path.join(QUEUE, "%d.json" % jid))
-            break
-        except FileExistsError:
-            jid += 1
-        finally:
-            try:
-                os.unlink(gecici)
-            except OSError:
-                pass
+        meta["cwd"] = cwd
+    jid = bus.is_ekle(cmd, kind="shell", hedef="mac", source="mac_cmd", meta=meta)
     _audit("kuyrukta #%d: %s" % (jid, cmd))
 
-    sonuc = os.path.join(QUEUE, "done", "%d.sonuc.md" % jid)
     son = time.time() + bekleme
     while time.time() < son:
-        if os.path.exists(sonuc):
-            metin = open(sonuc, encoding="utf-8", errors="replace").read()
+        d = bus.is_oku(jid)
+        if d and d.get("status") in ("done", "failed"):
+            metin = d.get("sonuc") or ""
             # Rapor başlığını at, gövdeyi ver
             if "## Sonuç" in metin:
                 metin = metin.split("## Sonuç", 1)[1].strip()
+            if d.get("status") == "failed" and not metin:
+                metin = "(iş failed — Mac işçisi yarıda bıraktı ya da iş geçersizdi)"
             _audit("bitti #%d" % jid)
             return metin, True
         time.sleep(2)
     return ("(Mac cevap vermedi — iş #%d kuyrukta bekliyor, Mac uyanınca "
-            "koşacak. Sonuç: ops/mac-queue/done/%d.sonuc.md)" % (jid, jid)), False
+            "koşacak. Sonuç: python3 -m ghost.bus oku %d)" % (jid, jid)), False
 
 
 def main(argv):

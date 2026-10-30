@@ -37,6 +37,11 @@ final class GhostAPI {
     var yetkisizOldu: (() -> Void)?
 
     static let kullaniciAjani = "GhostKokpit/1 (iOS)"
+    /// 8c (Faz 3.12, 2026-10-30): uygulamanın bildiği API sözleşme sürümü; sunucu her yanıtta `X-Ghost-API` gönderir.
+    static let apiSurum = 1
+    /// Sunucunun söylediği sürüm bizimkinden farklıysa (değiştiğinde bir kez) çağrılır — Oturum uyarıya çevirir.
+    var apiUyumsuz: ((Int) -> Void)?
+    private var sonSunucuApi: Int?
 
     private let oturum: URLSession
     private let uzunOturum: URLSession   // outbox uzun yoklaması (25 sn bekler)
@@ -386,6 +391,11 @@ final class GhostAPI {
                           icerikTuru: icerikTuru, imzali: imzali)
         let (veri, yanit) = try await (uzun ? uzunOturum : oturum).data(for: req)
         let kod = (yanit as? HTTPURLResponse)?.statusCode ?? 0
+        if let h = (yanit as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Ghost-API"),
+           let sunucu = Int(h), sunucu != sonSunucuApi {
+            sonSunucuApi = sunucu
+            if sunucu != GhostAPI.apiSurum { apiUyumsuz?(sunucu) }
+        }
         if kod == 401 {
             yetkisizOldu?()
             throw APIHata.yetkisiz

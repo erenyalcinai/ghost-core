@@ -17,6 +17,8 @@ final class Oturum: ObservableObject {
     @Published var sayfa: Sayfa?
     /// Nabız'ın son anlık görüntüsü — Ayarlar sayfası sekmeden bağımsız açıldığı için burada.
     @Published var nabiz: Nabiz?
+    /// 8c: sunucu API sözleşme sürümü uygulamanınkinden farklıysa tek satır (Nabız üstü + Ayarlar).
+    @Published var apiUyari: String?
     let api: GhostAPI
     let taban: URL
 
@@ -43,6 +45,13 @@ final class Oturum: ObservableObject {
         esli = gecerli
         api.yetkisizOldu = { [weak self] in
             Task { @MainActor in self?.esli = false }
+        }
+        api.apiUyumsuz = { [weak self] sunucu in
+            Task { @MainActor in
+                self?.apiUyari = sunucu > GhostAPI.apiSurum
+                    ? "Sunucu API sürümü \(sunucu), uygulama \(GhostAPI.apiSurum) — Kokpit'i güncelle."
+                    : "Sunucu API sürümü \(sunucu), uygulama \(GhostAPI.apiSurum) — sunucu geride."
+            }
         }
     }
 

@@ -17,7 +17,7 @@ from ghost import api, kokpit, masa
 # (yöntem, ROTALAR yolu) → sözleşme: ornek yol, gövde, kabul edilen durumlar, beklenen anahtarlar (durum→anahtar kümesi)
 # "ham": JSON değil — yalnız durum + Content-Type öneki denetlenir.
 SOZLESME = {
-    ("GET", "/v1/ping"): dict(yol="/v1/ping", kimliksiz=True, durum={200}, anahtar={"ok", "at", "surum", "build", "surum_zaman"}),
+    ("GET", "/v1/ping"): dict(yol="/v1/ping", kimliksiz=True, durum={200}, anahtar={"ok", "api", "at", "surum", "build", "surum_zaman"}),
     ("GET", "/v1/acik/nabiz"): dict(yol="/v1/acik/nabiz", kimliksiz=True, durum={200}, anahtar={"gun", "siteler_ok", "siteler_n", "durum"}),
     ("GET", "/v1/nabiz"): dict(yol="/v1/nabiz", durum={200},
                                anahtar={"at", "ozet", "freeze", "guard", "makineler", "siteler", "nobetciler", "isler", "baglam"}),
@@ -120,6 +120,30 @@ class ApiSozlesme(unittest.TestCase):
             if eksik:
                 hatalar.append("%s %s: eksik anahtar %s (gelen %s)" % (yontem, rota, sorted(eksik), sorted(govde)[:12]))
         self.assertEqual(hatalar, [], "\n" + "\n".join(hatalar))
+
+    def test_api_surum_basligi_her_yanitta(self):
+        """8c (Faz 3.12): X-Ghost-API her yanıtta — 200, 401, 404 dahil; /v1/ping gövdesi `api` taşır."""
+        beklenen = str(api.API_SURUM)
+
+        def baslik(yol, imzali):
+            h = {}
+            if imzali:
+                ts = str(int(__import__("time").time()))
+                nonce = os.urandom(8).hex()
+                h = {"X-Ghost-Device": self.did, "X-Ghost-Ts": ts, "X-Ghost-Nonce": nonce,
+                     "X-Ghost-Sig": kokpit.imza(self.key, ts, nonce, "GET", yol, b"")}
+            req = urllib.request.Request(self.base + yol, headers=h)
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, r.headers.get("X-Ghost-API"), r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.headers.get("X-Ghost-API"), b""
+        st, b, govde = baslik("/v1/ping", False)
+        self.assertEqual((st, b), (200, beklenen))
+        self.assertEqual(json.loads(govde.decode()).get("api"), api.API_SURUM)
+        self.assertEqual(baslik("/v1/nabiz", False)[:2], (401, beklenen))
+        self.assertEqual(baslik("/v1/olmayan-uc", True)[:2], (404, beklenen))
+        self.assertEqual(baslik("/v1/nabiz", True)[:2], (200, beklenen))
 
     def test_kimliksiz_korumali_uc_401_bilinmeyen_yol_404(self):
         st, j = _istek(self.base, "GET", "/v1/nabiz")
