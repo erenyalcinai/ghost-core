@@ -12,8 +12,8 @@ agent knows before it reads anything else. Keep it true; a stale line misleads e
 - **The iPhone is a limb**: on the same Wi-Fi as the Mac; you can see its screen and tap.
 
 ## Owner
-- Name, what they do, what they can and cannot judge (e.g. "does not review code; their gate is
-  the business decision, quality must come from tests and review").
+- Name, what they do, and which decisions are theirs (e.g. "product and business calls are the
+  owner's; quality must come from tests and review gates, not from reading output").
 - Products and where their repositories live. Keep the canonical details in a dossier file,
   not here.
 
