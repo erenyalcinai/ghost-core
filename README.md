@@ -10,8 +10,8 @@ For its owner it is the thing that reads the mail, searches the last ten years o
 notes, photos and calls when asked, writes reminders into the phone, drives the Mac, ships
 the apps, and reports every morning. For a studio it is the invisible half of the team.
 
-This repository is the **open core** of that system. It was built by one engineer and
-the agent itself, in production since 11 August 2026, with real failures. The lessons those
+This repository is the **open core** of that system. It was built by one engineer, in
+production since 11 August 2026, with real failures. The lessons those
 failures produced are in [LESSONS.md](LESSONS.md); that file is the most honest thing
 here and probably the most useful.
 
@@ -30,7 +30,7 @@ here and probably the most useful.
 | Tests | ~1017, run with `python -m unittest` in well under a minute, no network, CI on every push |
 | Scheduling units | 8 launchd agents (Mac) + 3 systemd units (VPS) in this tree; the bridge and self-check units themselves live in the private deploy |
 | Lessons | 170 operational lessons, auto-extracted from commit messages, curated in [LESSONS.md](LESSONS.md) |
-| History | Started 11 August 2026; this open-core snapshot is from day 78 (880+ commits in the private tree, most authored by the agent under the owner's direction) |
+| History | Started 11 August 2026; this open-core snapshot is from day 78 (880+ commits in the private tree) |
 
 ## What it does, day to day
 
@@ -133,7 +133,7 @@ shared Desk with the table instead of pasting it into chat.
 patches the Swift view, builds and installs on the phone through the Mac, commits with a `Ders:`
 block explaining the root cause, and the lesson lands in `LESSONS.md` by itself. Pushes pass a
 test gate; the bridge reloads its own new code only when idle, so the reply that triggered the
-change is not lost. About 83% of the private tree's commits were made this way. A `FREEZE` file
+change is not lost. A `FREEZE` file
 or the pulled YubiKey stops all of it.
 
 **Fan out when one head is not enough.** `/fleet audit the backend for security` splits the job,
@@ -173,9 +173,7 @@ root cause is written as a `Ders:` block in the commit, extracted into the lesso
 automatically, and the rules that must change behaviour go into the agent's own operating
 context (`CLAUDE.md`), which it is instructed to keep correct: a stale line there misleads
 every future session, so it fixes the line when it sees it. Its memory directory is written
-the same way. The publishing script that produced this repository, the scrubber, the CI
-workflow and this README were written by the agent. About 83% of the private tree's commits
-are its own. What it may not do on its own: anything classed permanent or spend, anything
+the same way. What it may not do on its own: anything classed permanent or spend, anything
 while `FREEZE` exists, and anything on the Mac while the key is out.
 
 **Your data, and who may read it.** The owner's private data (Notes, Photos, iCloud files,
@@ -368,3 +366,4 @@ The project's own public domain (`ghostinprod.com`) is Ghost's brand and stays.
 
 Built and operated by [Eren Yalçın](https://github.com/erenyalcinai) with Ghost itself. Questions about the code:
 **eren@yalcin.ai**. MIT, see [LICENSE](LICENSE).
+
