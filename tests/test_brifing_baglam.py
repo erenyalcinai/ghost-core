@@ -56,20 +56,31 @@ class TestBrifingBaglam(unittest.TestCase):
         self.assertEqual(satirlar, ["Bugün kayda değer bir şey yok. Uzun açıklama.", "fırsat: TÜBİTAK BiGG Dünya 8 Kasım."])
 
     def test_yasak_konular_bloga_girer(self):
+        import sys
+        import types
         from unittest import mock
-        from ghost import gundem
+        import ghost
+        # ghost/gundem açık çekirdeğe GİRMEZ (kişisel hafıza + kararlar defteri okur); test gerçek modüle değil,
+        # brifing_baglam'ın çağırdığı `gundem.yasaklar` adına bağlı → sahte modül (2026-11-09: ghost-core CI ImportError).
         sahte = [("karar#9", "AppA BiGG başvurusu: Aşama 1'de red, RAFTA; tekrar önerme"),
                  ("karar#10", "AppA BiGG başvurusu: aynı konu ikinci kayıt"),
                  ("hafıza:hazir-site", "2026-10-20 Van demosu yapıldı, rafa kaldırıldı; GÜNDEME GETİRME")]
-        with mock.patch.object(gundem, "yasaklar", return_value=sahte):
+
+        def _sahte_gundem(**kw):
+            m = types.ModuleType("ghost.gundem")
+            m.yasaklar = mock.Mock(**kw)
+            return m
+
+        m = _sahte_gundem(return_value=sahte)
+        with mock.patch.dict(sys.modules, {"ghost.gundem": m}), mock.patch.object(ghost, "gundem", m, create=True):
             yk = bb.yasak_konular()
             blok = bb.blok(7)
         self.assertEqual(yk, ["AppA BiGG başvurusu", "hazir site — 2026-10-20 Van demosu yapıldı, rafa kaldırıldı; GÜNDEME GETİRME"])
         self.assertIn("RAF/İPTAL KARARLARI", blok)
         self.assertIn("- AppA BiGG başvurusu", blok)
-        with mock.patch.object(gundem, "yasaklar", side_effect=RuntimeError("db yok")):
+        m2 = _sahte_gundem(side_effect=RuntimeError("db yok"))
+        with mock.patch.dict(sys.modules, {"ghost.gundem": m2}), mock.patch.object(ghost, "gundem", m2, create=True):
             self.assertEqual(bb.yasak_konular(), [])
-
 
 if __name__ == "__main__":
     unittest.main()
