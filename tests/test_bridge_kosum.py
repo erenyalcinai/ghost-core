@@ -201,7 +201,7 @@ class IsYoluDepartmanMotordaTest(unittest.TestCase):
         import inspect
         self.assertIn("dep", inspect.signature(tb.run_claude).parameters)
 
-class IsBitisMesajiErenOzetTest(unittest.TestCase):
+class IsBitisMesajiSahipOzetTest(unittest.TestCase):
     """2026-11-09 (Sahip 'özerk işlerin yapısı anlaşılır değil', onay-3b9aff6344e2e808): iş bitiş mesajı ghost/eren_ozet
     özetidir, ham rapor sohbete ve kilit ekranına gitmez; özet üretilemezse eski tam mesaj (bilgi kaybı yok)."""
 

@@ -175,7 +175,7 @@ Güncelleme: 2026-11-04 (ilk sürüm 2026-08-20; 10-28 sır vekili, 10-30
 - Sır değeri ekrana/sohbete basılmaz; dosyadan dosyaya akar.
 
 ## Sıra (Yol B, Mac var: ≈3-3,5 sa; Mac root yedeği yoksa ≈4-5 sa)
-1. Sunucu (Sahip·panel): fsn1, Ubuntu, ≥4 GB, Backups AÇIK; root anahtarı
+1. Sunucu (Sahip·panel): dc1, Ubuntu, ≥4 GB, Backups AÇIK; root anahtarı
    ghost_root_sk (YubiKey). Eski IP korunabiliyorsa onu ata.
 2. Temel sistem (root): `paketler/apt-manual.txt` → `apt install`; Node 22;
    kullanıcı `ghost` uid 1000 + linger (`loginctl enable-linger ghost`);

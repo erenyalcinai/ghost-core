@@ -54,7 +54,7 @@ class TestVadeler(unittest.TestCase):
         self.assertEqual(vadeler.metin(14), "")
 
     def test_cli(self):
-        self.assertEqual(vadeler._main(["ekle", "Instagram geri alma", "2026-11-02", "erenyal", "--kaynak", "hafıza"]), 0)
+        self.assertEqual(vadeler._main(["ekle", "Instagram geri alma", "2026-11-02", "sahiphesap", "--kaynak", "hafıza"]), 0)
         self.assertEqual(vadeler._main(["liste"]), 0)
         self.assertEqual(vadeler._main(["yaklasan", "3650"]), 0)
         self.assertEqual(vadeler._main(["ekle", "eksik"]), 2)
