@@ -23,7 +23,7 @@ import urllib.parse
 
 import re
 
-from ghost import chat_policy, config, modeller
+from ghost import agents, chat_policy, config, efor as _efor, metrik, modeller
 
 BASE = config.BASE
 AYAR = config._parse_env_file(os.path.join(BASE, ".env"))   # .env yoksa (CI) boş: varsayılanlar
@@ -193,6 +193,28 @@ def _akit(proc, limit, on_event):
     return sonuc[0], "\n".join(kuyruk), err[0], zaman_asimi
 
 
+def _arac_sayisi(out):
+    """CLI sonucundaki num_turns → araç çağrısı sayısı yaklaşığı (ilk tur istem, gerisi araç)."""
+    try:
+        n = int(json.loads((out or "").strip()).get("num_turns") or 0)
+        return max(n - 1, 0)
+    except Exception:
+        return 0
+
+
+def _is_kaydi(sonuc, t0, dep_key, model, ozerk, out=None, zaman_asimi=False, rol=None):
+    """Faz 4.1.0 (2026-11-08): iş turu ölçüsü — sohbet turları köprüde ölçülür, işler burada
+    (`metrik.jsonl` tur=is: departman, model, kip, ozerk, hata). Ölçüm asla sonucu düşürmez."""
+    try:
+        metrik.tur_kaydet("is", t0, None, time.time(), zaman_asimi=zaman_asimi, arac=_arac_sayisi(out),
+                          uzunluk=len(sonuc[0] or ""), tur="is",
+                          ek={"departman": dep_key or "", "model": model, "kip": agents.mod_oku(),
+                              "ozerk": bool(ozerk), "hata": bool(sonuc[2]), "rol": rol or "is"})
+    except Exception:
+        pass
+    return sonuc
+
+
 def _sonuc_coz(out, err, returncode, session_id, model, on_usage):
     """CLI'nin nihai JSON'unu (json kipi ya da stream-json `result` satırı)
     (sonuç_metni, session_id, hata_mı) üçlüsüne çevirir; usage geri-çağrısını besler."""
@@ -240,13 +262,23 @@ def _sentetik_sonuc(on_event, zaman_asimi, nerede):
         _sessiz(nerede, _e)
 
 
-def _run_kalici(kalici, prompt, model, session_id, resume, limit, on_usage, on_event):
+def _kalici_uygun(kalici, model, sid, seviye):
+    try:
+        return kalici.uygun(model, sid, seviye)
+    except TypeError:                 # efor bilmeyen eski arayüz (test sahtesi)
+        return kalici.uygun(model, sid)
+
+
+def _run_kalici(kalici, prompt, model, session_id, resume, limit, on_usage, on_event, seviye=None):
     """run_claude'un kalıcı süreç yolu: model/oturum uyuyorsa açık süreci kullan,
     uymuyorsa (yeni oturum, /model) kapatıp yeniden aç. MCP'nin tamamı yüklenir
     (terminal gibi) — süreç ömrü boyunca araç listesi sabit kalsın, cache bozulmasın."""
-    if not kalici.uygun(model, session_id):
+    if not _kalici_uygun(kalici, model, session_id, seviye):
         try:
-            kalici.baslat(model, session_id, resume, mcp_yollari(True))
+            if seviye:
+                kalici.baslat(model, session_id, resume, mcp_yollari(True), efor=seviye)
+            else:
+                kalici.baslat(model, session_id, resume, mcp_yollari(True))
         except Exception as e:
             return ("⚠️ Çalıştırma hatası: %r" % e, session_id, True)
     sonuc, kuyruk, err, zaman_asimi, oldu = kalici.tur(prompt, limit, on_event)
@@ -260,7 +292,8 @@ def _run_kalici(kalici, prompt, model, session_id, resume, limit, on_usage, on_e
 
 
 def run_claude(prompt, model, session_id=None, resume=False, on_proc=None,
-               use_mcp=True, timeout=None, on_usage=None, on_event=None, kalici=None, ozerk=False):
+               use_mcp=True, timeout=None, on_usage=None, on_event=None, kalici=None, ozerk=False,
+               efor=None, rol=None, dep=None):
     """(sonuç_metni, session_id, hata_mı) döndürür. on_proc: Popen'ı kaydeder.
 
     kalici: ghost.kalici_oturum.KaliciOturum verilirse tur o süreçte koşar
@@ -280,16 +313,52 @@ def run_claude(prompt, model, session_id=None, resume=False, on_proc=None,
 
     ozerk: GHOST_OZERK=1 Claude SÜRECİNİN ortamına girer; güvenlik kapısı bu işaretle
     geri alınmaz eylemleri araç seviyesinde reddeder. Oturumun Bash'i bu ortamı
-    değiştiremez — kanca claude sürecinin çocuğudur (2026-10-28)."""
+    değiştiremez — kanca claude sürecinin çocuğudur (2026-10-28).
+
+    efor: low…max; verilmezse sahibin `/efor` ayarı (ghost/efor.py) — özerk işte ayar UYGULANMAZ
+    (CLI varsayılanı), gece hedefleri kota yakmasın. Ayar yoksa bayrak gitmez.
+
+    rol: ölçü etiketi (metrik tur=is `rol`): None/"is" = iş, "denetim" = ikinci göz (verify.review) — denetçi
+    koşuları iş sayılarına karışmasın (Faz 4.1.0).
+
+    dep: köprünün `agents.route(text)` ile bulduğu departman anahtarı (Faz 4.1.6, 2026-11-09) — persona/ajan kararı
+    BURADA: departman kipi + ajan → `--agents/--agent`; tek kip ya da ajan olmayan departman (Finans) → persona
+    SİSTEM istemine (`--append-system-prompt`). İstemdeki açık işaret ([DEPARTMAN:x@model], `departman ver`)
+    köprü yönlendirmesinden üstün. Köprü iş yolunda artık system_prefix yazmaz; verilmezse (eski çağıran) yalnız işaret."""
     limit = timeout or CLAUDE_TIMEOUT
+    seviye = efor if efor in _efor.SEVIYELER else (None if ozerk else _efor.oku())
     # Takma ad (opus/sonnet/…) → API+CLI'nin ortak EN GÜNCEL kimliği (Sahip 2026-10-01).
     # CLI'nin kendi eşlemesi derlendiği güne aittir; bkz. ghost/modeller.py.
     model = modeller.tam_model(model)
+    # Faz 4 departman kipi (2026-11-08): istemdeki [DEPARTMAN:x] işareti BURADA çözülür (sohbet yolunda köprü ekler,
+    # iş yolunda `departman ver` metnin içine yazar). Kalıcı sohbette koordinatör notu (kısa iş sende, derin iş
+    # `ghost.departman ver`). Tek kipte işaret anahtar vermez (isaret_coz_tam).
+    isaret_key, prompt, dep_model = agents.isaret_coz_tam(prompt)
     if kalici is not None:
+        if isaret_key:
+            prompt = agents.koordinator_notu(isaret_key) + prompt
         return _run_kalici(kalici, prompt, model, session_id, resume, limit,
-                           on_usage, on_event)
+                           on_usage, on_event, seviye)
+    # 4.1.6 (2026-11-09): köprü iş yolunda system_prefix YAZMAZ, route() anahtarını `dep` ile geçirir — karar burada.
+    # ajan_key: gerçek ajan koşar (açık işaret > köprü yönlendirmesi; ikisi de departman kipi + ajan şartına bağlı).
+    # persona: ajan koşmayan işte departman personası sistem istemine. dep_key: ölçü (hangi departman, iki yolda da).
+    ajan_key = isaret_key or agents.ajan_anahtar(dep)
+    persona = None if ajan_key else agents.persona_sistem(dep)
+    dep_key = ajan_key or (dep if persona else None)
+    # Model önceliği (Sahip 2026-11-08 "opus iyi; ama işin önem ve zorluğuna göre karar verebilmelisin"):
+    # işin AÇIK seçimi ([DEPARTMAN:x@model] — `departman ver --model` ya da önem yükseltmesi) > yaml varsayılanı
+    # (departments.yaml `model`, bugün opus) > miras (köprünün verdiği model). Ajan tanımına da aynı model yazılır,
+    # çünkü --agents JSON'undaki model CLI --model'den üstündür. Persona yolunda model miras kalır (tek kip bugünkü gibi).
+    dep_secim = (dep_model or agents.ajan_model(ajan_key)) if ajan_key else None
+    if dep_secim:
+        model = modeller.tam_model(dep_secim)
+    t0 = time.time()
     cmd = [CLAUDE, "-p", prompt, "--output-format",
-           "stream-json" if on_event else "json", "--model", model] + CLAUDE_ARGS
+           "stream-json" if on_event else "json", "--model", model] + CLAUDE_ARGS + _efor.arg(seviye)
+    if ajan_key:
+        cmd += agents.ajan_args(ajan_key, model=dep_secim)
+    elif persona:
+        cmd += ["--append-system-prompt", persona]
     if on_event:
         cmd.append("--verbose")               # stream-json --print bunu şart koşar
     paths = mcp_yollari(use_mcp)
@@ -311,20 +380,20 @@ def run_claude(prompt, model, session_id=None, resume=False, on_proc=None,
             if sonuc is None:
                 _sentetik_sonuc(on_event, zaman_asimi, "run_claude")
             if zaman_asimi:
-                return (_zaman_asimi_metni(limit), session_id, True)
+                return _is_kaydi((_zaman_asimi_metni(limit), session_id, True), t0, dep_key, model, ozerk, zaman_asimi=True, rol=rol)
             # result satırı yoksa CLI erken öldü: dönüş kodu sıfır değilse hata,
             # sıfırsa kuyruk metni ham çıktı gibi işlenir
             if sonuc is None and proc.returncode != 0:
-                return ("⚠️ Hata:\n" + (err or kuyruk or "bilinmeyen")[-1500:],
-                        session_id, True)
+                return _is_kaydi(("⚠️ Hata:\n" + (err or kuyruk or "bilinmeyen")[-1500:],
+                                  session_id, True), t0, dep_key, model, ozerk, rol=rol)
             out = sonuc if sonuc is not None else kuyruk
         else:
             try:
                 out, err = proc.communicate(timeout=limit)
             except subprocess.TimeoutExpired:
                 kill(proc)
-                return (_zaman_asimi_metni(limit), session_id, True)
+                return _is_kaydi((_zaman_asimi_metni(limit), session_id, True), t0, dep_key, model, ozerk, zaman_asimi=True, rol=rol)
     except Exception as e:
-        return ("⚠️ Çalıştırma hatası: %r" % e, session_id, True)
+        return _is_kaydi(("⚠️ Çalıştırma hatası: %r" % e, session_id, True), t0, dep_key, model, ozerk, rol=rol)
 
-    return _sonuc_coz(out, err, proc.returncode, session_id, model, on_usage)
+    return _is_kaydi(_sonuc_coz(out, err, proc.returncode, session_id, model, on_usage), t0, dep_key, model, ozerk, out=out, rol=rol)

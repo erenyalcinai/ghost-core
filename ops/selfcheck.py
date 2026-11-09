@@ -448,6 +448,62 @@ def _user_env():
     return e
 
 
+import ast
+
+
+def _ust_duzey(agac):
+    """Modül açılışında koşan import düğümleri (fonksiyon/sınıf gövdesine girmez; try/if içine girer).
+    Fonksiyon içi tembel import'lar sayılsaydı webhook → notify → kokpit → sahne → health ile neredeyse tüm
+    paket kapanışa giriyordu ve yanlış alarm aynen sürüyordu."""
+    yigin = list(agac.body)
+    while yigin:
+        d = yigin.pop()
+        if isinstance(d, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(d, (ast.Import, ast.ImportFrom)):
+            yield d
+        yigin.extend(ast.iter_child_nodes(d))
+
+
+def _modul_kod_ts(modul):
+    """Bir ghost modülünün ve onun (geçişli) yüklediği ghost/* dosyalarının EN YENİ zamanı.
+
+    NEDEN (2026-11-03, Sahip "bu yubikey bildirimi neden her gece geliyor"): ghost-hook denetimi
+    tüm ghost/ paketine + dpkg'ye bakıyordu; webhook'un hiç yüklemediği bir dosyaya commit girince de
+    "bayat" deyip her gece YubiKey'li Root kartı açıyordu (6 gecede 6 yanlış alarm)."""
+    kok = os.path.join(BASE, "ghost")
+    gorulen, sira, zamanlar = set(), [modul], []
+    while sira:
+        ad = sira.pop()
+        if ad in gorulen:
+            continue
+        gorulen.add(ad)
+        yol = os.path.join(kok, *ad.split(".")) + ".py"
+        if not os.path.exists(yol):
+            yol = os.path.join(kok, *ad.split("."), "__init__.py")
+        try:
+            zamanlar.append(os.path.getmtime(yol))
+            agac = ast.parse(open(yol, encoding="utf-8").read())
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for d in _ust_duzey(agac):
+            if isinstance(d, ast.ImportFrom) and d.module and (d.module == "ghost" or d.module.startswith("ghost.")):
+                alt = d.module[6:]
+                if alt:
+                    sira.append(alt)
+                else:
+                    sira += [a.name for a in d.names]
+            elif isinstance(d, ast.ImportFrom) and d.level == 1:
+                sira += [d.module] if d.module else [a.name for a in d.names]
+            elif isinstance(d, ast.Import):
+                sira += [a.name[6:] for a in d.names if a.name.startswith("ghost.")]
+    try:
+        zamanlar.append(os.path.getmtime(os.path.join(kok, "__init__.py")))
+    except OSError:
+        pass
+    return max(zamanlar) if zamanlar else 0
+
+
 def hook_bayat_uyar(kod_ts):
     """Webhook sunucusu (ghost-hook, SİSTEM birimi) bayat kodla koşuyorsa uyar — yenileyemeyiz
     (VPS'te sudo yok). NEDEN (2026-10-27): webhook 'her_zaman_onay' düzeltmesi commit'lendi ama
@@ -458,7 +514,7 @@ def hook_bayat_uyar(kod_ts):
         r = subprocess.run(["systemctl", "show", "ghost-hook", "-p", "MainPID", "--value"],
                            capture_output=True, text=True, timeout=10)
         pid = int(r.stdout.strip() or 0)
-        if not pid or not bayat_kod(kod_ts, _surec_ts(pid)):
+        if not pid or not bayat_kod(_modul_kod_ts("webhook"), _surec_ts(pid)):   # kod_ts (tüm paket) değil
             return None
         isaret = os.path.join(BASE, "ops", ".hook_bayat_uyari")
         if os.path.exists(isaret) and time.time() - os.path.getmtime(isaret) < 86400:

@@ -18,7 +18,7 @@ REFLEKS (Ö11): Sahip sohbette "şunu halledelim / takip et / hedefimiz…" deyi
 kaydeder ve ilk planı aynı turda gösterir — sahibin /hedef yazması gerekmez. "İkinci plan(da)" deyince
 `ikinci_plan`. CLI: python3 -m ghost.goals liste|goster <id>|ekle "<başlık>" ["detay"] [--kill …] [--oncelik N]
 [--butce N]|plan <id> "a|b|c"|adim <id> <n> tamam|acik|rapor <id> @dosya|puan <id> +|-|ikinci-plan <id>|
-durdur|devam|tamam <id>
+durdur|devam|tamam <id>|engel <id> "ne bekleniyor"|model [opus|fable|sonnet|kapat] [--bitis 2026-11-04T08:00]  (hedef turlarının motoru; durum `hedef_model`)
 """
 import datetime
 import json
@@ -43,19 +43,25 @@ CREATE TABLE IF NOT EXISTS goals(
 """
 _V2_SUTUNLAR = (("plan", "TEXT NOT NULL DEFAULT '[]'"), ("son_rapor", "TEXT NOT NULL DEFAULT ''"),
                 ("kill", "TEXT NOT NULL DEFAULT ''"), ("puan", "INTEGER NOT NULL DEFAULT 0"),
-                ("oncelik", "INTEGER NOT NULL DEFAULT 1"), ("butce_hafta", "INTEGER NOT NULL DEFAULT 3"),
+                ("oncelik", "INTEGER NOT NULL DEFAULT 1"), ("butce_hafta", "INTEGER NOT NULL DEFAULT 10"),
                 ("hafta", "TEXT NOT NULL DEFAULT ''"), ("hafta_tur", "INTEGER NOT NULL DEFAULT 0"),
                 ("notu", "TEXT NOT NULL DEFAULT ''"))
-WORK_GAP_H = 6      # aynı hedefe en erken bu kadar saatte bir dokunulur
+WORK_GAP_H = 2      # aynı hedefe en erken bu kadar saatte bir dokunulur (6→2, Sahip 2026-11-06 "kotamız çok, limite gerek yok"; Ultra haftalık %2)
 _TICK_GAP = 300     # tik en fazla 5 dk'da bir koşar
 _last_tick = 0.0
 DURAKLATILDI = "duraklatıldı"
+ENGELDE = "engelde"   # Sahip 2026-10-30: tur Sahip/Mac bekliyorsa yeni tur AÇILMAZ; `devam` ya da Sahip cevabı açar
 PUAN_DURAKLAT = -2
 _KILL_TARIH = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _KILL_TUR = re.compile(r"^(\d+)\s*tur$", re.I)
 
 
 def _rapor_dizini():
+    """Tur raporları dossier/hedefler/<id>-son.md. Testte (GHOST_OPS) geçici dizin: 2026-11-08 gecesi test hedefi
+    AUTOINCREMENT ile #13 oldu, repoda gerçek 13-son.md commit'liydi → son_rapor_oku gerçek raporu okudu, pre-push kapısı
+    8 turda kırmızı kaldı. Repo yolu test altında da sabit kalınca izlenen veri dosyası teste sızar."""
+    if os.environ.get("GHOST_OPS"):
+        return os.path.join(config._ops(), "hedefler")
     return os.path.join(config.BASE, "dossier", "hedefler")
 
 
@@ -75,7 +81,7 @@ def _conn():
 
 # ---------- kayıt ----------
 
-def add(title, detail="", plan=None, kill="", oncelik=1, butce_hafta=3):
+def add(title, detail="", plan=None, kill="", oncelik=1, butce_hafta=10):
     c = _conn()
     try:
         cur = c.execute("INSERT INTO goals(title, detail, created, plan, kill, oncelik, butce_hafta) VALUES(?,?,?,?,?,?,?)",
@@ -246,6 +252,37 @@ def son_rapor_oku(goal):
     return ""
 
 
+def tur_modeli(simdi=None):
+    """Hedef turlarının motoru (Sahip 2026-10-30 "opusa geçelim": Fable haftalığı dolunca turlar Opus'a sabitlenir).
+    durum `hedef_model` = {"model": "opus", "bitis": "2026-11-04T08:00"}; bitiş geçince None (köprü varsayılanı)."""
+    from ghost import durum
+    d = durum.oku("hedef_model") or {}
+    model = d.get("model")
+    if not model:
+        return None
+    bitis = d.get("bitis")
+    if bitis:
+        try:
+            if datetime.datetime.fromisoformat(bitis) <= (simdi or datetime.datetime.now()):
+                return None
+        except ValueError:
+            return None
+    return model
+
+
+def tur_modeli_ayarla(model, bitis=None):
+    """`model` None/"kapat" → ayar silinir."""
+    from ghost import durum
+    if not model or model == "kapat":
+        durum.sil("hedef_model")
+        return None
+    d = {"model": model}
+    if bitis:
+        datetime.datetime.fromisoformat(bitis)  # biçim denetimi
+        d["bitis"] = bitis
+    return durum.yaz("hedef_model", d)
+
+
 def _queue_work(goal, kind="hedef", announce=True, vardiya=False):
     """Hedef turunu olay veriyoluna bırak. vardiya=True (Faz 2.1): gece vardiyası turu — duyuru yok, istem sabah kartı için
     3 satırlık rapor ister; kind "vardiya:<gid>" ile iş kaydı sabah eşlenir."""
@@ -264,29 +301,50 @@ def _queue_work(goal, kind="hedef", announce=True, vardiya=False):
         "ÖNCEKİ TUR RAPORU:\n%s\n"
         "Bu turda plandaki AÇIK bir adımda BİR BİRİM somut ilerleme yap (araştır/üret/analiz et); önceki turu "
         "tekrarlama. Adım bittiyse `python3 -m ghost.goals adim %d <n> tamam`. Raporunu `dossier/hedefler/%d-son.md` "
-        "dosyasına YAZ (sonraki tur girdisi) ve çıktıda ver: (1) ne yaptın (2) somut çıktı (3) sonraki adım. "
-        "Kısa ve keskin; telefonda okunacak. Yapamadığın geri alınmaz adım varsa ÖNERİLEN EYLEM bloğu yaz.\n"
-        "SINIR: geri alınamaz/harcamalı hiçbir şey yapma — yalnız öner."
+        "dosyasına YAZ (sonraki tur girdisi) ve çıktıda ver. Çıktının İLK PARAGRAFI sahibe gider (ürün sahibi, teknik "
+        "inceleme yapmaz, telefonda okur): 2-4 düz cümle — ne yaptın, sonuç, ondan ne bekleniyor; hedef/Masa/iş numarası, "
+        "dosya yolu, commit, madde işareti, kalın yazı YOK. Ayrıntı ondan sonra: (1) ne yaptın (2) somut çıktı (3) sonraki "
+        "adım (tamamı Masa'ya iner). Yapamadığın geri alınmaz adım varsa ÖNERİLEN EYLEM bloğu yaz.\n"
+        "SINIR: geri alınamaz/harcamalı hiçbir şey yapma — yalnız öner. Masa'ya `python3 -m ghost.masa yayinla <dosya> <Kart>` "
+        "SERBEST: kendin yayınla, bunun için ÖNERİLEN EYLEM yazma.\n"
+        "BEKLEME: ilerleme sahibin cevabına ya da şu an ulaşamadığın bir şeye (Mac uykuda, telefon) bağlıysa turu bitirmeden "
+        "`python3 -m ghost.goals engel %d \"<ne bekleniyor>\"` koş — hedef yeni tur açmaz, Sahip cevap verince açılır. "
+        "Önceki tur zaten bekliyorsa ve durum değişmediyse iş üretme: yalnız engel koy, tek satır yaz."
         % (goal["id"], goal["title"], ("Detay: %s\n" % goal["detail"]) if goal.get("detail") else "",
            goal.get("kill") or "yok", int(goal.get("puan") or 0), int(goal.get("work_count") or 0) + 1,
-           plan_metni, (son or "(ilk tur)")[:2500], goal["id"], goal["id"]))
+           plan_metni, (son or "(ilk tur)")[:2500], goal["id"], goal["id"], goal["id"]))
     if vardiya:
         prompt = ("GECE VARDİYASI TURU (Sahip uyuyor; sonuç sabah Tek Gün kartına 3 satırla girer — raporunun ilk 3 satırı "
                   "'bitti / yarım / onay gerek' hükmünü taşısın).\n" + prompt)
     ann = ("🎯 Hedef çalışılıyor: %s" % goal["title"][:80]) if announce is True else (announce or None)
-    bus.istek(prompt, kind, "goal", announce=ann)
+    bus.istek(prompt, kind, "goal", announce=ann, model=tur_modeli())
+
+
+def _vardiya_icinde(now):
+    """Gece vardiyası açık ve pencere içindeyse True: o saatlerde hedef turunu YALNIZ vardiya.tick açar.
+    NEDEN (2026-11-03): ikisi aynı dakikada aynı hedefi açıyordu — #7 02:31:00 'hedef' + 02:31:01 'vardiya:7',
+    #8 05:45:01 + 05:45:06 → iki tur, iki kat token, aynı dosyaya iki taslak (Masa #252/#253 ile #254/#255)."""
+    try:
+        from ghost import vardiya
+        a = vardiya.ayar_oku()
+        return bool(a.get("acik", True)) and vardiya.pencere(now, a)[0]
+    except Exception:
+        return False
 
 
 def tick(now=None, kota_uygun=None):
     """Sırası gelen TEK hedefi çalışmaya al (varsa). Ateşlenen id ya da None.
     Sıra: öncelik yüksek → en uzun süredir dokunulmamış; kill dolanlar kapanır; haftalık bütçe ve
-    6 saat aralığı korunur; kota penceresi doluysa (kota.ozerk_uygun) tur ertelenir."""
+    6 saat aralığı korunur; kota penceresi doluysa (kota.ozerk_uygun) tur ertelenir; gece vardiyası
+    penceresinde (vardiya açıkken) tur açmaz — gece turu vardiyanındır."""
     global _last_tick
     now = now or time.time()
     if now - _last_tick < _TICK_GAP:
         return None
     _last_tick = now
     if governance.is_frozen():
+        return None
+    if _vardiya_icinde(now):
         return None
     if kota_uygun is None:
         try:
@@ -371,7 +429,7 @@ def _main(argv):
     if argv[0] == "ekle":
         kill = _secenek(argv, "--kill", "")
         oncelik = int(_secenek(argv, "--oncelik", 1))
-        butce = int(_secenek(argv, "--butce", 3))
+        butce = int(_secenek(argv, "--butce", 10))
         if len(argv) < 2:
             print('kullanım: ekle "<başlık>" ["detay"] [--kill 2026-11-16|"10 tur"] [--oncelik N] [--butce N]')
             return 2
@@ -397,9 +455,22 @@ def _main(argv):
     if argv[0] == "ikinci-plan":
         print("duraklatıldı" if ikinci_plan(argv[1]) else "yok")
         return 0
+    if argv[0] == "engel":
+        print("engelde" if set_status(argv[1], ENGELDE, " ".join(argv[2:]) or "bekliyor") else "yok")
+        return 0
     if argv[0] in ("durdur", "devam", "tamam"):
         durum = {"durdur": DURAKLATILDI, "devam": "aktif", "tamam": "tamam"}[argv[0]]
         print("tamam" if set_status(argv[1], durum) else "yok")
+        return 0
+    if argv[0] == "model":
+        if len(argv) < 2:
+            m = tur_modeli()
+            print("hedef turu motoru: %s" % (m or "köprü varsayılanı"))
+            return 0
+        bitis = _secenek(argv, "--bitis")
+        tur_modeli_ayarla(argv[1], bitis)
+        m = tur_modeli()
+        print("hedef turu motoru: %s%s" % (m or "köprü varsayılanı", (" (bitiş %s)" % bitis) if (m and bitis) else ""))
         return 0
     print(__doc__)
     return 2

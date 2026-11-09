@@ -128,7 +128,8 @@ class SohbetSunucu:
 
     def durum(self):
         t = self.tur
-        return {"canli": self.kalici.canli(), "model": self.kalici.model, "sid": self.kalici.sid,
+        return {"canli": self.kalici.canli(), "model": self.kalici.model, "efor": self.kalici.efor,
+                "sid": self.kalici.sid,
                 "mesgul": bool(t and not t.bitti.is_set()),
                 "tur_id": t.id if t else None, "tur_ozet": t.ozet if t else None,
                 "bekleyen": bool(t and t.bitti.is_set() and not t.teslim),
@@ -140,14 +141,14 @@ class SohbetSunucu:
         if op == "durum":
             return gonder(self.durum())
         if op == "uygun":
-            return gonder({"uygun": self.kalici.uygun(istek.get("model"), istek.get("sid"))})
+            return gonder({"uygun": self.kalici.uygun(istek.get("model"), istek.get("sid"), istek.get("efor"))})
         if op == "baslat":
             with self.kilit:
                 if self.tur and not self.tur.bitti.is_set():
                     return gonder({"hata": "mesgul", "tur_id": self.tur.id})
             try:
                 self.kalici.baslat(istek.get("model"), istek.get("sid"), bool(istek.get("resume")),
-                                   istek.get("mcp_paths") or ())
+                                   istek.get("mcp_paths") or (), efor=istek.get("efor"))
             except Exception as e:
                 return gonder({"hata": "baslat: %r" % e})
             return gonder({"ok": True})

@@ -112,7 +112,9 @@ def main():
         notlar.append("ghost.db açıldı: %d tablo, %d satır, bütünlük ok"
                       % (len(tablolar), toplam))
 
-        for gerekli in ["secrets.env", "ops/audit.jsonl"]:
+        # 2026-11-04: ev/ (BASE dışı) kalemleri de — sunucu giderse başka kopyası olmayanlar
+        for gerekli in ["secrets.env", "ops/audit.jsonl", ".env", "ev/.secrets",
+                        "ev/.claude/projects/-home-ghost-jarvis/memory/MEMORY.md"]:
             if os.path.exists(os.path.join(kok, gerekli)):
                 notlar.append("%s var" % gerekli)
             else:

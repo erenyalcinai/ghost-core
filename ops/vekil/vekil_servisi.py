@@ -963,20 +963,29 @@ SMTP_DATA_TAVAN = 35 * 1024 * 1024
 
 
 def mail_karti_coz(onizleme):
-    """gmail_gonder._onizleme biçimi → dict (kime, cc, konu, ekler[(ad, bayt, sha12)], govde) ya da None."""
-    m = re.match(r"Kime: ([^\n]*)\n(?:Cc: ([^\n]*)\n)?Konu: ([^\n]*)\nEkler:\n((?:  [^\n]*\n)*?)\n(.*)\Z",
+    """gmail_gonder._onizleme biçimi → dict (kimden, kime, cc, konu, ekler[(ad, bayt, sha12)], govde) ya da None.
+    'Kimden:' satırı yalnız Ghost'un kendi adresinden (ghost@example.com) giden mailde vardır (2026-10-31)."""
+    m = re.match(r"(?:Kimden: ([^\n]*)\n)?Kime: ([^\n]*)\n(?:Cc: ([^\n]*)\n)?Konu: ([^\n]*)\nEkler:\n((?:  [^\n]*\n)*?)\n(.*)\Z",
                  onizleme or "", re.S)
     if not m:
         return None
+    kimden = (m.group(1) or "").strip() or None
+    if kimden is not None and kimden != GHOST_KIMDEN:
+        return None
     ekler = []
-    for satir in m.group(4).splitlines():
+    for satir in m.group(5).splitlines():
         e = re.match(r"  • (.+) \((\d+) bayt, sha256 ([0-9a-f]{12})\)$", satir)
         if e:
             ekler.append((e.group(1), int(e.group(2)), e.group(3)))
         elif satir.strip() != "(yok)":
             return None
-    return {"kime": m.group(1).strip(), "cc": (m.group(2) or "").strip() or None, "konu": m.group(3),
-            "ekler": ekler, "govde": m.group(5)}
+    return {"kimden": kimden, "kime": m.group(2).strip(), "cc": (m.group(3) or "").strip() or None, "konu": m.group(4),
+            "ekler": ekler, "govde": m.group(6)}
+
+
+TAKMA_GONDEREN = "sahip@example.com"
+GHOST_ADRES = "ghost@example.com"          # Ghost'un kendi adresi (Gmail takma adı, 2026-10-31 Sahip)
+GHOST_KIMDEN = "Ghost <%s>" % GHOST_ADRES
 
 
 def mail_kartla_eslesir(kart, ham, alicilar, gonderen):
@@ -993,7 +1002,12 @@ def mail_kartla_eslesir(kart, ham, alicilar, gonderen):
         return False, "alıcı başlığı kartla aynı değil"
     if sorted(alicilar) != sorted(x.lower() for x in [kart["kime"]] + ([kart["cc"]] if kart["cc"] else [])):
         return False, "zarf alıcıları kartla aynı değil"
-    if adr("From") != [gonderen.lower()]:
+    # 2026-10-31 Sahip: sahip@example.com Gmail'de "farklı adresten gönder" takma adı → From bu da olabilir (zarf yine Gmail)
+    ghost_mu = kart.get("kimden") == GHOST_KIMDEN
+    if ghost_mu:
+        if adr("From") != [GHOST_ADRES]:
+            return False, "gönderen kartta yazan Ghost adresi değil"
+    elif adr("From") not in ([gonderen.lower()], [TAKMA_GONDEREN]):
         return False, "gönderen sahibin adresi değil"
     if str(msg["Subject"] or "") != kart["konu"]:
         return False, "konu kartla aynı değil"
@@ -1022,7 +1036,7 @@ def mail_kartla_eslesir(kart, ham, alicilar, gonderen):
             return False, "başlık birden çok: %s" % ad
     # From görünen adı: yalnız sahibin adı ya da adsız (ör. "Apple Destek <adres>" taklidi olmasın)
     gorunen = (msg["From"].addresses[0].display_name if msg["From"] and msg["From"].addresses else "").strip()
-    if gorunen not in ("", "Sahip"):
+    if gorunen not in (("", "Ghost") if ghost_mu else ("", "Sahip")):
         return False, "gönderen görünen adı kartla aynı değil"
     # Başlıklar: yalnız bilinen küme. gmail_gonder._mesaj'ın ürettiği başlıklar + MIME zorunluları.
     izinli_bas = {"from", "to", "cc", "subject", "reply-to", "mime-version", "content-type",
@@ -1030,7 +1044,7 @@ def mail_kartla_eslesir(kart, ham, alicilar, gonderen):
     for ad in msg.keys():
         if ad.lower() not in izinli_bas:
             return False, "kartta olmayan başlık: %s" % ad[:40]
-    if [h.strip().lower() for h in msg.get_all("Reply-To", [])] not in ([], ["sahip@example.com"]):
+    if [h.strip().lower() for h in msg.get_all("Reply-To", [])] not in ([], [GHOST_ADRES if ghost_mu else "sahip@example.com"]):
         return False, "Reply-To kartla aynı değil"
     return True, ""
 

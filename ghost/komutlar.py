@@ -35,7 +35,13 @@ def liste():
 # ---------------------------------------------------------------- göçmüş komutlar
 @komut("/durum", "sistem durumu", "/status")
 def _durum(arg, mgr, ctx):
-    ctx.send(mgr.chat_id, ctx.durum_text(mgr))
+    metin = ctx.durum_text(mgr)
+    try:
+        from ghost import efor
+        metin += "\nEfor: %s (/efor)" % efor.etiket(efor.oku())
+    except Exception:
+        pass
+    ctx.send(mgr.chat_id, metin)
 
 
 @komut("/saglik", "servisler, nöbetçiler, bağlam")
@@ -210,6 +216,38 @@ def _model(arg, mgr, ctx):
     ctx.send(mgr.chat_id, "Motor: %s → %s" % (m, modeller.tam_model(m)))
 
 
+@komut("/efor", "Düşünme eforu (low/medium/high/xhigh/max/varsayilan)", "/effort")
+def _efor_komut(arg, mgr, ctx):
+    from ghost import efor
+    if not arg.strip():
+        return ctx.send(mgr.chat_id, "Efor: %s\nSeç: /efor %s" % (
+            efor.etiket(efor.oku()), " | ".join(efor.SEVIYELER + (efor.VARSAYILAN,))))
+    try:
+        s = efor.yaz(arg)
+    except ValueError:
+        return ctx.send(mgr.chat_id, "Efor: %s" % " | ".join(efor.SEVIYELER + (efor.VARSAYILAN,)))
+    ctx.send(mgr.chat_id, "Efor: %s — sonraki mesajdan itibaren (sohbet aynı oturumla devam eder)."
+             % efor.etiket(s))
+
+
+@komut("/mod", "Çalışma kipi: tek (bugünkü) | departman (gerçek ajanlar)", "/kip")
+def _mod(arg, mgr, ctx):
+    """Faz 4 (Sahip 2026-11-08 'iki mod olsun, ikisi arasında seçim yapabileyim'). Kip durum tablosunda
+    (ajan_mod); sonraki işten itibaren geçerli, kalıcı sohbet süreci aynı kalır (köprü kodu değişmez)."""
+    from ghost import agents
+    a = arg.strip().lower()
+    if not a:
+        return ctx.send(mgr.chat_id, "Kip: %s\nSeç: /mod tek | departman\n• tek — bugünkü: tek oturum her şeyi yapar, "
+                        "departman yalnız persona\n• departman — iş düşen departman AYRI ajan (kendi yönergesi/araçları/"
+                        "modeli), sohbet koordinatör; derin işi `python3 -m ghost.departman ver <ad> \"görev\"` ile verir"
+                        % agents.mod_oku())
+    try:
+        m = agents.mod_yaz(a)
+    except ValueError:
+        return ctx.send(mgr.chat_id, "Kip: tek | departman")
+    ctx.send(mgr.chat_id, "Kip: %s — sonraki işten itibaren (sohbet oturumu aynı kalır)." % m)
+
+
 @komut("/guard", "Özerk işte onay aç/kapa")
 def _guard(arg, mgr, ctx):
     mgr.state["guard"] = (arg.lower() != "off")
@@ -276,8 +314,17 @@ def _codex(arg, mgr, ctx):
 @komut("/departmanlar", "Uzman birimler")
 def _departmanlar(arg, mgr, ctx):
     from ghost import agents
-    ctx.send(mgr.chat_id, "🏢 Ghost departmanları:\n" + "\n".join(
-        "• %s — %s" % (d["ad"], ", ".join(d["araclar"])) for d in agents.DEPARTMENTS.values()))
+    kip = agents.mod_oku()
+    satirlar = []
+    for k, d in agents.DEPARTMENTS.items():
+        if agents.ajan_mi(k):
+            from ghost import departman
+            kul, tavan = departman.butce_durum(k)
+            satirlar.append("• %s — ajan · model %s · bu hafta %d/%s iş · araç: %s" % (
+                d["ad"], agents.ajan_model(k) or "miras", kul, tavan or "∞", ", ".join(d.get("izin") or []) or "hepsi"))
+        else:
+            satirlar.append("• %s — yalnız persona (%s)" % (d["ad"], ", ".join(d["araclar"])))
+    ctx.send(mgr.chat_id, "🏢 Ghost departmanları (kip: %s — /mod):\n%s" % (kip, "\n".join(satirlar)))
 
 
 @komut("/rapor", "Şeffaflık: ne yaptım")

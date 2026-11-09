@@ -173,21 +173,74 @@ def vade_ayikla(govde):
     return out
 
 
+def _anahtar(konu, ders):
+    """İçerik anahtarı: konu (etiketsiz) + ders, boşluklar sadeleşmiş.
+    NEDEN (2026-11-03): geçmiş yeniden yazılınca (rebase) aynı commit YENİ sha ile gelir; yalnız sha'ya bakan süzgeç
+    onu yeni ders sanıyordu → Ekim'in üç gününün dersleri 5-6 kez yazıldı (351 başlık, 322 tekil). Kitapta ve bağlam
+    notunda tekil sayı geçer; aynı ders bağlama birden çok kez girmesin."""
+    konu = _ETIKET.sub("", " " + (konu or "")).strip()
+    return " ".join(konu.split()), " ".join((ders or "").split())
+
+
+def _bloklar(metin):
+    """dersler.md → (önsöz metni, [blok metni, …]); her blok '## ' satırıyla başlar, sonraki '## '’ye dek sürer."""
+    on, bloklar = [], []
+    for satir in (metin or "").splitlines(keepends=True):
+        if _BASLIK.match(satir.rstrip("\n")):
+            bloklar.append(satir)
+        elif bloklar:
+            bloklar[-1] += satir
+        else:
+            on.append(satir)
+    return "".join(on), bloklar
+
+
+def tekillestir(metin, tercih=()):
+    """Aynı içerikli (konu+ders) tekrar blokları tek bloğa indir. Döner: (yeni_metin, silinen).
+    İlk geçtiği yer (sıra eskiden yeniye) korunur; içerik olarak `tercih` sha'larından biri (bugünkü geçmişte erişilebilen
+    commit) varsa o blok seçilir — kitap ve kayıt tabloları sha'yı `git show` ile açabilsin."""
+    on, bloklar = _bloklar(metin)
+    tercih7 = {t[:7] for t in tercih}
+    sira, gruplar = [], {}
+    for b in bloklar:
+        k = kayitlar_oku(b)
+        anahtar = _anahtar(k[0]["konu"], k[0]["ders"]) if k else ("", b)
+        if anahtar not in gruplar:
+            sira.append(anahtar)
+            gruplar[anahtar] = []
+        gruplar[anahtar].append((k[0]["sha"][:7] if k else "", b))
+    silinen = sum(len(v) - 1 for v in gruplar.values())
+    if not silinen:
+        return metin, 0
+    secilen = []
+    for anahtar in sira:
+        aday = gruplar[anahtar]
+        b = next((b for sha, b in aday if sha in tercih7), aday[0][1])
+        secilen.append(b.rstrip("\n") + "\n")
+    return on + "\n".join(secilen), silinen
+
+
 def guncelle(mevcut, kayitlar):
     """Dosya metnini yeni derslerle güncelle. Döner: (yeni_metin, eklenen).
 
     kayitlar: (sha, tarih, konu, ders[, etiket]) listesi, eskiden yeniye.
-    Zaten yazılı sha atlanır → betik istediği kadar sık koşabilir.
+    Zaten yazılı sha ya da aynı içerik (konu+ders; rebase'le yeni sha almış commit) atlanır → betik istediği kadar
+    sık koşabilir.
     """
     metin = mevcut or ""
     varolan = yazili_shalar(metin)
+    icerik = {_anahtar(k["konu"], k["ders"]) for k in kayitlar_oku(metin)}
     yeniler = []
     for kayit in kayitlar:
         sha, tarih, konu, ders = kayit[:4]
         etiket = kayit[4] if len(kayit) > 4 else ()
         if not ders or sha[:7] in {s[:7] for s in varolan}:
             continue
+        anahtar = _anahtar(konu, ders)
+        if anahtar in icerik:
+            continue
         varolan.add(sha[:7])
+        icerik.add(anahtar)
         yeniler.append(girdi(sha, tarih, konu, ders, etiket))
     if not yeniler:
         return metin, 0

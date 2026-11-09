@@ -308,8 +308,10 @@ def bekle(since_seq=0, bekle=0):
         time.sleep(0.5)
 
 
-def eylem(eylem_id, veri=None, alanlar=None, cihaz=None):
-    """Uygulamadan gelen buton/form → Sahip mesajı olarak köprü kuyruğuna."""
+def eylem(eylem_id, veri=None, alanlar=None, cihaz=None, imzala=None):
+    """Uygulamadan gelen buton/form → Sahip mesajı olarak köprü kuyruğuna.
+    imzala(metin) → (imza, ts): API cihaz doğrulamasının jetonuyla (masa.ilet ile aynı yol). Metin sunucuda
+    kurulduğu için istek imzası onu kapsamaz; imzasız kayıt köprüde özerk işe düşüyordu (2026-10-30 onay kartı)."""
     from ghost import kokpit
     if alanlar:
         satirlar = ["[Sahne form: %s]" % eylem_id]
@@ -320,7 +322,7 @@ def eylem(eylem_id, veri=None, alanlar=None, cihaz=None):
         metin = "[Sahne eylem: %s] %s" % (eylem_id, veri or "")
         sahip_onayi_kaydet(metin, "kokpit-eylem")    # imzalı istekten geldi (api /v1/eylem)
     kokpit.outbox_yaz(metin, "sahip")
-    kokpit.mesaj_kuyrukla(metin, cihaz)
+    kokpit.mesaj_kuyrukla(metin, cihaz, imza=imzala(metin) if imzala else None)
     cozumle(eylem_id, veri)
     return metin
 

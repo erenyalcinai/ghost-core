@@ -49,6 +49,16 @@ BOSTA_KAPAT_SN = int(os.environ.get("JARVIS_KALICI_BOSTA", "3600"))
 EOF = object()
 
 
+def _ajan_args():
+    """Faz 4.1.3 (2026-11-08): sohbet süreci departman ajan tanımlarını alır (ghost.agents.sohbet_args) — Agent
+    aracında subagent_type=<departman>. Hata/boşsa [] (sohbet asla bundan düşmez)."""
+    try:
+        from ghost import agents
+        return agents.sohbet_args()
+    except Exception:
+        return []
+
+
 def _durum_yaz(pid, mesgul, model="", sid=""):
     try:
         tmp = DURUM_DOSYASI + ".tmp"
@@ -81,6 +91,7 @@ class KaliciOturum:
         self.proc = None
         self.model = None
         self.sid = None
+        self.efor = None
         self.q = None
         self.err = [""]
         self.kilit = threading.Lock()
@@ -95,14 +106,16 @@ class KaliciOturum:
     def canli(self):
         return self.proc is not None and self.proc.poll() is None
 
-    def uygun(self, model, sid):
-        return self.canli() and self.model == model and self.sid == sid
+    def uygun(self, model, sid, efor=None):
+        # efor süreç düzeyinde: /efor değişince süreç aynı oturumla yeniden açılır (ghost/efor.py)
+        return self.canli() and self.model == model and self.sid == sid and self.efor == (efor or None)
 
-    def baslat(self, model, sid, resume, mcp_paths=()):
+    def baslat(self, model, sid, resume, mcp_paths=(), efor=None):
+        from ghost import efor as _efor
         self.kapat()
         cmd = [self.claude_bin, "-p", "--input-format", "stream-json",
                "--output-format", "stream-json", "--verbose",
-               "--model", model] + self.ekstra_args
+               "--model", model] + self.ekstra_args + _efor.arg(efor) + _ajan_args()
         if mcp_paths:
             cmd += ["--mcp-config"] + list(mcp_paths)
         if sid:
@@ -111,15 +124,15 @@ class KaliciOturum:
             cmd, cwd=self.cwd, env=self.env, text=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             start_new_session=True)
-        self.model, self.sid = model, sid
+        self.model, self.sid, self.efor = model, sid, (efor or None)
         self.q = queue.Queue()
         self.err = [""]
         self.acilis = time.time()
         threading.Thread(target=self._oku, args=(self.proc, self.q), daemon=True).start()
         threading.Thread(target=self._oku_err, args=(self.proc,), daemon=True).start()
         _durum_yaz(self.proc.pid, False, model, sid)
-        self.log("kalıcı oturum açıldı pid=%s model=%s %s" % (
-            self.proc.pid, model, "resume" if resume else "yeni"))
+        self.log("kalıcı oturum açıldı pid=%s model=%s%s %s" % (
+            self.proc.pid, model, (" efor=%s" % efor) if efor else "", "resume" if resume else "yeni"))
 
     def _oku(self, proc, q):
         try:

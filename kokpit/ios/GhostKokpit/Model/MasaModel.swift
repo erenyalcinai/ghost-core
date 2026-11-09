@@ -65,6 +65,40 @@ final class MasaModel: ObservableObject {
         return out.joined(separator: " › ")
     }
 
+    // MARK: Son eklenenler + arama (0.19, Sahip 2026-11-06: "Masa'da belge bulmak çok zor, son eklenenlere hızlı ulaşmalıyım")
+
+    /// Kartın güncelleme damgası ("YYYY-MM-DD HH:MM:SS"); yoksa oluşturma. Dizge sıralaması = zaman sıralaması.
+    static func damga(_ k: MasaKart) -> String { k.guncelleme ?? k.ts ?? "" }
+
+    /// Klasör olmayan son `n` kayıt, en yenisi önce — hangi klasörde olduğuna bakmaz.
+    func sonEklenenler(_ n: Int = 8) -> [MasaKart] {
+        Array(kartlar.filter { !$0.klasor }.sorted { Self.damga($0) > Self.damga($1) }.prefix(n))
+    }
+
+    /// Kartın bulunduğu klasör yolu ("AppA › Lansman"); kökteyse boş.
+    func ebeveynKirinti(_ k: MasaKart) -> String {
+        guard let e = k.ebeveyn else { return "" }
+        return kirinti(e)
+    }
+
+    /// Ad + önizlemede büyük/küçük harf ve aksan duyarsız arama; klasörler de bulunur; en yeni önce, en çok 60 sonuç.
+    func ara(_ sorgu: String) -> [MasaKart] {
+        let q = Self.duzle(sorgu)
+        guard !q.isEmpty else { return [] }
+        return Array(kartlar
+            .filter { Self.duzle($0.ad).contains(q) || Self.duzle($0.onizleme ?? "").contains(q) }
+            .sorted { Self.damga($0) > Self.damga($1) }
+            .prefix(60))
+    }
+
+    /// "Ödev İhracat" → "odev ihracat" (Türkçe İ/ı dahil; folding Locale'siz yapılır, sonra küçültülür).
+    static func duzle(_ s: String) -> String {
+        s.replacingOccurrences(of: "İ", with: "i").replacingOccurrences(of: "ı", with: "i")
+            .folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func dongu() async {
         await yenile()
         while !Task.isCancelled {

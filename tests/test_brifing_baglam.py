@@ -44,7 +44,31 @@ class TestBrifingBaglam(unittest.TestCase):
 
     def test_bos_dizin_bos_cikti(self):
         bb.INTEL = tempfile.mkdtemp(prefix="bos-")
-        self.assertEqual(bb.blok(7), "")
+        self.assertEqual(bb.blok(7, yasak=False), "")
+
+    def test_duz_yazi_brifing_basligi_ve_kucuk_harf_firsat(self):
+        """2026-10-30: numarasız brifing tekrar filtresine hiç girmiyordu; '■ Fırsat' büyük harf şartını kaçırıyordu."""
+        bugun = time.strftime("%Y-%m-%d")
+        open(os.path.join(self.d, bugun + ".md"), "w").write(
+            "👻 Ghost Brifingi\n\n■ Bugün bilmen gereken\nBugün kayda değer bir şey yok. Uzun açıklama.\n\n■ Fırsat\n"
+            "TÜBİTAK BiGG Dünya 8 Kasım.\nŞart olarak…\n\n■ Not\nyok\n")
+        _, satirlar = bb.intel_basliklar(7)[0]
+        self.assertEqual(satirlar, ["Bugün kayda değer bir şey yok. Uzun açıklama.", "fırsat: TÜBİTAK BiGG Dünya 8 Kasım."])
+
+    def test_yasak_konular_bloga_girer(self):
+        from unittest import mock
+        from ghost import gundem
+        sahte = [("karar#9", "AppA BiGG başvurusu: Aşama 1'de red, RAFTA; tekrar önerme"),
+                 ("karar#10", "AppA BiGG başvurusu: aynı konu ikinci kayıt"),
+                 ("hafıza:hazir-site", "2026-10-20 Van demosu yapıldı, rafa kaldırıldı; GÜNDEME GETİRME")]
+        with mock.patch.object(gundem, "yasaklar", return_value=sahte):
+            yk = bb.yasak_konular()
+            blok = bb.blok(7)
+        self.assertEqual(yk, ["AppA BiGG başvurusu", "hazir site — 2026-10-20 Van demosu yapıldı, rafa kaldırıldı; GÜNDEME GETİRME"])
+        self.assertIn("RAF/İPTAL KARARLARI", blok)
+        self.assertIn("- AppA BiGG başvurusu", blok)
+        with mock.patch.object(gundem, "yasaklar", side_effect=RuntimeError("db yok")):
+            self.assertEqual(bb.yasak_konular(), [])
 
 
 if __name__ == "__main__":

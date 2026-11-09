@@ -144,6 +144,21 @@ def cek(d):
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
+PROFIL_UC = "https://api.anthropic.com/api/oauth/profile"
+PROFIL_SN = 24 * 3600
+
+
+def _profil_plan(d):
+    """Hesabın güncel plan adı ('Ultra'). Keychain'deki subscriptionType/rateLimitTier giriş
+    anındaki değeri tutar, yükseltmede bayatlar (2026-11-01: Ultra'ya geçilmişken max_5x)."""
+    req = urllib.request.Request(PROFIL_UC, headers={
+        "Authorization": "Bearer " + d["accessToken"],
+        "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        o = json.loads(r.read().decode("utf-8", "replace")).get("organization") or {}
+    return o.get("plan_display_name") or ""
+
+
 def _yaz(d):
     durum.yaz("kota", d)             # Faz 1.9: ops/kota.json → durum tablosu
 
@@ -166,9 +181,15 @@ def yenile(min_yas=0):
     try:
         d = belirtec()
         ham = cek(d)
+        plan, profil_ts = eski.get("plan_profil") or "", eski.get("profil_ts") or 0
+        if not plan or simdi - profil_ts > PROFIL_SN:
+            try:
+                plan, profil_ts = _profil_plan(d) or plan, int(simdi)
+            except Exception:
+                pass
         kayit = {"ts": int(simdi), "at": time.strftime("%F %T"),
-                 "plan": _plan_adi(d), "kaynak": "mac-keychain",
-                 "limitler": normalize(ham), "hata": None}
+                 "plan": plan or _plan_adi(d), "plan_profil": plan, "profil_ts": profil_ts,
+                 "kaynak": "mac-keychain", "limitler": normalize(ham), "hata": None}
     except urllib.error.HTTPError as e:
         kayit = dict(eski, hata="HTTP %s" % e.code, hata_ts=int(simdi))
         if e.code == 429:
@@ -232,7 +253,7 @@ def metin():
 
 
 # ---------- kota-farkında zamanlama (2026-10-29, bütünsel denetim 04 Ö7 / 02 b2) ----------
-PENCERE_ESIK = 85      # 5 saatlik pencere bu yüzdeyi aştıysa özerk iş ERTELENİR
+PENCERE_ESIK = 85      # 5 saatlik pencere (ölçümde varsa) bu yüzdeyi aştıysa özerk iş ERTELENİR
 PENCERE_BAYAT_SN = 2 * 3600   # ölçüm bundan eskiyse (Mac kapalı) karar verilemez → engelleme
 
 
@@ -265,11 +286,44 @@ def pencere_durumu(simdi=None):
             "sifirlanma_metin": oturum.get("sifirlanma_metin") or "", "yas_sn": yas}
 
 
+# 2026-11-01: Anthropic Ultra'da (eski Max 20x) 5 saatlik limiti kaldırdı, haftalık limit kaldı.
+# Ölçüm 'session' satırı vermezse pencere_durumu bilinir=False döner → 5 saat kapısı kendiliğinden
+# açılır (Max 5x'te satır sürer, kapı sürer). Asıl sınır haftalık 'weekly_all': özerk iş sahibin
+# haftanın kalanındaki sohbet payını yemesin diye bu eşikte durur.
+HAFTALIK_ESIK = 90
+
+
+def haftalik_durumu(simdi=None):
+    """Haftalık · tüm modeller: {bilinir, yuzde, dolu, sifirlanma_ts, sifirlanma_metin, yas_sn}.
+    Model kapsamlı haftalık (weekly_scoped, örn. Fable) bilerek bakılmaz: o dolunca turlar başka
+    modele geçer (goals model), iş durmaz."""
+    simdi = simdi or time.time()
+    ham = _oku_ham()
+    yas = max(0, int(simdi) - int(ham.get("ts", 0) or 0))
+    h = next((l for l in ham.get("limitler") or [] if l.get("tur") == "weekly_all"), None)
+    if not h or yas > PENCERE_BAYAT_SN:
+        return {"bilinir": False, "yuzde": None, "dolu": False, "sifirlanma_ts": None,
+                "sifirlanma_metin": "", "yas_sn": yas}
+    sifir_ts = None
+    try:
+        if h.get("sifirlanma"):
+            sifir_ts = datetime.fromisoformat(h["sifirlanma"]).timestamp()
+    except Exception:
+        sifir_ts = None
+    yuzde = int(h.get("yuzde") or 0)
+    dolu = yuzde >= HAFTALIK_ESIK and (sifir_ts is None or sifir_ts > simdi)
+    return {"bilinir": True, "yuzde": yuzde, "dolu": dolu, "sifirlanma_ts": sifir_ts,
+            "sifirlanma_metin": h.get("sifirlanma_metin") or "", "yas_sn": yas}
+
+
 def ozerk_uygun(simdi=None):
-    """Özerk/zamanlı iş şimdi koşsun mu? (uygun, gerekçe)."""
+    """Özerk/zamanlı iş şimdi koşsun mu? (uygun, gerekçe). 5 saatlik pencere (varsa) + haftalık."""
     d = pencere_durumu(simdi)
     if d["dolu"]:
         return False, "kota penceresi %%%d dolu, sıfırlanma %s" % (d["yuzde"], d["sifirlanma_metin"] or "?")
+    h = haftalik_durumu(simdi)
+    if h["dolu"]:
+        return False, "haftalık kota %%%d, sıfırlanma %s" % (h["yuzde"], h["sifirlanma_metin"] or "?")
     return True, ""
 
 

@@ -176,3 +176,42 @@ class IsKartiTurEtiketiTest(unittest.TestCase):
         bas = src.split("etkinlik_baslat(", 1)[1].split("except Exception", 1)[0]
         self.assertIn('get("kind"', bas)
         self.assertNotRegex(bas, r"or kind\b")
+
+class IsYoluDepartmanMotordaTest(unittest.TestCase):
+    """Faz 4.1.6 (2026-11-09, Sahip onayı onay-3c997e0c047cf0e5): köprü iş yolunda persona/işaret YAZMAZ —
+    agents.route anahtarını run_claude(dep=) ile geçirir, karar motorda (tek kip persona sistem istemine,
+    departman kipi gerçek ajan). system_prefix yalnız sohbet yolunda kalır."""
+
+    def test_job_one_system_prefix_kullanmaz_dep_gecirir(self):
+        import inspect
+        src = inspect.getsource(tb.Manager._job_one)
+        self.assertNotIn("agents.system_prefix(", src)          # yorumda ad geçer, ÇAĞRI yok
+        self.assertIn("dep_key, dep = agents.route(text)", src)
+        self.assertRegex(src, r"run_claude\([^)]*dep=dep_key")
+        # istem sırası: araç notu + metin → prompt_kur (slash komutu öne) — persona eklenmez
+        self.assertIn("prompt = _tool_note(job_mcp) + text", src)
+        self.assertIn("prompt = cc_komutlar.prompt_kur(text, prompt)", src)
+
+    def test_sohbet_yolu_system_prefix_surer(self):
+        import inspect
+        src = inspect.getsource(tb.Manager)
+        self.assertEqual(src.count("agents.system_prefix("), 1)   # yalnız sohbet turu
+
+    def test_run_claude_dep_imzasi(self):
+        import inspect
+        self.assertIn("dep", inspect.signature(tb.run_claude).parameters)
+
+class IsBitisMesajiErenOzetTest(unittest.TestCase):
+    """2026-11-09 (Sahip 'özerk işlerin yapısı anlaşılır değil', onay-3b9aff6344e2e808): iş bitiş mesajı ghost/eren_ozet
+    özetidir, ham rapor sohbete ve kilit ekranına gitmez; özet üretilemezse eski tam mesaj (bilgi kaybı yok)."""
+
+    def test_job_one_eren_ozet_kullanir_ve_push_ozet(self):
+        import inspect
+        src = inspect.getsource(tb.Manager._job_one)
+        self.assertIn("_eren_ozet.is_mesaji(icon, kind_lbl, dur, res, denetim", src)
+        self.assertIn("send(self.chat_id, mesaj)", src)
+        self.assertIn('tamamlandı (%d sn):', src)                       # düşüş yolu: eski tam mesaj
+        push = src.split("apns.herkese(", 1)[1].split("collapse=", 1)[0]
+        self.assertIn("mesaj[:200]", push); self.assertNotIn("res[:200]", push)
+        self.assertIn("apns.etkinlik_bitir(jid, kind_lbl, durum, mesaj[:120])", src)
+

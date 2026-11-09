@@ -36,6 +36,9 @@ OPS = os.path.join(BASE, "ops")
 REPO = os.environ.get("GHOST_BACKUP_REPO", "ornek-org/jarvis")
 BRANCH = "hafiza"
 WORK = os.path.join(OPS, "backups", ".repo")
+# Geçici arşiv DİSKTE kurulur: /tmp tmpfs=RAM + usrquota — 2026-11-09 sabahı 140 MB arşiv gpg aşamasında "Disk quota
+# exceeded" ile düştü (prova aynı sebeple 2026-10-05'te diske taşınmıştı). ops/backups /dev/sda1'de, 13 GB boş.
+TMP_KOK = os.path.join(OPS, "backups", ".tmp")
 
 # Saklama: günlük 7, haftalık 4 (pazartesi), aylık 12 (ayın 1'i)
 KEEP = {"gunluk": 7, "haftalik": 4, "aylik": 12}
@@ -50,9 +53,21 @@ FILES = [
     "ops/baton.json",       # biz_state/port_state/heartbeats 2026-10-29'dan beri ghost.db `durum` tablosunda (DBS)
     "ops/uptime_state.json", "ops/offset.txt", "ops/chat_session.json",
     "secrets.env",          # anahtarların çoğu tek kopya; şifreli gider
+    # 2026-11-04 (felaket kurtarma, Sahip "kalan gerekenleri yap"): sunucu giderse kaybolanlar — küçük, şifreli gider
+    ".env",                 # WEBHOOK_SECRET vb. (Email Worker + Kısayollar aynı değeri bekler)
+    "ops/sahne.json", "ops/sahne_gecmis.json", "ops/sahne_onaylar.json", "ops/onay_sonuc.jsonl",
+    "ops/apns.jsonl", "ops/metrik.jsonl", "ops/verify.jsonl", "ops/kurallar_durum.json",
 ]
+FILE_DESENLERI = ["mcp*.json"]   # MCP ayarları (sentry token'ı yalnız burada); yenisi eklenince kendiliğinden girer
 DIRS = ["intel", "dossier", "ops/requests", "ops/jobs",
-        "ops/masa_dosya"]   # Masa kalıcı: sahibin yüklediği foto/belge tek kopyaydı (2026-10-04)
+        "ops/masa_dosya",   # Masa kalıcı: sahibin yüklediği foto/belge tek kopyaydı (2026-10-04)
+        "ops/kokpit_paylasim", "ops/gmail_taslak"]   # paylaşım uzantısıyla sahibin gönderdiği (9 MB) + mail taslakları
+# Ev dizini (BASE dışı) — arşivde `ev/<yol>` altına girer, geri yüklemede ~/<yol>'a döner. ASLA stage dışına yazılmaz.
+# kokpit_medya (178 MB sohbet medyası, çoğu Ghost'un ürettiği kopya; kalıcı olan Masa'da) bilerek dışarıda: yedeği 2,4 katına çıkarır.
+EV_KOK = os.path.expanduser("~")
+EV_DIRS = [".secrets",                                   # ASC .p8 Apple'dan yeniden İNDİRİLEMEZ, GSC servis hesabı vb.
+           ".claude/projects/-home-ghost-jarvis/memory",  # harness hafızası: Sahip kararları (kanonik), 924 KB
+           "site-tools"]                                # example.com deploy'unun purify.py'si (repoda yok)
 import heartbeat  # noqa: E402  Nabız damgası (Faz 2.10; sys.path[0] = ops)
 
 
@@ -108,9 +123,10 @@ def snapshot(stage):
         out.close()
         con.close()
         man.append((rel, os.path.getsize(dst)))
-    for rel in FILES:
+    desenli = sorted(os.path.relpath(p, BASE) for d in FILE_DESENLERI for p in glob.glob(os.path.join(BASE, d)))
+    for rel in list(FILES) + [r for r in desenli if r not in FILES]:
         src = os.path.join(BASE, rel)
-        if not os.path.exists(src):
+        if not os.path.isfile(src):
             continue
         dst = os.path.join(stage, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -125,99 +141,312 @@ def snapshot(stage):
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         n = sum(len(f) for _, _, f in os.walk(dst))
         man.append((rel + "/", n))
+    ev_stage = os.path.join(stage, "ev")
+    for rel in EV_DIRS:
+        # Mutlak/../ yol stage dışına yazdırabilir (os.path.join mutlak ikinci parçada stage'i atar) → reddet.
+        if os.path.isabs(rel) or ".." in rel.split("/"):
+            continue
+        src = os.path.join(EV_KOK, rel)
+        if not os.path.isdir(src):
+            continue
+        dst = os.path.join(ev_stage, rel)
+        if not os.path.realpath(dst).startswith(os.path.realpath(stage) + os.sep):
+            continue
+        shutil.copytree(src, dst, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        n = sum(len(f) for _, _, f in os.walk(dst))
+        man.append(("ev/" + rel + "/", n))
     return man
 
 
-KURULUM_NOTU = """# Tesisat — sunucuyu sıfırdan ayağa kaldırma
+KURULUM_NOTU = """# Tesisat — VPS giderse Ghost'u sıfırdan ayağa kaldırma (kısa reçete)
 
-Kod GitHub'da, hafıza şifreli yedekte. Bu klasör ÜÇÜNCÜ parça: sunucuyu
-Ghost'un çalıştığı hâle getiren kablolar. 2026-08-20'de sayıldı — 14 systemd
-biriminin 12'si ve 14 cron satırı YALNIZCA sunucuda duruyordu, yani sunucu
-gittiğinde kurtarma arkeolojiye dönüyordu.
+Kod GitHub'da (ornek-org/jarvis), hafıza bu şifreli arşivde, bu klasör
+ÜÇÜNCÜ parça: sunucuyu Ghost'un çalıştığı hâle getiren kablolar.
+TAM reçete (komutlar, süreler, doğrulamalar, Mac de yoksa Yol C):
+`playbooks/felaket-kurtarma.md` (kaynak: dossier/felaket-kurtarma/).
+Güncelleme: 2026-11-04 (ilk sürüm 2026-08-20; 10-28 sır vekili, 10-30
+~/.ghost veri dizinleri, kullanıcı birimleri bu notu eskitmişti).
 
-## Sıra
+## Önce
+- Hetzner snapshot/yedek VARSA ondan geri yükle (≤45 dk), sonra 9-10.
+- Sıra: makine → kullanıcı → kod → hafıza → root servisleri (kapı/onay/vekil)
+  → sırlar → birimler → dış bağlar → KÖPRÜ EN SON.
+- Sır değeri ekrana/sohbete basılmaz; dosyadan dosyaya akar.
 
-1. Kod: `git clone` (ornek-org/jarvis) → `/home/ghost/jarvis`
-2. Sırlar + hafıza: bu arşivin kökünden `secrets.env`, `ops/*.db`,
-   `ops/*.jsonl`, `ops/*.json` yerlerine (ve `ops/masa_dosya/` — Masa ekleri)
-3. Bağımlılıklar: `ortam.txt`'ye bak
-4. systemd: `systemd/*` → `/etc/systemd/system/`, sonra
-   `systemctl daemon-reload` + `systemd/DURUM.txt`'de enabled görünen her
-   birim için `systemctl enable --now <birim>`
-5. cron: `crontab crontab.txt`
-6. nginx: `nginx/ghost-hooks` → `/etc/nginx/sites-available/`, symlink
-   `sites-enabled`, `nginx -t`, `systemctl reload nginx`
-7. TLS: sertifika YEDEKLENMEZ (özel anahtar root-only ve self-signed —
-   yeniden üretilir). nginx `/etc/ssl/certs/ghost-hooks.crt` +
-   `/etc/ssl/private/ghost-hooks.key` bekler; yeniden üret.
-8. DNS: yeni sunucunun IP'si Cloudflare'de `hooks.*` kaydına yazılmalı;
-   Mac tarafında `.env` içindeki `GHOST_VPS_IP` de güncellenmeli
-   (deploy.sh'ta sabit yedek IP var, ona da bak).
-9. SSH: Mac'in `~/.ssh/ghost_runtime.pub` anahtarı `authorized_keys`'e —
-   yoksa Mac işçisi ve bayrak devri çalışmaz.
+## Sıra (Yol B, Mac var: ≈3-3,5 sa; Mac root yedeği yoksa ≈4-5 sa)
+1. Sunucu (Sahip·panel): fsn1, Ubuntu, ≥4 GB, Backups AÇIK; root anahtarı
+   ghost_root_sk (YubiKey). Eski IP korunabiliyorsa onu ata.
+2. Temel sistem (root): `paketler/apt-manual.txt` → `apt install`; Node 22;
+   kullanıcı `ghost` uid 1000 + linger (`loginctl enable-linger ghost`);
+   swap 2 GB; `conf/etc/...` altındaki sshd/needrestart/fail2ban/claude-code
+   dosyalarını aynı yola koy; ufw: 22 + 80/443 yalnız Cloudflare.
+3. Kod: `git clone` → `/home/ghost/jarvis` (geçici PAT; vekil gelince bırak).
+4. Hafıza: arşiv kökünden `secrets.env`, `ops/*.db`, `ops/*.jsonl|json`,
+   `dossier/`, `intel/`, `ops/jobs|requests`; `python3 ops/veri_tasi.py`
+   (~/.ghost/<ad> + ops/<ad> symlink), `ops/masa_dosya/` → ~/.ghost/masa_dosya.
+5. Root servisleri (Mac'ten YubiKey): `ops/root/faz0_kur.sh`, `ops/root/kur.sh`
+   (kapı + managed-settings), `ops/root/kisitla.sh`, `ops/onay/kur.sh`,
+   `ops/vekil/kur.sh`.
+6. Sırlar: vekilin `sirlar.env`'i + onay durumu bu arşivde YOK (root).
+   (a) Mac `~/.ghost/yedek-sir/root-*.tgz.gpg` → `/var/lib` (chown!)
+   (b) yoksa panellerden yeni değer + `DON=1 sh ops/vekil/kur.sh`.
+   Doğrulama: `python3 -m ghost.vekil durum` → `eksik: []`.
+7. Kullanıcı ortamı: git insteadOf → vekil `github-git`; `core.hooksPath
+   ops/githooks`; `.env` + `mcp*.json` arşiv kökünden, `ev/*` → ~ ; Claude CLI
+   (~/.local/bin/claude); `paketler/pip-user.txt`, `paketler/npm-global.txt`,
+   `paketler/araclar.txt` (~/.local/bin + ~/.ghost/araclar adları).
+8. Birimler/cron/nginx/TLS:
+   - sistem: `systemd/*` → /etc/systemd/system, `systemd/DURUM.txt`'de
+     enabled olanlar (`ghost-huntbatch` hariç); drop-in'ler
+     `conf/etc/systemd/system.control/`; tam liste `systemd/BIRIMLER.txt`.
+     ghost-bridge'i yalnız ENABLE et.
+   - kullanıcı: `systemd-kullanici/*` → ~/.config/systemd/user,
+     `XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload`,
+     `systemd-kullanici/DURUM.txt`'deki enabled birimler; linger satırı orada.
+   - cron: `crontab.txt` (tek seferlik/bayat satırları ayıkla).
+   - nginx: `nginx/*` → sites-available, `nginx/ENABLED.txt`'dekileri
+     sites-enabled'a bağla; `nginx -t`. TLS özel anahtarı YEDEKLENMEZ:
+     hooks için self-signed üret; ghost-api.example.com için CF Origin CA.
+9. Dış bağlar: IP değiştiyse Cloudflare 3 A kaydı (hooks.example.com,
+   hooks.owner.example, ghost-api.example.com) + Mac: tunnel/vekiltunel plist,
+   ~/.ssh/config, ~/jarvis/.env `GHOST_VPS_IP`, `git remote vps`. IP aynı
+   olsa da Mac'te `ssh-keygen -R <IP>` (yeni host anahtarı). Mac'in
+   `ghost_runtime.pub`'ı `authorized_keys`'e — yoksa işçi/tünel çalışmaz.
+10. Köprü: Mac köprüsü (ai.jarvis.macbridge) DURDURULMUŞ olmalı, sonra
+    `systemctl start ghost-bridge` + `systemctl --user start ghost-sohbet`;
+    selfcheck, Telegram ping, Kokpit ping, vekil `eksik: []`.
+
+## Bu arşivde OLMAYANLAR (bilerek ya da henüz)
+- `conf/OKUNAMADI.txt`: root-only dosyalar (ufw kuralları vb.) — kaynak
+  repodaki ops/root/, ops/vekil/, ops/onay/ betikleri.
+- Vekil `sirlar.env`, onay cihazları, TLS özel anahtarları (root) → Mac
+  `~/.ghost/yedek-sir/root-*.tgz.gpg` (`ops/vekil/mac_root_yedek.sh`, YubiKey).
+- kokpit_medya (178 MB sohbet medyası; kalıcı olan Masa'da) — bilerek.
+- 2026-11-04'ten beri arşivde: `.env`, `mcp*.json`, `ops/kokpit_paylasim/`,
+  `ops/gmail_taslak/`, sahne/onay_sonuc/metrik geçmişi ve `ev/` altında
+  `~/.secrets/`, harness hafıza dizini, `~/site-tools/` → `ev/<yol>` →
+  `~/<yol>` (mod 600/700 korunur, chown ghost).
 """
+
+# --- Tesisat kaynakları (testler bu sabitleri geçici dizine çevirir) ---
+SISTEM_BIRIM_DIZIN = "/etc/systemd/system"
+KULLANICI_BIRIM_DIZIN = os.path.expanduser("~/.config/systemd/user")
+NGINX_DIZIN = "/etc/nginx"
+# Okunabilir ise AYNEN kopyalanan conf dosyaları — AÇIK LİSTE (sır taşımayan,
+# küçük, kurulumda elle yeniden yazılması gereken). Joker yalnız ghost önekli
+# ya da drop-in dizinlerinde; sır dosyası (secrets.env, sirlar.env, .env,
+# anahtarlar) bu listeye GİRMEZ.
+CONF_DESENLERI = [
+    "/etc/systemd/system.control/ghost-*.d/*.conf",   # ghost-bridge MemoryHigh (faz0_kur.sh)
+    "/etc/systemd/system/ghost-*.d/*.conf",
+    "/etc/ssh/sshd_config.d/10-ghost-*.conf",          # hardening repoda YOK
+    "/etc/needrestart/conf.d/ghost.conf",              # ghost-* restart istisnası (2026-09-26 kök neden)
+    "/etc/claude-code/managed-settings.json",          # güvenlik kapısı kancası
+    "/etc/fail2ban/jail.d/*.conf",
+    "/etc/ufw/user.rules", "/etc/ufw/user6.rules",     # root-only → OKUNAMADI.txt'ye düşer
+]
+CONF_TAVAN = 256 * 1024           # conf dosyası bundan büyükse kopyalanmaz (yanlış eşleşme koruması)
+ARAC_DIZINLERI = [os.path.expanduser("~/.local/bin"),
+                  os.path.expanduser("~/.ghost/araclar")]
+
+
+def _cmd(args, env=None, timeout=60):
+    """Komutu koş, stdout'u döndür; yoksa/hata/zaman aşımı → None. Tesisat hiçbir
+    komut yüzünden düşmemeli: eksik kalem yedeği durdurmaz, eksik diye yazılır."""
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout,
+                           env=env)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 and not r.stdout.strip():
+        return None
+    return r.stdout
+
+
+def _kullanici_env():
+    env = dict(os.environ)
+    env.setdefault("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())
+    return env
+
+
+def _yaz(yol, metin):
+    os.makedirs(os.path.dirname(yol), exist_ok=True)
+    with open(yol, "w", encoding="utf-8") as f:
+        f.write(metin if metin.endswith("\n") or not metin else metin + "\n")
+
+
+def _birim_kopyala(kaynak_dizin, hedef, is_enabled):
+    """ghost-* birimlerini kopyala + DURUM.txt (ad<TAB>enabled durumu). Döner: sayı."""
+    birimler = sorted(glob.glob(os.path.join(kaynak_dizin, "ghost-*.service"))
+                      + glob.glob(os.path.join(kaynak_dizin, "ghost-*.timer")))
+    os.makedirs(hedef, exist_ok=True)
+    durum, n = [], 0
+    for src in birimler:
+        try:
+            shutil.copy2(src, os.path.join(hedef, os.path.basename(src)))
+        except OSError:
+            continue
+        n += 1
+        ad = os.path.basename(src)
+        durum.append("%s\t%s" % (ad, is_enabled(ad)))
+    return n, durum
+
+
+def _systemctl_enabled(ad, kullanici=False):
+    args = ["systemctl"] + (["--user"] if kullanici else []) + ["is-enabled", ad]
+    out = _cmd(args, env=_kullanici_env() if kullanici else None, timeout=15)
+    return (out or "").strip() or "?"
+
+
+def _linger():
+    try:
+        import pwd
+        kul = os.environ.get("USER") or pwd.getpwuid(os.getuid()).pw_name
+    except Exception:
+        kul = ""
+    out = _cmd(["loginctl", "show-user", kul, "-p", "Linger"], timeout=15) if kul else None
+    if out and "=" in out:
+        return out.strip().split("=", 1)[1] or "?"
+    # loginctl yoksa linger dosyası: /var/lib/systemd/linger/<kullanıcı>
+    if kul and os.path.exists("/var/lib/systemd/linger/" + kul):
+        return "yes"
+    return "?"
+
+
+def _conf_kopyala(hedef):
+    """CONF_DESENLERI'ni mutlak yol aynasıyla `conf/` altına kopyala. Döner: (kopya, okunamadı)."""
+    kopya, okunamadi = [], []
+    for desen in CONF_DESENLERI:
+        eslesen = sorted(glob.glob(desen)) if any(c in desen for c in "*?[") else [desen]
+        for src in eslesen:
+            if not os.path.isfile(src):
+                continue
+            try:
+                if os.path.getsize(src) > CONF_TAVAN:
+                    okunamadi.append("%s\tçok büyük" % src)
+                    continue
+                with open(src, "rb") as f:
+                    veri = f.read()
+            except PermissionError:
+                okunamadi.append("%s\tokunamadı (root)" % src)
+                continue
+            except OSError as e:
+                okunamadi.append("%s\t%s" % (src, e.__class__.__name__))
+                continue
+            dst = os.path.join(hedef, src.lstrip("/"))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(dst, "wb") as f:
+                f.write(veri)
+            kopya.append(src)
+    return kopya, okunamadi
+
+
+def _paketler(hedef):
+    """Paket/araç listeleri: yeniden kurarken NE kurulacağı (sürümler dahil). Döner: yazılan dosya sayısı."""
+    n = 0
+    listeler = {
+        "apt-manual.txt": ["apt-mark", "showmanual"],
+        "pip-user.txt": [sys.executable, "-m", "pip", "list", "--user", "--format=freeze"],
+        "npm-global.txt": ["npm", "ls", "-g", "--depth=0"],
+        "snap.txt": ["snap", "list"],
+    }
+    for ad, args in listeler.items():
+        out = _cmd(args, timeout=90)
+        if out and out.strip():
+            _yaz(os.path.join(hedef, ad), out)
+            n += 1
+    satirlar = []
+    for d in ARAC_DIZINLERI:
+        if not os.path.isdir(d):
+            continue
+        satirlar.append("# %s" % d)
+        for ad in sorted(os.listdir(d)):
+            yol = os.path.join(d, ad)
+            hedef_yol = os.path.realpath(yol) if os.path.islink(yol) else ""
+            satirlar.append("%s%s" % (ad, ("\t→ " + hedef_yol) if hedef_yol else ""))
+    if satirlar:
+        _yaz(os.path.join(hedef, "araclar.txt"), "\n".join(satirlar))
+        n += 1
+    return n
 
 
 def tesisat(stage):
     """Kablo tesisatı: kod ve hafıza yedeklense de sunucu giderse BUNLAR ölürdü.
 
-    systemd birimleri, cron, nginx — üçü de repo dışında, yalnız makinede.
-    Sertifika ÖZEL ANAHTARI bilerek alınmıyor: root-only okunamaz ve zaten
-    self-signed, yeniden üretmek doğru yol (bkz. KURULUM.md).
+    systemd (sistem + kullanıcı birimleri, enabled durumu, linger, tam birim
+    listesi), cron, nginx (+ hangi siteler açık), okunabilir conf dosyaları,
+    paket/araç listeleri — hepsi repo dışında, yalnız makinede. Sertifika
+    ÖZEL ANAHTARI ve root sır dosyaları bilerek alınmıyor: root-only okunamaz,
+    hooks sertifikası self-signed — yeniden üretmek doğru yol (bkz. KURULUM.md).
+    Root-only olup okunamayan conf'lar `conf/OKUNAMADI.txt`'ye ADIYLA yazılır.
     """
     d = os.path.join(stage, "tesisat")
     os.makedirs(d, exist_ok=True)
     man = []
 
-    r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-    if r.returncode == 0 and r.stdout.strip():
-        with open(os.path.join(d, "crontab.txt"), "w", encoding="utf-8") as f:
-            f.write(r.stdout)
-        man.append(("tesisat/crontab.txt", len(r.stdout.splitlines())))
+    out = _cmd(["crontab", "-l"], timeout=15)
+    if out and out.strip():
+        _yaz(os.path.join(d, "crontab.txt"), out)
+        man.append(("tesisat/crontab.txt", len(out.splitlines())))
 
+    # Sistem birimleri (root sahipli ama okunur) + tam birim listesi
     sd = os.path.join(d, "systemd")
-    os.makedirs(sd, exist_ok=True)
-    birimler = sorted(glob.glob("/etc/systemd/system/ghost-*.service")
-                      + glob.glob("/etc/systemd/system/ghost-*.timer"))
-    durum = []
-    for src in birimler:
-        try:
-            shutil.copy2(src, os.path.join(sd, os.path.basename(src)))
-        except OSError:
-            continue
-        ad = os.path.basename(src)
-        e = subprocess.run(["systemctl", "is-enabled", ad],
-                           capture_output=True, text=True)
-        durum.append("%s\t%s" % (ad, (e.stdout or e.stderr).strip() or "?"))
+    n, durum = _birim_kopyala(SISTEM_BIRIM_DIZIN, sd, _systemctl_enabled)
     if durum:
-        with open(os.path.join(sd, "DURUM.txt"), "w", encoding="utf-8") as f:
-            f.write("\n".join(durum) + "\n")
-    man.append(("tesisat/systemd/", len(birimler)))
+        _yaz(os.path.join(sd, "DURUM.txt"), "\n".join(durum))
+    liste = _cmd(["systemctl", "list-unit-files", "--no-pager", "--no-legend"], timeout=30)
+    if liste and liste.strip():
+        _yaz(os.path.join(sd, "BIRIMLER.txt"), liste)
+    man.append(("tesisat/systemd/", n))
+
+    # Kullanıcı birimleri (ghost-api/nabiz/sohbet/tunnelwatch) + linger
+    ku = os.path.join(d, "systemd-kullanici")
+    n, durum = _birim_kopyala(KULLANICI_BIRIM_DIZIN, ku,
+                              lambda ad: _systemctl_enabled(ad, kullanici=True))
+    _yaz(os.path.join(ku, "DURUM.txt"),
+         "\n".join(["# linger\t%s" % _linger()] + durum))
+    man.append(("tesisat/systemd-kullanici/", n))
 
     ng = os.path.join(d, "nginx")
     os.makedirs(ng, exist_ok=True)
     n = 0
-    for src in glob.glob("/etc/nginx/sites-available/ghost*"):
+    for src in sorted(glob.glob(os.path.join(NGINX_DIZIN, "sites-available", "ghost*"))):
         try:
             shutil.copy2(src, os.path.join(ng, os.path.basename(src)))
             n += 1
         except OSError:
             pass
+    acik = sorted(os.listdir(os.path.join(NGINX_DIZIN, "sites-enabled"))) \
+        if os.path.isdir(os.path.join(NGINX_DIZIN, "sites-enabled")) else []
+    if acik:
+        _yaz(os.path.join(ng, "ENABLED.txt"), "\n".join(acik))
     man.append(("tesisat/nginx/", n))
+
+    cf = os.path.join(d, "conf")
+    kopya, okunamadi = _conf_kopyala(cf)
+    if okunamadi:
+        _yaz(os.path.join(cf, "OKUNAMADI.txt"), "\n".join(
+            ["# root-only ya da alınamayan — kaynak repoda ops/root, ops/vekil, ops/onay"]
+            + okunamadi))
+    man.append(("tesisat/conf/", len(kopya)))
+
+    pk = os.path.join(d, "paketler")
+    man.append(("tesisat/paketler/", _paketler(pk)))
 
     # Ortam: yeniden kurarken neyin yüklü olması gerektiği
     satirlar = ["# Ortam — kurtarma sırasında bunlar gerekli"]
     try:
-        satirlar.append(open("/etc/os-release", encoding="utf-8")
-                        .read().split("\n")[0])
+        with open("/etc/os-release", encoding="utf-8") as f:
+            satirlar.append(f.readline().rstrip("\n"))
     except OSError:
         pass
     satirlar.append("python3: " + sys.version.split()[0])
-    for komut in ("git", "gpg", "nginx", "ffmpeg", "node", "claude", "wrangler"):
+    for komut in ("git", "gpg", "nginx", "ffmpeg", "node", "npm", "claude", "codex",
+                  "wrangler", "uv", "asc", "rea", "jq"):
         yol = shutil.which(komut)
         satirlar.append("%s: %s" % (komut, yol or "YOK"))
-    with open(os.path.join(d, "ortam.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(satirlar) + "\n")
+    _yaz(os.path.join(d, "ortam.txt"), "\n".join(satirlar))
 
     with open(os.path.join(d, "KURULUM.md"), "w", encoding="utf-8") as f:
         f.write(KURULUM_NOTU)
@@ -361,7 +590,8 @@ def main():
     stamp = date.today().isoformat()
     t0 = time.time()
 
-    with tempfile.TemporaryDirectory(prefix="ghostbak-") as tmp:
+    os.makedirs(TMP_KOK, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ghostbak-", dir=TMP_KOK) as tmp:
         enc, meta = build_archive(tmp, stamp)
         boyut = os.path.getsize(enc)
         sha = hashlib.sha256(open(enc, "rb").read()).hexdigest()[:12]

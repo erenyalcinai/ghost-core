@@ -90,9 +90,20 @@ def needs_review(prompt, result, kind="", err=False):
     return bool(_IDDIA.search(_norm(result)))
 
 
+def _isaretsiz(request):
+    """Faz 4 (2026-11-08 ilk koşu bulgusu): emir metnindeki [DEPARTMAN:x] işareti denetçiye sızınca motor
+    denetçiyi de o departmanın ajanı olarak (--agent) koşturdu — denetçi TARAFSIZ kalmalı, işaret silinir."""
+    try:
+        from ghost import agents
+        return agents._ISARET_RE.sub("", request or "")
+    except Exception:
+        return request or ""
+
+
 def build_prompt(request, result):
     """Kör denetçi istemi. DİKKAT: buraya ajanın düşüncesi/gerekçesi/oturum
     geçmişi KOYULMAZ — yalnız emir ve ham rapor. Körlük tasarımın kendisi."""
+    request = _isaretsiz(request)
     return (
         "İKİNCİ GÖZ — KÖR DENETİM.\n\n"
         "Sen bağımsız bir denetçisin. Bir ajan aşağıdaki emri aldı ve işi "
@@ -142,7 +153,7 @@ def parse(out):
     def _al(alan):
         mm = re.search(alan + r"\s*:\s*(.+?)(?=\n[A-ZÇĞİÖŞÜ]{4,}\s*:|\Z)",
                        txt, re.I | re.S)
-        return " ".join(mm.group(1).split())[:400] if mm else ""
+        return " ".join(mm.group(1).split())[:1200] if mm else ""
     return karar, _al("GEREKÇE"), _al("KONTROL")
 
 
@@ -192,8 +203,12 @@ def review(request, result, runner, kind="", jid=None, model=None, timeout=None,
         # ozerk: denetçi de gözetimsiz işin parçası — kapı geri alınmaz eylemi onda da kessin
         # (2. tur bulgu 1: denetçi tam yetkiyle koşup özerk sınırını deliyordu). Denetçi salt-okuma
         # yapar, yetenek kaybı yok.
-        out, _, err = runner(p, model or MODEL, use_mcp=[],
-                             timeout=timeout or TIMEOUT, ozerk=ozerk)
+        try:
+            out, _, err = runner(p, model or MODEL, use_mcp=[],
+                                 timeout=timeout or TIMEOUT, ozerk=ozerk, rol="denetim")   # metrik: iş değil denetim
+        except TypeError:                       # rol bilmeyen koşucu (test sahtesi / eski imza)
+            out, _, err = runner(p, model or MODEL, use_mcp=[],
+                                 timeout=timeout or TIMEOUT, ozerk=ozerk)
     except Exception as e:                      # denetçi asla işi düşürmesin
         out, err = "denetçi çalıştırılamadı: %r" % e, True
     if err:

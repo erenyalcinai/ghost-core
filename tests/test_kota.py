@@ -137,3 +137,27 @@ class TestPencereDurumu(unittest.TestCase):
     def test_dosya_yoksa_bilinmez(self):
         d = kota.pencere_durumu()
         self.assertFalse(d["bilinir"]); self.assertTrue(kota.ozerk_uygun()[0])
+
+    def _yaz_limitler(self, limitler):
+        import time
+        durum.yaz("kota", {"ts": int(time.time()), "limitler": limitler})
+
+    def test_ultra_session_yoksa_pencere_kapisi_acik(self):
+        # Ultra'da 5 saatlik limit yok → ölçümde session satırı yok → pencere engellemez
+        self._yaz_limitler([{"tur": "weekly_all", "yuzde": 40}])
+        self.assertFalse(kota.pencere_durumu()["bilinir"])
+        self.assertEqual(kota.ozerk_uygun(), (True, ""))
+
+    def test_haftalik_dolu_erteler(self):
+        from datetime import datetime, timezone, timedelta
+        ileri = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        self._yaz_limitler([{"tur": "weekly_all", "yuzde": 93, "sifirlanma": ileri,
+                             "sifirlanma_metin": "Çar 08:00"}])
+        uygun, neden = kota.ozerk_uygun()
+        self.assertFalse(uygun); self.assertIn("haftalık", neden); self.assertIn("Çar 08:00", neden)
+
+    def test_model_kapsamli_haftalik_engellemez(self):
+        # Fable haftalığı dolunca turlar Opus'a geçer; iş durmaz
+        self._yaz_limitler([{"tur": "weekly_all", "yuzde": 52},
+                            {"tur": "weekly_scoped", "yuzde": 98}])
+        self.assertTrue(kota.ozerk_uygun()[0])

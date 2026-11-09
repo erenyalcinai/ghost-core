@@ -96,7 +96,7 @@ class KayitDefteri(unittest.TestCase):
         komutlar.bul("/kanal")("", mgr, ctx)
         komutlar.bul("/cihazlar")("", mgr, ctx)
         komutlar.bul("/istekler")("", mgr, ctx)
-        self.assertEqual(ctx.gonderilen[0], "durum-ok")
+        self.assertTrue(ctx.gonderilen[0].startswith("durum-ok"))   # + "Efor: …" satırı (2026-11-02)
         self.assertIn("Kullanım", ctx.gonderilen[1])
         self.assertEqual(ctx.gonderilen[2], "iptal 3")
         self.assertIn("Kanallar", ctx.gonderilen[3])

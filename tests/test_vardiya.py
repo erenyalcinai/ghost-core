@@ -17,6 +17,8 @@ def _ts(y, mo, d, h, mi):
 class TestVardiya(unittest.TestCase):
     def setUp(self):
         durum.sil(vardiya.DURUM_AD)
+        # Testler davranışı eski ayarla sınar (tavan 3 / kota %60 / aralık 25); gerçek varsayılan 2026-11-06'da 8/85/15 oldu.
+        vardiya.ayar_yaz(tavan=3, kota_tavan=60, aralik_dk=25)
         c = goals._conn()
         c.execute("DELETE FROM goals"); c.commit(); c.close()
         governance.unfreeze()
@@ -115,6 +117,18 @@ class TestVardiya(unittest.TestCase):
         y = vardiya.tick(_ts(2026, 10, 31, 23, 5))
         self.assertEqual(len(y), 1)
         self.assertIn("(1/3)", y[0])
+
+    def test_taze_tur_atlanir(self):
+        # 2026-11-03: başka yoldan (gündüz zamanlayıcısı/sohbet) yeni açılmış hedefe ikinci tur açılmaz
+        g1 = goals.add("yeni çalışıldı", oncelik=3)
+        g2 = goals.add("sıradaki", oncelik=1)
+        t = _ts(2026, 11, 3, 23, 5)
+        c = goals._conn()
+        c.execute("UPDATE goals SET last_worked=? WHERE id=?", (t - 15 * 60, g1)); c.commit(); c.close()
+        self.assertEqual(vardiya.tick(t), ["#%d kuyruklandı (1/3)" % g2])
+        self._is(20, g2, "bitti")
+        self.assertEqual(vardiya.tick(t + 40 * 60), ["#%d kuyruklandı (2/3)" % g1])   # 55 dk geçti → sırası geldi
+        self.assertEqual(self.kuyruk, [g2, g1])
 
     def test_kota_freeze_kapali_engeller(self):
         goals.add("x")

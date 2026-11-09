@@ -35,6 +35,14 @@ class Profil(unittest.TestCase):
         self.assertIsNone(sahip.HATA)
         self.assertIsNone(sahip.durum())
 
+    def test_takma_alan_asil_siteye_eslenir(self):
+        self._yaz(json.dumps({"siteler": [
+            {"alan": "a.example", "trafik": True, "takma": ["a.la", "b.la"]},
+            {"alan": "c.example", "takma": ["izlenmeyen.la"]},
+            {"alan": "d.example", "trafik": True}]}))
+        self.assertEqual(sahip.trafik_takma(), {"a.la": "a.example", "b.la": "a.example"})
+        self.assertEqual(sahip.trafik_siteleri(), ("a.example", "d.example"))
+
     def test_bozuk_json_importu_kirmaz_ve_uyarir(self):
         self._yaz("{bozuk")
         self.assertEqual(sahip.profil(yenile=True), {})

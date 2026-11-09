@@ -27,7 +27,7 @@ from ghost import config, durum, goals, governance
 
 DURUM_AD = "vardiya"
 KIND = "vardiya:%d"
-VARSAYILAN = {"acik": True, "baslangic": "23:00", "bitis": "07:00", "tavan": 3, "kota_tavan": 60, "aralik_dk": 25}
+VARSAYILAN = {"acik": True, "baslangic": "23:00", "bitis": "07:00", "tavan": 8, "kota_tavan": 85, "aralik_dk": 15}
 AKTIF_IS = ("kuyrukta", "çalışıyor", "denetimde")
 _SAAT = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
@@ -130,14 +130,23 @@ def _kota():
         return None
 
 
-def adaylar():
-    """Aktif, kill'i dolmamış hedefler: öncelik yüksek → en uzun süredir dokunulmamış."""
+TAZE_TUR_DK = 45   # son bu kadar dakikada tur açılmış hedef atlanır (tur tavanı 30 dk + pay)
+
+
+def adaylar(now=None):
+    """Aktif, kill'i dolmamış hedefler: öncelik yüksek → en uzun süredir dokunulmamış.
+    Son TAZE_TUR_DK içinde başka yoldan (gündüz zamanlayıcısı, sohbet) turu açılmış hedef atlanır: aynı hedefe aynı anda
+    iki tur = iki kat token + aynı dosyaya iki taslak (2026-11-03 çift tur). goals.tick pencere içinde artık susar;
+    bu süzgeç kalan örtüşmeyi kapatır (22:50'de açılan gündüz turu 23:00'te hâlâ sürerken)."""
+    now = now or time.time()
     out = []
     for g in goals.list_goals(all_states=True):
         if g.get("status") != "aktif":
             continue
         bitti, _ = goals.kill_durumu(g)
         if bitti:
+            continue
+        if float(g.get("last_worked") or 0) > now - TAZE_TUR_DK * 60:
             continue
         out.append(g)
     out.sort(key=lambda g: (-int(g.get("oncelik") or 0), float(g.get("last_worked") or 0)))
@@ -190,7 +199,7 @@ def tick(now=None):
     if yuzde is not None and yuzde >= int(a["kota_tavan"]):
         return yapilan
     koşulmuş = {k["gid"] for k in kosulan}
-    aday = next((g for g in adaylar() if g["id"] not in koşulmuş), None)
+    aday = next((g for g in adaylar(now) if g["id"] not in koşulmuş), None)
     if aday is None:
         return yapilan                             # hedefsiz gece = uyku
     _kuyrukla(aday, now)
@@ -290,7 +299,7 @@ def durum_metni(now=None):
     a = ayar_oku()
     st = durum.oku(DURUM_AD) or {}
     icinde, pid = pencere(now, a)
-    ad = adaylar()
+    ad = adaylar(now)
     return ("vardiya %s · pencere %s–%s · tavan %d/gece · kota eşiği %%%d · aralık %d dk\n"
             "şu an %s (pencere %s) · bu pencerede koşulan %d · aday hedef %d%s\nson rapor: %s" % (
                 "AÇIK" if a.get("acik", True) else "KAPALI", a["baslangic"], a["bitis"], a["tavan"], a["kota_tavan"],

@@ -9,6 +9,10 @@ import UIKit
 /// sistemine yazar ve **sonucu geri bildirir**:
 /// - `hatirlatici` → EKReminder (alarmlı; Ghost, VPS ya da ağ olmasa da çalar)
 /// - `etkinlik`    → EKEvent (takvimde, 15 dk önce uyarı)
+/// - `hatirlatici_sil` / `etkinlik_sil` → Ghost'un DAHA ÖNCE yazdığını kaldırır (2026-11-04). Kayıt
+///   yazarken geri bildirdiğimiz kimlikle bulunur; kimlik eşitlemede değişmişse yalnız AYNI başlık + AYNI
+///   dakikadaki kayıt aranır — sahibin elle kurduğu bir şeye dokunulmaz. Bulunamazsa ("zaten-yok") iş
+///   tamam sayılır: Sahip silmiş ya da tamamlamıştır.
 ///
 /// Neden sonucu geri bildirmek şart: "gönderdim" ile "telefona yazıldı" aynı şey
 /// değildir. Varsayılıp geçilirse Sahip olmayan bir hatırlatıcıya güvenir — sessiz
@@ -73,7 +77,7 @@ final class EllerYoneticisi: ObservableObject {
             var mesaj = ""
             var yerel = ""
             do {
-                yerel = try uygula(g)
+                yerel = try await uygula(g)
                 ok = true
                 yazilan += 1
             } catch {
@@ -84,12 +88,54 @@ final class EllerYoneticisi: ObservableObject {
         if yazilan > 0 { sonDurum = "\(yazilan) görev telefona yazıldı." }
     }
 
-    private func uygula(_ g: Gorev) throws -> String {
+    private func uygula(_ g: Gorev) async throws -> String {
         switch g.tur {
         case "hatirlatici": return try hatirlaticiYaz(g.veri)
         case "etkinlik": return try etkinlikYaz(g.veri)
+        case "hatirlatici_sil": return try await hatirlaticiSil(g.veri)
+        case "etkinlik_sil": return try etkinlikSil(g.veri)
         default: throw EllerHata.bilinmeyen(g.tur)
         }
+    }
+
+    private func hatirlaticiSil(_ v: GorevVeri) async throws -> String {
+        guard let id = v.yerelId, !id.isEmpty else { throw EllerHata.kimlikYok }
+        if let r = depo.calendarItem(withIdentifier: id) as? EKReminder {
+            try depo.remove(r, commit: true)
+            return id
+        }
+        // Kimlik iCloud eşitlemesinde değişebilir: yalnız aynı başlık + aynı dakikadaki açık hatırlatıcı.
+        guard let h = v.hedefTs else { return "zaten-yok" }
+        let ne = Date(timeIntervalSince1970: h)
+        let p = depo.predicateForIncompleteReminders(
+            withDueDateStarting: ne.addingTimeInterval(-60), ending: ne.addingTimeInterval(60), calendars: nil)
+        let baslik = v.ad
+        let kimlikler: [String] = await withCheckedContinuation { devam in
+            depo.fetchReminders(matching: p) { liste in
+                devam.resume(returning: (liste ?? []).filter { $0.title == baslik }.map { $0.calendarItemIdentifier })
+            }
+        }
+        let eslesen = kimlikler.compactMap { depo.calendarItem(withIdentifier: $0) as? EKReminder }
+        guard !eslesen.isEmpty else { return "zaten-yok" }
+        for r in eslesen { try depo.remove(r, commit: false) }
+        try depo.commit()
+        return eslesen[0].calendarItemIdentifier
+    }
+
+    private func etkinlikSil(_ v: GorevVeri) throws -> String {
+        guard let id = v.yerelId, !id.isEmpty else { throw EllerHata.kimlikYok }
+        if let e = depo.event(withIdentifier: id) {
+            try depo.remove(e, span: .thisEvent, commit: true)
+            return id
+        }
+        guard let h = v.hedefTs else { return "zaten-yok" }
+        let ne = Date(timeIntervalSince1970: h)
+        let p = depo.predicateForEvents(withStart: ne.addingTimeInterval(-60), end: ne.addingTimeInterval(60), calendars: nil)
+        let eslesen = depo.events(matching: p).filter { $0.title == v.ad && abs($0.startDate.timeIntervalSince(ne)) < 60 }
+        guard !eslesen.isEmpty else { return "zaten-yok" }
+        for e in eslesen { try depo.remove(e, span: .thisEvent, commit: false) }
+        try depo.commit()
+        return eslesen[0].eventIdentifier ?? id
     }
 
     private func hatirlaticiYaz(_ v: GorevVeri) throws -> String {
@@ -128,11 +174,13 @@ final class EllerYoneticisi: ObservableObject {
 enum EllerHata: LocalizedError {
     case bilinmeyen(String)
     case listeYok(String)
+    case kimlikYok
 
     var errorDescription: String? {
         switch self {
         case .bilinmeyen(let t): return "bilinmeyen görev türü: \(t)"
         case .listeYok(let m): return m
+        case .kimlikYok: return "silinecek kaydın kimliği yok"
         }
     }
 }

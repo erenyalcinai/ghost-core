@@ -24,10 +24,10 @@ here and probably the most useful.
 
 | | |
 |---|---|
-| Core Python (`ghost/`) | ~18,000 lines, 69 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
-| Organs (`ops/`) | ~16,200 lines: bridge, sentinels, Mac and iPhone limbs |
-| Cockpit app (`kokpit/ios`) | ~7,900 lines Swift, iOS + macOS targets, one source |
-| Tests | ~1017, run with `python -m unittest` in well under a minute, no network, CI on every push |
+| Core Python (`ghost/`) | ~19,000 lines, 72 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
+| Organs (`ops/`) | ~16,800 lines: bridge, sentinels, Mac and iPhone limbs |
+| Cockpit app (`kokpit/ios`) | ~8,100 lines Swift, iOS + macOS targets, one source |
+| Tests | ~1099, run with `python -m unittest` in well under a minute, no network, CI on every push |
 | Scheduling units | 8 launchd agents (Mac) + 3 systemd units (VPS) in this tree; the bridge and self-check units themselves live in the private deploy |
 | Lessons | 170 operational lessons, auto-extracted from commit messages, curated in [LESSONS.md](LESSONS.md) |
 | History | Started 11 August 2026; this open-core snapshot is from day 78 (880+ commits in the private tree) |
@@ -366,4 +366,3 @@ The project's own public domain (`ghostinprod.com`) is Ghost's brand and stays.
 
 Built and operated by [Eren Yalçın](https://github.com/erenyalcinai) with Ghost itself. Questions about the code:
 **eren@yalcin.ai**. MIT, see [LICENSE](LICENSE).
-

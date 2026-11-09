@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Ayarlar: Telegram'da komutla değişen kipler burada tek dokunuş — birincil kanal
-/// (/kanal), sesli yanıt (/sesli), onay kapısı (/guard), motor (/model). Hepsi köprüye
+/// (/kanal), sesli yanıt (/sesli), onay kapısı (/guard), motor (/model), efor (/efor), çalışma kipi (/mod). Hepsi köprüye
 /// aynı komut olarak gider; sunucu tek yazar kalır. Altta cihaz bilgisi ve eşlemeyi sıfırlama.
 struct AyarlarView: View {
     @EnvironmentObject var oturum: Oturum
@@ -25,6 +25,11 @@ struct AyarlarView: View {
     }
 
     private static let modeller = ["fable", "opus", "sonnet", "haiku"]
+    private static let eforlar = ["low", "medium", "high", "xhigh", "max", "varsayilan"]
+    /// Faz 4 (Sahip 2026-11-08 "iki mod olsun … ayarlarda da seçimi olsun"): tek = bugünkü tek oturum,
+    /// departman = iş düşen departman ayrı ajan. Köprüye /mod komutu gider; değer Nabız `kip`ten okunur.
+    private static let kipler: [(String, String)] = [("tek", "tek — bugünkü, tek oturum"),
+                                                     ("departman", "departman — gerçek ajanlar")]
 
     /// Gösterilecek nabız: taze olan varsa o, yoksa açılışta verilen.
     private var n: Nabiz? { canli ?? nabiz }
@@ -55,6 +60,18 @@ struct AyarlarView: View {
                             Button(m) { Task { await gonder("/model " + m) } }
                         }
                     }
+                    satir("Efor", deger: n?.efor ?? "—") {
+                        ForEach(AyarlarView.eforlar, id: \.self) { e in
+                            Button(e == "varsayilan" ? "varsayılan" : e) { Task { await gonder("/efor " + e) } }
+                        }
+                    }
+                    satir("Çalışma kipi", deger: n?.kip ?? "—") {
+                        ForEach(AyarlarView.kipler, id: \.0) { k in
+                            Button(k.1) { Task { await gonder("/mod " + k.0) } }
+                        }
+                    }
+                    Text("tek: Ghost tek oturumda her şeyi yapar (bugünkü). departman: işe düşen departman (Mühendislik, İstihbarat, Operasyon) kendi yönergesi ve araçlarıyla ayrı ajan olarak koşar, sohbet koordinatör kalır. Sonraki işten itibaren geçerli.")
+                        .font(.caption).foregroundStyle(Renk.ikincil).listRowBackground(Renk.zemin)
                 } header: { Text("Kipler").foregroundStyle(Renk.ikincil) }
 
                 Section {

@@ -666,7 +666,8 @@ class H(BaseHTTPRequestHandler):
         if governance.is_frozen():
             return self._json(423, {"hata": "FREEZE aktif"})
         channels.son_kanal_ayarla("kokpit")
-        metin = sahne.eylem(eid, veri.get("veri"), veri.get("alanlar"), cihaz["id"])
+        metin = sahne.eylem(eid, veri.get("veri"), veri.get("alanlar"), cihaz["id"],
+                            imzala=lambda m: _inbox_imza(cihaz, m))
         return self._json(200, {"ok": True, "metin": metin})
 
     def _p_paylas(self, cihaz, u, q, veri, body, ham):

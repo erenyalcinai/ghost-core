@@ -1322,7 +1322,9 @@ class Manager:
                 log("etkinlik başlat hata: %r" % e)
             t0 = time.time()
             sid = str(uuid.uuid4())
-            # Departman yönlendirme: işe uygun uzman personayı iliştir
+            # Departman yönlendirme (Faz 4.1.6, 2026-11-09): köprü yalnız anahtarı bulur ve iş kartına yazar;
+            # persona/ajan kararı motor.run_claude'da (`dep=`): tek kip → persona sistem istemine, departman kipi →
+            # gerçek ajan (--agents/--agent). system_prefix iş yolundan kalktı — köprü istemi yeniden kurmaz.
             dep_key, dep = agents.route(text)
             if dep:
                 self._set(jid, department=dep["ad"])
@@ -1330,13 +1332,12 @@ class Manager:
             # MCP sunucu(lar)ını yükler (bkz. _mcp_servers_for) — belirsizse
             # eski davranış: üçü de yüklenir (yetenek kaybı yok).
             job_mcp = _mcp_servers_for(text)
-            prompt = (_tool_note(job_mcp)
-                      + agents.system_prefix(text, dep=dep) + text)  # tek route çağrısı
+            prompt = _tool_note(job_mcp) + text
             prompt = cc_komutlar.prompt_kur(text, prompt)  # /arastir, /istihbarat, /denetim işleri skill'le koşar
             ozerk = text.startswith(AUTONOMOUS_GUARD)   # sahibin onayladığı iş bu öneki taşımaz
             res, _, err = run_claude(
                 prompt, model, session_id=sid, resume=False,
-                use_mcp=job_mcp,
+                use_mcp=job_mcp, dep=dep_key,
                 on_proc=lambda p, j=jid: self.procs.__setitem__(j, p),
                 on_event=akis.olay_kaydedici("is#%s" % jid), ozerk=ozerk)
             self.procs.pop(jid, None)
@@ -1409,9 +1410,17 @@ class Manager:
                     _sessiz("_job_one@1583", _e)
             icon = "❌" if err else ("⚠️" if takildi else ("☑️" if dogrulanmadi else "✅"))
             kind_lbl = self.jobs[jid].get("department") or kind
-            send(self.chat_id, "%s %s tamamlandı (%d sn):\n\n%s%s" %
-                 (icon, kind_lbl.capitalize(), dur, res,
-                  ("\n\n" + denetim) if denetim else ""))
+            # sahibe giden mesaj kısa ve düz (2026-11-09 "özerk işlerin yapısı anlaşılır değil"): ghost/eren_ozet raporun
+            # tamamını dosyaya + Masa'ya yazar, sohbete 2-4 cümle; özet üretilemezse eski tam mesaj (bilgi kaybı yok).
+            try:
+                from ghost import eren_ozet as _eren_ozet
+                mesaj = _eren_ozet.is_mesaji(icon, kind_lbl, dur, res, denetim, jid=jid, err=err,
+                                             takildi=takildi, dogrulanmadi=dogrulanmadi)
+            except Exception as e:
+                log("iş özeti üretilemedi (#%s): %r" % (jid, e))
+                mesaj = "%s %s tamamlandı (%d sn):\n\n%s%s" % (icon, kind_lbl.capitalize(), dur, res,
+                                                              ("\n\n" + denetim) if denetim else "")
+            send(self.chat_id, mesaj)
             if not err:  # refleks: sonuçta tablo/diff varsa Sahne'ye de bas (ghost/sahne.isten)
                 try:
                     from ghost import sahne as _sahne
@@ -1428,9 +1437,9 @@ class Manager:
                     log("önerilen eylem kartı açılamadı (#%s): %r" % (jid, e))
             try:  # biten iş → telefona push (Faz 2 push kapsamı: onay · iş · alarm)
                 apns.herkese("%s İş #%d %s" % (icon, jid, durum),
-                             "%s: %s" % (kind_lbl, res[:200]), {"sekme": "akis"},
+                             mesaj[:200], {"sekme": "akis"},                 # kilit ekranına da özet, ham rapor değil
                              collapse="is:%d" % jid)
-                apns.etkinlik_bitir(jid, kind_lbl, durum, res[:120])
+                apns.etkinlik_bitir(jid, kind_lbl, durum, mesaj[:120])
             except Exception as e:
                 log("push hata: %r" % e)
 

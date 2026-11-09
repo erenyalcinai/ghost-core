@@ -16,7 +16,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INTEL = os.path.join(BASE, "intel")
 SENTEZ = os.path.join(BASE, "dossier", "sentez")
 _BASLIK = re.compile(r"^\d\)\s+(.+)$")
-_FIRSAT = re.compile(r"^■\s*\d*\s*F[Iİ]RSAT")
+_FIRSAT = re.compile(r"^■\s*\d*\s*f[ıiİI]rsat", re.I)    # 2026-10-30: "■ Fırsat" küçük harfle gelebiliyor
 _KARAR = re.compile(r"(ODAKLAN|ERTELE)", re.I)
 SATIR_TAVAN = 110
 
@@ -39,7 +39,7 @@ def intel_basliklar(gun=7, simdi=None, dizin=None):
             continue
         if simdi - ts > gun * 86400 or ts > simdi + 86400:
             continue
-        basliklar, firsat_bekle = [], False
+        basliklar, firsat_bekle, bolumde, duz = [], False, False, None
         try:
             for satir in open(yol, encoding="utf-8", errors="replace"):
                 satir = satir.strip()
@@ -50,13 +50,17 @@ def intel_basliklar(gun=7, simdi=None, dizin=None):
                     basliklar.append(_kisalt(m.group(1)))
                     continue
                 if _FIRSAT.match(satir):
-                    firsat_bekle = True
+                    firsat_bekle, bolumde = True, False
                     continue
                 if firsat_bekle and not satir.startswith("■"):
                     basliklar.append("fırsat: " + _kisalt(satir))
                     firsat_bekle = False
                 elif satir.startswith("■"):
-                    firsat_bekle = False
+                    firsat_bekle, bolumde = False, True
+                elif bolumde and duz is None and not satir.lower().startswith("kaynak"):
+                    duz = satir                  # numarasız düz yazı brifing (2026-10-30): ilk bölümün ilk satırı başlık sayılır
+            if duz and not any(not b.startswith("fırsat:") for b in basliklar):
+                basliklar.insert(0, _kisalt(duz))
         except OSError:
             continue
         if basliklar:
@@ -81,7 +85,29 @@ def son_sentez_kararlari(dizin=None, en_fazla=6):
     return os.path.basename(yol), satirlar[:en_fazla]
 
 
-def blok(gun=7, simdi=None):
+def yasak_konular(en_fazla=60):
+    """sahibin raf/iptal kararları + hafızada 'tekrar önerme' diyen dosyalar → kısa konu listesi (ghost/gundem.yasaklar,
+    gündem organıyla aynı mekanik kaynak). 2026-10-30: brifing BiGG Dünya'yı AppA için 'bugün yapılacak iş' diye önerdi —
+    iki raf kararı istemde yoktu. Hata → [] (brifing bu blok olmadan sürer)."""
+    try:
+        from ghost import gundem
+        liste = gundem.yasaklar()
+    except Exception:  # noqa: BLE001
+        return []
+    out, gor = [], set()
+    for kaynak, metin in liste:
+        if kaynak.startswith("hafıza:"):
+            konu = kaynak[7:].replace("-", " ") + ((" — " + metin[:80]) if metin else "")
+        else:
+            konu = metin.split(":", 1)[0] if ":" in metin else metin
+        konu = _kisalt(konu, 110)
+        if konu and konu.lower() not in gor:
+            gor.add(konu.lower())
+            out.append(konu)
+    return out[:en_fazla]
+
+
+def blok(gun=7, simdi=None, yasak=True):
     parcalar = []
     basliklar = intel_basliklar(gun, simdi)
     if basliklar:
@@ -94,6 +120,12 @@ def blok(gun=7, simdi=None):
     if kararlar:
         parcalar.append("SON HAFTALIK SENTEZİN KARARLARI (%s) — ERTELE denen konuyu fırsat/öneri diye geri getirme:" % ad)
         parcalar.extend("- " + k for k in kararlar)
+    yk = yasak_konular() if yasak else []
+    if yk:
+        parcalar.append("SAHİBİN RAF/İPTAL KARARLARI (raf = Ghost kendiliğinden önermez; ömür boyu yasak DEĞİL): bu konularda "
+                        "GERÇEKTEN yeni bir gelişme (yeni çağrı, son tarih, kural) varsa BİR cümle bilgi + '(rafta)' notuyla ver, "
+                        "karar sahibin; 'bugün yapılacak iş' dili yok, aynı gelişmeyi ikinci kez sunma:")
+        parcalar.extend("- " + k for k in yk)
     return "\n".join(parcalar)
 
 

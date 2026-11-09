@@ -24,6 +24,7 @@ Köprü: `ops/telegram_bridge.py` — async iş yöneticisi.
 | `/arastir <hedef>` | OSINT dosyası — iş metni `/arastir <hedef>`, skill tek kaynak |
 | `/deploy <hedef>` | deploy — guard on'ken onay ister |
 | `/model <fable\|opus\|sonnet\|haiku>` | motor seçimi; **fable = en güçlü** (Mythos sınıfı, Opus üstü), haiku = en hızlı/ucuz |
+| `/efor <low\|medium\|high\|xhigh\|max\|varsayilan>` | düşünme eforu (Claude Code `--effort`); `/efor` tek başına durumu gösterir; sohbet aynı oturumla yeniden açılır; özerk işlere uygulanmaz; Kokpit Ayarlar → Efor |
 | `/guard <on\|off>` | riskli iş onayı aç/kapa |
 | `/help` | komut listesi |
 

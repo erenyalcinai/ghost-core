@@ -83,8 +83,9 @@ class OzerkIsaret(unittest.TestCase):
 
     def test_ozerk_isaretli_digeri_degil(self):
         self.assertEqual(self._env(ozerk=True).get("GHOST_OZERK"), "1")
-        self.assertNotIn("GHOST_OZERK", self._env())
-        self.assertNotIn("GHOST_OZERK", motor.ORTAM)         # genel ortam kirlenmez
+        # dict assertNotIn mesajına girerse tüm ortam (sır değerleriyle) test çıktısına basılır → yalnız bool
+        self.assertFalse("GHOST_OZERK" in self._env(), "GHOST_OZERK sızdı")
+        self.assertFalse("GHOST_OZERK" in motor.ORTAM, "genel ortam kirlendi")
 
     def test_ozerk_onek_ayraci(self):
         self.assertTrue((tb.AUTONOMOUS_GUARD + "iş").startswith(tb.AUTONOMOUS_GUARD))

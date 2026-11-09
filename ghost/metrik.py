@@ -32,8 +32,9 @@ def _yol(ad):
 # ---------- tur kayıtları ----------
 
 def tur_kaydet(kanal, mesaj_ts, ilk_cikti_ts, cevap_ts, zaman_asimi=False,
-               arac=0, uzunluk=0, tur="sohbet", ilk_satir_ts=None):
-    """Bir sohbet/iş turunu metrik.jsonl'e yaz. Süreler saniye; ilk çıktı yoksa None."""
+               arac=0, uzunluk=0, tur="sohbet", ilk_satir_ts=None, ek=None):
+    """Bir sohbet/iş turunu metrik.jsonl'e yaz. Süreler saniye; ilk çıktı yoksa None.
+    ek: iş turlarında (Faz 4.1.0, 2026-11-08) departman/model/kip/ozerk/hata alanları — motor.run_claude yazar."""
     try:
         kayit = {"ts": time.strftime("%F %T", time.localtime(cevap_ts or time.time())),
                  "tur": tur, "kanal": kanal or "",
@@ -42,10 +43,13 @@ def tur_kaydet(kanal, mesaj_ts, ilk_cikti_ts, cevap_ts, zaman_asimi=False,
                  "ilk_satir_sn": round(ilk_satir_ts - mesaj_ts, 2) if (ilk_satir_ts and mesaj_ts) else None,
                  "toplam_sn": round((cevap_ts or time.time()) - mesaj_ts, 2) if mesaj_ts else None,
                  "zaman_asimi": bool(zaman_asimi), "arac": int(arac or 0), "uzunluk": int(uzunluk or 0)}
+        if ek:
+            for k, v in ek.items():
+                kayit.setdefault(k, v)          # çekirdek alanlar ezilmez
         with _LOCK:
             with open(_yol("metrik.jsonl"), "a", encoding="utf-8") as f:
                 f.write(json.dumps(kayit, ensure_ascii=False) + "\n")
-        if zaman_asimi:
+        if zaman_asimi and tur == "sohbet":   # iş zaman aşımı kayıp CEVAP değildir (iş kartı 'yarım' der)
             sayac("kayip_cevap")
     except Exception:
         pass
@@ -96,6 +100,8 @@ def ozet(gun=7, simdi=None):
     esik = simdi - gun * 86400
     ilk, toplam, kayip, n = [], [], 0, 0
     ilk_satir = []
+    is_n, is_toplam, is_hata, is_dep = 0, [], 0, {}   # Faz 4.1.0: iş turları (motor.run_claude yazar)
+    denetim_n = 0                                     # ikinci göz koşuları (rol=denetim) iş sayılmaz
     try:
         with open(_yol("metrik.jsonl"), encoding="utf-8") as f:
             for satir in f:
@@ -104,7 +110,21 @@ def ozet(gun=7, simdi=None):
                     ts = time.mktime(time.strptime(r["ts"], "%Y-%m-%d %H:%M:%S"))  # strptime %F/%T tanımaz
                 except Exception:
                     continue
-                if ts < esik or r.get("tur") != "sohbet":
+                if ts < esik:
+                    continue
+                if r.get("tur") == "is":
+                    if r.get("rol") == "denetim":
+                        denetim_n += 1
+                        continue
+                    is_n += 1
+                    if r.get("toplam_sn") is not None:
+                        is_toplam.append(r["toplam_sn"])
+                    if r.get("hata") or r.get("zaman_asimi"):
+                        is_hata += 1
+                    d = r.get("departman") or "genel"
+                    is_dep[d] = is_dep.get(d, 0) + 1
+                    continue
+                if r.get("tur") != "sohbet":
                     continue
                 n += 1
                 if r.get("ilk_sn") is not None:
@@ -119,7 +139,9 @@ def ozet(gun=7, simdi=None):
         pass
     except Exception:
         pass
-    return {"var": n > 0, "gun": gun, "tur": n,
+    return {"var": n > 0 or is_n > 0, "gun": gun, "tur": n,
+            "is_tur": is_n, "is_p50": _yuzdelik(is_toplam, 50), "is_p95": _yuzdelik(is_toplam, 95),
+            "is_hata": is_hata, "is_departman": is_dep, "denetim_tur": denetim_n,
             "ilk_p50": _yuzdelik(ilk, 50), "ilk_p95": _yuzdelik(ilk, 95),
             "ilk_satir_p50": _yuzdelik(ilk_satir, 50), "ilk_satir_p95": _yuzdelik(ilk_satir, 95), "ilk_satir_n": len(ilk_satir),
             "toplam_p50": _yuzdelik(toplam, 50), "toplam_p95": _yuzdelik(toplam, 95),
@@ -190,6 +212,11 @@ def metin(gun=7):
     if o["toplam_p50"] is not None:
         satir.append("tur p50 %ss · p95 %ss" % (o["toplam_p50"], o["toplam_p95"]))
     satir.append("kayıp cevap %d" % o["kayip"])
+    if o.get("is_tur"):
+        dep = ", ".join("%s %d" % (k, v) for k, v in sorted(o["is_departman"].items(), key=lambda kv: -kv[1]))
+        satir.append("iş %d tur (p50 %ss · p95 %ss · hata %d; %s)%s" % (
+            o["is_tur"], o["is_p50"], o["is_p95"], o["is_hata"], dep,
+            " · denetim %d" % o["denetim_tur"] if o.get("denetim_tur") else ""))
     if s:
         satir.append("sayaçlar: " + ", ".join("%s %d" % (k, v) for k, v in sorted(s.items())))
     return " · ".join(satir)

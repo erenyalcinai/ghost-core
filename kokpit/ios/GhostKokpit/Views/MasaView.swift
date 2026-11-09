@@ -15,23 +15,31 @@ struct MasaView: View {
     @EnvironmentObject var oturum: Oturum
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = MasaModel()
+    /// 0.19 (Sahip 2026-11-06): Masa'da belge bulmak zordu — arama kutusu + "Son eklenenler".
+    @State private var arama = ""
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    UzuvlarSeridi()
-                    SimdiBolumu()
-                    if let h = model.hata {
-                        Text(h).font(.footnote).foregroundStyle(Renk.uyari).kart()
+                    if !arama.trimmingCharacters(in: .whitespaces).isEmpty {
+                        AramaSonuclari(sorgu: arama, model: model)
+                    } else {
+                        UzuvlarSeridi()
+                        SimdiBolumu()
+                        if let h = model.hata {
+                            Text(h).font(.footnote).foregroundStyle(Renk.uyari).kart()
+                        }
+                        SonEklenenler(model: model)
+                        KlasorIcerik(ebeveyn: nil, model: model)
                     }
-                    KlasorIcerik(ebeveyn: nil, model: model)
                 }
                 .padding()
             }
             .ghostZemin()
             .navigationTitle("Masa")
             .satirBaslik()
+            .searchable(text: $arama, prompt: "Masa'da ara")
             .aracMenusu()
             .toolbar {
                 ToolbarItem(placement: .ghostSol) {
@@ -52,6 +60,111 @@ struct MasaView: View {
                 model.baglan(oturum.api)
                 model.geriBildirim = { $0 ? Titre.hafif() : Titre.hata() }
                 await model.dongu()
+            }
+        }
+    }
+}
+
+// MARK: Son eklenenler + arama (0.19)
+
+/// Kökte, klasör karolarının üstünde: en son eklenen/güncellenen 8 kayıt, hangi kartta olduğu satır altında.
+/// Sahip 2026-11-06: "Masa'da belge bulmak çok zor, son eklenenlere daha hızlı ulaşabilmeliyim".
+struct SonEklenenler: View {
+    @ObservedObject var model: MasaModel
+    @AppStorage("masa.sonEklenenler.acik") private var acik = true
+
+    private var kayitlar: [MasaKart] { model.sonEklenenler(8) }
+
+    var body: some View {
+        if !kayitlar.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { acik.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        BolumBaslik(metin: "Son eklenenler")
+                        Image(systemName: acik ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold)).foregroundStyle(Renk.ikincil).padding(.top, 6)
+                    }
+                }
+                .buttonStyle(.plain)
+                if acik {
+                    VStack(spacing: 0) {
+                        ForEach(Array(kayitlar.enumerated()), id: \.element.id) { i, k in
+                            NavigationLink(value: MasaHedef.oge(k.id)) {
+                                KisaSatir(kart: k, yer: model.ebeveynKirinti(k))
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu { KartMenusu(kart: k, model: model) }
+                            if i < kayitlar.count - 1 {
+                                Divider().overlay(Renk.ikincil.opacity(0.25)).padding(.leading, 44)
+                            }
+                        }
+                    }
+                    .background(Renk.kart, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+        }
+    }
+}
+
+/// Tek satır: simge · ad · (yer › yol) · tarih. Liste ve arama sonuçları aynı satırı kullanır.
+struct KisaSatir: View {
+    let kart: MasaKart
+    let yer: String
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: TurSimge.ad(kart.tur))
+                .font(.body).foregroundStyle(kart.klasor ? Renk.uyari.opacity(0.9) : Renk.ikincil).frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(kart.ad).font(.subheadline.weight(.medium)).foregroundStyle(Renk.metin).lineLimit(1)
+                HStack(spacing: 6) {
+                    if !yer.isEmpty {
+                        Text(yer).font(.caption2).foregroundStyle(Renk.ikincil).lineLimit(1)
+                    } else {
+                        Text(TurSimge.etiket(kart.tur)).font(.caption2).foregroundStyle(Renk.ikincil)
+                    }
+                    if !kart.ghostun {
+                        Rozet(metin: "sen", renk: Renk.uyari)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            Text(Tarih.kisa(kart.guncelleme ?? kart.ts)).font(.caption2).foregroundStyle(Renk.ikincil)
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(Renk.ikincil)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Arama kutusu doluyken Masa gövdesinin yerine geçer: ad/önizleme eşleşen kartlar, en yeni önce, yeri altında.
+struct AramaSonuclari: View {
+    let sorgu: String
+    @ObservedObject var model: MasaModel
+
+    private var sonuclar: [MasaKart] { model.ara(sorgu) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            BolumBaslik(metin: sonuclar.isEmpty ? "Sonuç yok" : "\(sonuclar.count) sonuç")
+            if sonuclar.isEmpty {
+                Text("Ad ya da önizlemede \"\(sorgu)\" geçen kart yok. Dolap'taki kartlar aramaya girmez.")
+                    .font(.footnote).foregroundStyle(Renk.ikincil)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(sonuclar.enumerated()), id: \.element.id) { i, k in
+                        NavigationLink(value: k.klasor ? MasaHedef.klasor(k.id) : MasaHedef.oge(k.id)) {
+                            KisaSatir(kart: k, yer: model.ebeveynKirinti(k))
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu { KartMenusu(kart: k, model: model) }
+                        if i < sonuclar.count - 1 {
+                            Divider().overlay(Renk.ikincil.opacity(0.25)).padding(.leading, 44)
+                        }
+                    }
+                }
+                .background(Renk.kart, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }

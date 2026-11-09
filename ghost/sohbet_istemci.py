@@ -88,17 +88,18 @@ class KaliciIstemci:
     def canli(self):
         return bool(self._durum().get("canli"))
 
-    def uygun(self, model, sid):
+    def uygun(self, model, sid, efor=None):
         if self.bagla_id:                    # devralma kipi: süreç ne olursa olsun yeniden BAŞLATMA
             return True
         try:
-            return bool(_istek({"op": "uygun", "model": model, "sid": sid}, yol=self.yol).get("uygun"))
+            return bool(_istek({"op": "uygun", "model": model, "sid": sid, "efor": efor},
+                               yol=self.yol).get("uygun"))
         except (OSError, ValueError):
             return False
 
-    def baslat(self, model, sid, resume, mcp_paths=()):
+    def baslat(self, model, sid, resume, mcp_paths=(), efor=None):
         r = _istek({"op": "baslat", "model": model, "sid": sid, "resume": bool(resume),
-                    "mcp_paths": list(mcp_paths or ())}, zaman_asimi=60, yol=self.yol)
+                    "mcp_paths": list(mcp_paths or ()), "efor": efor}, zaman_asimi=60, yol=self.yol)
         if r.get("hata"):
             raise RuntimeError(r["hata"])
         self.model, self.sid = model, sid

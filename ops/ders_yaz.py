@@ -78,17 +78,21 @@ def main():
         with open(HEDEF, encoding="utf-8") as f:
             mevcut = f.read()
 
+    tum = commitler()
+    mevcut, silinen = dersler.tekillestir(mevcut, tercih=[c[0] for c in tum])   # rebase tekrarları (2026-11-03)
     varolan = {s[:7] for s in dersler.yazili_shalar(mevcut)}
     kayitlar = []
-    for sha, tarih, konu, govde in commitler():
+    for sha, tarih, konu, govde in tum:
         ders = dersler.ders_ayikla(govde)
         etiket = dersler.etiketler(dokunulan(sha)) if (ders and sha[:7] not in varolan) else ()
         kayitlar.append((sha, tarih, konu, ders, etiket))
     yeni, eklenen = dersler.guncelle(mevcut, kayitlar)
-    k_n, v_n = karar_vade_isle(commitler())
+    k_n, v_n = karar_vade_isle(tum)
     if (k_n or v_n) and not sessiz:
         print("ders_yaz: %d karar, %d vade commit mesajından işlendi" % (k_n, v_n))
-    if eklenen:
+    if silinen and not sessiz:
+        print("ders_yaz: %d tekrar ders birleştirildi" % silinen)
+    if eklenen or silinen:
         os.makedirs(os.path.dirname(HEDEF), exist_ok=True)
         with open(HEDEF, "w", encoding="utf-8") as f:
             f.write(yeni)

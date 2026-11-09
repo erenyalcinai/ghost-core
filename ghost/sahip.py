@@ -107,6 +107,12 @@ def trafik_siteleri():
     return tuple(s["alan"] for s in siteler() if s.get("trafik"))
 
 
+def trafik_takma():
+    """Takma alan → asıl alan (profilde "takma": [...]). Aynı sitenin başka adresten gelen ziyareti
+    (ör. Instagram tarayıcısının sahip.la'su) sayımda asıl alana katılır."""
+    return {t: s["alan"] for s in siteler() if s.get("trafik") for t in (s.get("takma") or ())}
+
+
 def masa_kok():
     return tuple(profil().get("masa_kok") or ("Ghost", "Raporlar", "Paylaşımlar"))
 

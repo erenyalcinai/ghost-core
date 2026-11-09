@@ -85,6 +85,54 @@ class Kuyruk(unittest.TestCase):
         self.assertFalse(gorevler.iptal(gid))              # ikinci kez yok
         self.assertIn("iptallik", gorevler.metin())
 
+    # 2026-11-04: Ghost kendi yazdığını kaldırabilir (Sahip "sen hatırlatıcıları kaldıramıyor musun")
+    def test_sil_yalniz_telefona_yazilmis_kayit(self):
+        gid, _ = gorevler.ekle("hatirlatici", {"ad": "token yenile", "ne_zaman": _yarin()})
+        yeni, hata = gorevler.sil_kuyrukla(gid)              # henüz telefona yazılmadı
+        self.assertIsNone(yeni)
+        self.assertIn("yazılmamış", hata)
+        gorevler.sonuclandir(gid, True, "", "EK-9", "telefon")
+        yeni, hata = gorevler.sil_kuyrukla(gid)
+        self.assertIsNone(hata)
+        b = [x for x in gorevler.bekleyenler() if x["id"] == yeni][0]
+        self.assertEqual(b["tur"], "hatirlatici_sil")
+        self.assertEqual((b["veri"]["yerel_id"], b["veri"]["kaynak"], b["veri"]["ad"]), ("EK-9", gid, "token yenile"))
+        self.assertIsInstance(b["veri"]["ts"], float)        # uygulama ts'yi zorunlu çözer
+        self.assertIn("zaten kuyrukta", gorevler.sil_kuyrukla(gid)[1])
+        gorevler.sonuclandir(yeni, True, "", "EK-9", "telefon")
+        self.assertEqual(gorevler.liste()[1]["durum"], "silindi")
+        self.assertIn("zaten silindi", gorevler.sil_kuyrukla(gid)[1])
+        self.assertIn("🗑", gorevler.metin())
+
+    def test_sil_hatasi_kaynagi_bozmaz_ve_bilinmeyen(self):
+        gid, _ = gorevler.ekle("etkinlik", {"ad": "Toplantı", "bas": _yarin("14:00")})
+        gorevler.sonuclandir(gid, True, "", "EV-1", "telefon")
+        yeni, _ = gorevler.sil_kuyrukla(gid)
+        self.assertEqual(gorevler.bekleyenler()[0]["tur"], "etkinlik_sil")
+        gorevler.sonuclandir(yeni, False, "izin yok", "", "telefon")
+        kaynak = [x for x in gorevler.liste() if x["id"] == gid][0]
+        self.assertEqual(kaynak["durum"], "tamam")           # silinemediyse kaynak 'silindi' olmaz
+        self.assertIn("yok", gorevler.sil_kuyrukla(99999)[1])
+        self.assertIn("tür", gorevler.ekle("hatirlatici_sil", {"ad": "x", "ne_zaman": _yarin()})[1])  # yalnız sil_kuyrukla
+
+    def test_sil_basarisi_bildirilmez_hatasi_bildirilir(self):
+        gid, _ = gorevler.ekle("hatirlatici", {"ad": "sessiz", "ne_zaman": _yarin()})
+        gorevler.sonuclandir(gid, True, "", "EK-2", "telefon")
+        yeni, _ = gorevler.sil_kuyrukla(gid)
+        g = gorevler.sonuclandir(yeni, True, "", "zaten-yok", "telefon")
+        giden = []
+        from ghost import notify
+        eski = notify.telegram
+        notify.telegram = lambda m, *a, **k: giden.append(m)
+        try:
+            self.assertIn("zaten yoktu", gorevler.haber_ver(g))
+            self.assertEqual(giden, [])
+            g["durum"], g["sonuc"] = "hata", "izin yok"
+            gorevler.haber_ver(g)
+            self.assertEqual(len(giden), 1)
+        finally:
+            notify.telegram = eski
+
 
 class Bolge(unittest.TestCase):
     def setUp(self):

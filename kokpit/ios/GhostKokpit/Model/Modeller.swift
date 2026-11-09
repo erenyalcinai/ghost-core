@@ -22,6 +22,8 @@ struct Nabiz: Decodable {
     var freeze: Bool?
     var guardAcik: Bool?
     var model: String?
+    var efor: String?            // /efor: low…max | "varsayılan" (2026-11-02)
+    var kip: String?             // /mod: tek | departman (Faz 4, 2026-11-08)
     var makineler: [Makine]?
     var siteler: [Site]?
     var nobetciler: [Nobetci]?
@@ -46,7 +48,7 @@ struct Nabiz: Decodable {
     var kota: Kota?
 
     enum CodingKeys: String, CodingKey {
-        case at, ozet, freeze, model, makineler, siteler, nobetciler, isler, baglam, kanal, sesli
+        case at, ozet, freeze, model, efor, kip, makineler, siteler, nobetciler, isler, baglam, kanal, sesli
         case duyular, bekleyen, bugun, altyapi, baglanti, kota
         case siteNabzi = "site_nabzi"
         case is_ = "is"
@@ -342,7 +344,7 @@ struct DuyuYanit: Decodable { var ok: Bool; var guncel: [String]? }
 /// `ad` (başlık) ve `ts` (epoch — sunucu zaten doğruladı, geçmiş zaman gelmez).
 struct Gorev: Decodable, Identifiable {
     var id: Int
-    var tur: String              // hatirlatici | etkinlik
+    var tur: String              // hatirlatici | etkinlik | hatirlatici_sil | etkinlik_sil
     var veri: GorevVeri
 }
 
@@ -353,12 +355,18 @@ struct GorevVeri: Decodable {
     var not: String?
     var yer: String?
     var neZamanMetin: String?
+    /// Yalnız `*_sil`: kaldırılacak kaydın cihazdaki kimliği (yazarken geri bildirdiğimiz) ve
+    /// kimlik bulunamazsa yedek arama için hedef zamanı (epoch).
+    var yerelId: String?
+    var hedefTs: Double?
 
     enum CodingKeys: String, CodingKey {
         case ad, ts, yer
         case not = "not"
         case bitTs = "bit_ts"
         case neZamanMetin = "ne_zaman_metin"
+        case yerelId = "yerel_id"
+        case hedefTs = "hedef_ts"
     }
 }
 

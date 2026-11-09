@@ -4,6 +4,9 @@ Faz 5 duyularla tek yön kurulmuştu: telefon anlatır, Ghost dinler. Bu modül 
 yönü açar. Ghost bir görev bırakır, uygulama onu iOS'un KENDİ sistemine yazar:
 - `hatirlatici` → gerçek bir iOS Hatırlatıcı (alarmlı, Ghost kapalıyken bile çalar)
 - `etkinlik`   → gerçek bir Takvim etkinliği
+- `hatirlatici_sil` / `etkinlik_sil` → Ghost'un DAHA ÖNCE yazdığını kaldırır (2026-11-04, Sahip "sen
+  hatırlatıcıları kaldıramıyor musun"). Yalnız bu kuyruktan `tamam` dönmüş, `yerel_id`'si bilinen kayıt
+  silinebilir; uygulama kimlikle bulur (bulamazsa başlık+aynı dakika), sahibin elle kurduğuna dokunmaz.
 
 Neden Telegram mesajı yetmiyor: Ghost'un kendi zamanlayıcısı (ghost/schedule.py)
 mesaj atar — telefon sessizdeyse, uçak modundaysa ya da Sahip Telegram'a bakmıyorsa
@@ -21,7 +24,8 @@ import time
 
 from ghost import config, governance, kokpit
 
-TURLER = ("hatirlatici", "etkinlik")
+TURLER = ("hatirlatici", "etkinlik")                  # ekle() ile kurulanlar
+SIL_TURU = {"hatirlatici": "hatirlatici_sil", "etkinlik": "etkinlik_sil"}   # sil_kuyrukla() ile kaldırılanlar
 BEKLEYEN_TAVAN = 50        # tek çekimde uygulamaya verilecek en fazla görev
 OMUR_GUN = 30              # bu yaştan eski BİTMİŞ görevler budanır
 
@@ -100,6 +104,44 @@ def ekle(tur, veri, sessiz=False):
     return gid, None
 
 
+def sil_kuyrukla(gid):
+    """Ghost'un daha önce telefona YAZDIĞI hatırlatıcı/etkinliği kaldırma görevi → (id, hata).
+    Kaynak görev `tamam` ve `yerel_id`'li olmalı — "gönderdim" değil "yazıldı" dediğimiz kayıt. Aynı kayıt için
+    bekleyen silme varsa yenisi açılmaz. `ts` şimdi: uygulamanın GorevVeri'si ts'yi zorunlu çözer."""
+    c = _db()
+    r = c.execute("SELECT id,tur,veri,durum,sonuc,yerel_id,cihaz,ts,biten FROM kokpit_gorevler WHERE id=?",
+                  (int(gid),)).fetchone()
+    if not r:
+        c.close()
+        return None, "görev #%s yok" % gid
+    g = _satir(r)
+    if g["tur"] not in SIL_TURU:
+        c.close()
+        return None, "#%s silinebilir bir tür değil (%s)" % (gid, g["tur"])
+    if g["durum"] == "silindi":
+        c.close()
+        return None, "#%s zaten silindi" % gid
+    if g["durum"] != "tamam" or not g["yerel_id"]:
+        c.close()
+        return None, "#%s telefona yazılmamış (durum %s) — silinecek bir şey yok; bekliyorsa `iptal`" % (gid, g["durum"])
+    for (v,) in c.execute("SELECT veri FROM kokpit_gorevler WHERE durum='bekliyor' AND tur=?", (SIL_TURU[g["tur"]],)):
+        if json.loads(v or "{}").get("kaynak") == g["id"]:
+            c.close()
+            return None, "#%s için silme zaten kuyrukta" % gid
+    k = g["veri"]
+    veri = {"ad": k.get("ad", "?"), "yerel_id": g["yerel_id"], "kaynak": g["id"], "ts": time.time(),
+            "hedef_ts": k.get("ts"), "ne_zaman_metin": k.get("ne_zaman_metin", "")}
+    cur = c.execute("INSERT INTO kokpit_gorevler(tur, veri, durum, ts) VALUES(?,?, 'bekliyor', ?)",
+                    (SIL_TURU[g["tur"]], json.dumps(veri, ensure_ascii=False), time.strftime("%F %T")))
+    yeni = cur.lastrowid
+    c.commit()
+    c.close()
+    governance.audit("gorevler", "sil", governance.REVERSIBLE, "%s #%d ← #%d: %s" % (
+        SIL_TURU[g["tur"]], yeni, g["id"], veri["ad"][:60]))
+    _durtu()
+    return yeni, None
+
+
 def _durtu():
     """Uygulamayı sessiz push'la uyandır — kuyrukta iş var. En iyi çaba: push
     gitmezse uygulama zaten öne gelince, SSE'de ve arka plan tazelemesinde çeker."""
@@ -142,6 +184,11 @@ def sonuclandir(gid, ok, mesaj="", yerel_id="", cihaz=None):
                   "WHERE id=?", (int(gid),)).fetchone()
     c.close()
     g = _satir(r)
+    if ok and g["tur"] in SIL_TURU.values() and g["veri"].get("kaynak"):
+        c = _db()
+        c.execute("UPDATE kokpit_gorevler SET durum='silindi' WHERE id=? AND durum='tamam'", (int(g["veri"]["kaynak"]),))
+        c.commit()
+        c.close()
     governance.audit("gorevler", "sonuc", governance.READ,
                      "#%s %s → %s %s" % (gid, g["tur"], g["durum"], (mesaj or "")[:80]))
     return g
@@ -172,7 +219,9 @@ def buda():
     c.close()
 
 
-_SIMGE = {"bekliyor": "⏳", "tamam": "✅", "hata": "❌", "iptal": "🚫"}
+_SIMGE = {"bekliyor": "⏳", "tamam": "✅", "hata": "❌", "iptal": "🚫", "silindi": "🗑"}
+_AD = {"hatirlatici": "hatırlatıcı", "etkinlik": "etkinlik",
+       "hatirlatici_sil": "hatırlatıcı SİL", "etkinlik_sil": "etkinlik SİL"}
 
 
 def metin(limit=10):
@@ -183,8 +232,7 @@ def metin(limit=10):
     for x in g:
         v = x["veri"]
         s.append("%s #%d %s — %s @ %s%s" % (
-            _SIMGE.get(x["durum"], "•"), x["id"],
-            "hatırlatıcı" if x["tur"] == "hatirlatici" else "etkinlik",
+            _SIMGE.get(x["durum"], "•"), x["id"], _AD.get(x["tur"], x["tur"]),
             v.get("ad", "?"), v.get("ne_zaman_metin", "?"),
             ("\n     " + x["sonuc"]) if x["durum"] == "hata" and x["sonuc"] else ""))
     return "\n".join(s)
@@ -193,6 +241,20 @@ def metin(limit=10):
 def haber_ver(g):
     """Sonuç sahibe düşsün — 'gönderdim' ile 'telefona yazıldı' aynı şey değil."""
     v = g["veri"]
+    if g["tur"] in SIL_TURU.values():
+        # Silme başarısı bildirilmez (Sahip 2026-10-29: "koştu" bildirimleri yoruyor) — sonucu sohbette Ghost söyler;
+        # yalnız hata push'lanır.
+        tur = "Hatırlatıcı" if g["tur"] == "hatirlatici_sil" else "Takvim etkinliği"
+        if g["durum"] == "tamam":
+            return "🗑 %s telefondan kaldırıldı: %s%s" % (tur, v.get("ad", "?"),
+                                                          " (zaten yoktu)" if g.get("yerel_id") == "zaten-yok" else "")
+        metin_ = "❌ %s telefondan KALDIRILAMADI: %s — %s" % (tur, v.get("ad", "?"), g.get("sonuc") or "sebep yok")
+        try:
+            from ghost import notify
+            notify.telegram(metin_)
+        except Exception:
+            kokpit.outbox_yaz(metin_, "ghost")
+        return metin_
     tur = "Hatırlatıcı" if g["tur"] == "hatirlatici" else "Takvim etkinliği"
     if g["durum"] == "tamam":
         metin_ = "📲 %s telefonuna yazıldı: %s — %s" % (tur, v.get("ad", "?"), v.get("ne_zaman_metin", "?"))
@@ -220,6 +282,15 @@ def main(argv):
         gid, hata = ekle("etkinlik", {"ad": argv[1], "bas": argv[2],
                                       "bit": argv[3] if len(argv) > 3 else "",
                                       "yer": argv[4] if len(argv) > 4 else ""})
+    elif cmd == "sil" and len(argv) > 1:
+        kod = 0
+        for n in argv[1:]:
+            yeni, hata_ = sil_kuyrukla(n)
+            if hata_:
+                print("HATA #%s: %s" % (n, hata_)); kod = 1
+            else:
+                print("kuyruğa girdi: #%d (#%s'i kaldır) — telefon çekince silinecek (sonucu /gorevler)" % (yeni, n))
+        return kod
     elif cmd == "iptal" and len(argv) > 1:
         print("iptal edildi" if iptal(argv[1]) else "bulunamadı ya da zaten bitmiş"); return 0
     elif cmd == "json":

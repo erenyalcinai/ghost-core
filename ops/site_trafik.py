@@ -18,6 +18,7 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from ghost import sahip  # noqa: E402  (profil: ops/sahip.json)
 
 SITELER = sahip.trafik_siteleri()   # ops/sahip.json "trafik": true olan alanlar
+TAKMA = sahip.trafik_takma()        # takma alan → asıl alan (sahip.la → sahip.kim, 2026-11-03)
 
 # sahibin telefonu: iPhone 17 → 402x874 nokta, iOS 26+. iPhone 17 iOS 18
 # çalıştıramaz, bu yüzden aynı ekranda iOS 18 gören kayıt başkasıdır.
@@ -44,7 +45,8 @@ SAHIP_SAFARI = "26"
 # cihazda bu kombinasyonlar pratikte görülmüyor.
 BOT_EKRAN = {(800.0, 600.0), (1600.0, 1200.0), (1280.0, 1280.0), (1280.0, 720.0), (2000.0, 2000.0)}
 # Veri merkezi şehirleri (ekran ölçüsü ele vermezse ikinci kapı).
-BOT_SEHIR = {"Council Bluffs", "Ashburn", "Eatonton", "North Charleston", "Boardman"}
+BOT_SEHIR = {"Council Bluffs", "Ashburn", "Eatonton", "North Charleston", "Boardman",
+             "Boydton"}  # Boydton VA = Microsoft Azure veri merkezi (2026-11-04)
 
 
 def sorgu(hogql):
@@ -71,11 +73,15 @@ FROM events WHERE event = '$pageview'
  AND properties.$host IN (%s)
  AND timestamp > now() - INTERVAL %d DAY
 GROUP BY properties.$host, distinct_id ORDER BY count() DESC LIMIT 10000""" % (
-        ", ".join("'%s'" % s for s in SITELER), gun)
-    return [dict(zip(
+        ", ".join("'%s'" % s for s in tuple(SITELER) + tuple(TAKMA)), gun)
+    satirlar = [dict(zip(
         ("site", "kimlik", "os", "osv", "gen", "yuk", "sehir", "bolge",
          "vpgen", "tarayici", "tarsur", "kaynak", "olay", "ilk", "son"), r))
         for r in sorgu(q)]
+    for k in satirlar:  # takma alandan gelen ziyaret asıl siteye sayılır; ham adres 'host'ta kalır
+        k["host"] = k["site"]
+        k["site"] = TAKMA.get(k["site"], k["site"])
+    return satirlar
 
 
 def sinifla(k):

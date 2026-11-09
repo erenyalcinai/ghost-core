@@ -32,6 +32,24 @@ except Exception:
 AKTIF_IS = ("kuyrukta", "çalışıyor", "denetimde")
 
 
+def _ajan_kip():
+    """Çalışma kipi (ghost/agents.mod_oku): tek | departman (Faz 4, 2026-11-08)."""
+    try:
+        from ghost import agents
+        return agents.mod_oku()
+    except Exception:
+        return "tek"
+
+
+def _efor_seviye():
+    """/efor ayarı (ghost/efor.py); varsayılansa "varsayılan"."""
+    try:
+        from ghost import efor
+        return efor.etiket(efor.oku())
+    except Exception:
+        return ""
+
+
 def _json(ad, default=None):
     try:
         with open(os.path.join(config.OPS, ad), encoding="utf-8") as f:
@@ -273,7 +291,7 @@ def nabiz():
     except Exception:
         kanal = "telegram"
     return {"at": time.strftime("%F %T"), "ozet": ozet, "freeze": freeze,
-            "guard": bool(st.get("guard", True)), "model": st.get("model", ""),
+            "guard": bool(st.get("guard", True)), "model": st.get("model", ""), "efor": _efor_seviye(), "kip": _ajan_kip(),
             "kanal": kanal, "sesli": bool(st.get("voice")),
             "makineler": mak, "siteler": siteler, "nobetciler": nob, "isler": isler,
             "baglam": _baglam(), "duyular": _duyular(), "disk_bos_gb": vps.get("disk_bos_gb"),
