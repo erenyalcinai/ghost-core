@@ -141,7 +141,9 @@ def dokum_metni(d):
 
 # ---------- model ----------
 
-def _model_calistir(istem):
+def _model_komut(istem):
+    """(argv, env): araçsız haiku çağrısının komutu ve dar ortamı (yalnız giriş belirteci; başka sır taşımaz).
+    Ayrı işlev: `cevap_olcum` aynı kabuğu kesilebilir bir bekleyişle koşturur (2026-11-10)."""
     from ghost import modeller
     kopru = config.load_env()
     claude = modeller.claude_bin()
@@ -152,9 +154,13 @@ def _model_calistir(istem):
         model = modeller.tam_model(MODEL)
     except Exception:
         model = MODEL
+    return [claude, "-p", istem, "--output-format", "text", "--model", model, "--tools", "", "--strict-mcp-config"], env
+
+
+def _model_calistir(istem):
+    argv, env = _model_komut(istem)
     with tempfile.TemporaryDirectory(prefix="epizod-") as kum:
-        r = subprocess.run([claude, "-p", istem, "--output-format", "text", "--model", model,
-                            "--tools", "", "--strict-mcp-config"],
+        r = subprocess.run(argv,
                            capture_output=True, text=True, timeout=300, cwd=kum, env=env, stdin=subprocess.DEVNULL)
     if r.returncode != 0 or not r.stdout.strip():
         raise RuntimeError("epizod modeli cevap vermedi (rc=%s): %s" % (r.returncode, (r.stderr or "")[-200:]))

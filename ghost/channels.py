@@ -130,8 +130,35 @@ class AppKanal:
     def __init__(self, log=None):
         self.log = log
 
+    @staticmethod
+    def _yetim_benimse(text):
+        """Yeni geçici balon açmadan önce: dökümde hâlâ geçici duran Ghost balonu var mı? Sohbet tek şeritli olduğu için
+        böyle bir satır ancak balonu açan köprü süreci tur bitmeden kapandıysa kalır (2026-11-10: selfcheck köprüyü turun
+        ortasında yeniledi; eski balon sonsuza dek dönen "çalışıyor" olarak kaldı, yeni köprü ikinci balon açtı).
+        sahibin son mesajından SONRA açılmış en yeni yetim aynı turundur → benimsenir (metni güncellenir, id'si döner);
+        daha eskiler kapatılır (geçici=0, metni kalır). → benimsenen id ya da None. Asla fırlatmaz."""
+        try:
+            from ghost import kokpit
+            satirlar = kokpit.outbox_oku(-1, 200)
+            sahip = [m["id"] for m in satirlar if m.get("kaynak") == "sahip"]
+            son_sahip = max(sahip) if sahip else None   # pencerede Sahip mesajı yoksa balonun turu bilinemez → benimseme YOK
+            benimsenen = None
+            for m in reversed([m for m in satirlar if m.get("kaynak") == "ghost" and m.get("gecici")]):
+                if benimsenen is None and son_sahip is not None and m["id"] > son_sahip \
+                        and kokpit.outbox_guncelle(m["id"], text, None, gecici=True):
+                    benimsenen = m["id"]
+                else:
+                    kokpit.outbox_guncelle(m["id"], m.get("metin") or "", None)   # dönen balon dursun
+            return benimsenen
+        except Exception:
+            return None
+
     def send(self, text, buttons=None, gecici=False):
         from ghost import apns, kokpit
+        if gecici:
+            rid = self._yetim_benimse(text)   # köprü tur ortasında yenilendiyse açık balon sürer, ikincisi açılmaz
+            if rid:
+                return rid
         rid = kokpit.outbox_yaz(text, "ghost", buttons, gecici=gecici)
         if gecici:
             return rid                      # ilk satır: push yok, sonuç gelince gider
@@ -146,10 +173,14 @@ class AppKanal:
                 self.log("push hata: %r" % e)
         return rid
 
-    def guncelle(self, ref, text, buttons=None):
-        """Faz 2.7: ilk satır balonunu (ref = döküm id) sonuçla doldur; push sonuçta gider (send kuralı)."""
+    def guncelle(self, ref, text, buttons=None, gecici=False, ara=None):
+        """Faz 2.7: ilk satır balonunu (ref = döküm id) sonuçla doldur; push sonuçta gider (send kuralı).
+        2026-11-10: `gecici=True` → tur sürerken en son ara not aynı balona yazılır (geçici kalır, push YOK,
+        başarısızsa yeni mesaj AÇILMAZ); `ara` = turun ara notları, sonuçla birlikte kayda girer."""
         from ghost import apns, kokpit
-        if not ref or not kokpit.outbox_guncelle(ref, text, buttons):
+        if gecici:
+            return ref if (ref and kokpit.outbox_guncelle(ref, text, None, gecici=True)) else None
+        if not ref or not kokpit.outbox_guncelle(ref, text, buttons, ara=ara):
             return self.send(text, buttons)
         try:
             if buttons:
@@ -199,13 +230,23 @@ class Kanallar:
                 pass
         return refs
 
-    def guncelle(self, refs, text, buttons=None):
-        """Faz 2.7: send(gecici=True) ile açılan balonları sonuçla doldur; ref'i olmayan kanal normal send alır."""
+    def guncelle(self, refs, text, buttons=None, gecici=False, ara=None):
+        """Faz 2.7: send(gecici=True) ile açılan balonları sonuçla doldur; ref'i olmayan kanal normal send alır.
+        2026-11-10: `gecici=True` (ara not) → YALNIZ Kokpit balonu yerinde güncellenir; ref yoksa hiçbir şey gitmez,
+        Telegram'a dokunulmaz (yerel yazma, ağ çağrısı yok). `ara` yalnız Kokpit kaydına yazılır."""
         out = {}
         for k in self.kanallar:
             ad = getattr(k, "ad", "")
             try:
-                r = k.guncelle((refs or {}).get(ad), text, buttons) if hasattr(k, "guncelle") else k.send(text, buttons)
+                if gecici:
+                    ref = (refs or {}).get(ad)
+                    if ad != "kokpit" or not ref or not hasattr(k, "guncelle"):
+                        continue
+                    r = k.guncelle(ref, text, None, gecici=True)
+                elif ara and ad == "kokpit" and hasattr(k, "guncelle"):
+                    r = k.guncelle((refs or {}).get(ad), text, buttons, ara=ara)
+                else:
+                    r = k.guncelle((refs or {}).get(ad), text, buttons) if hasattr(k, "guncelle") else k.send(text, buttons)
                 if r:
                     out[ad] = r
             except Exception:

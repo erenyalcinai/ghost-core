@@ -631,11 +631,12 @@ def send(chat_id, text, buttons=None, yalniz=None, gecici=False):
     return _kanallar(chat_id).send(text, buttons, yalniz=yalniz, gecici=gecici)
 
 
-def send_guncelle(chat_id, refs, text, buttons=None):
+def send_guncelle(chat_id, refs, text, buttons=None, gecici=False, ara=None):
     """Faz 2.7: send(gecici=True) ile açılan balonları sonuçla doldur (Telegram editMessageText, Kokpit outbox_guncelle);
-    ref'i olmayan kanal normal mesaj alır."""
+    ref'i olmayan kanal normal mesaj alır. 2026-11-10: `gecici=True` → ara not (yalnız Kokpit balonu, geçici kalır);
+    `ara` → turun ara notları sonuçla birlikte Kokpit kaydına yazılır."""
     text = text.strip() if text and text.strip() else "(boş yanıt)"
-    return _kanallar(chat_id).guncelle(refs or {}, text, buttons)
+    return _kanallar(chat_id).guncelle(refs or {}, text, buttons, gecici=gecici, ara=ara)
 
 
 def answer_cb(cb_id, text=""):
@@ -1029,6 +1030,13 @@ class Manager:
             log("ilk satır hata: %r" % e)
             return None
 
+    def _ara_not_gonder(self, refs, metin):
+        """2026-11-10: tur sürerken gelen ara not aynı Kokpit balonuna yazılır (geçici kalır, push yok, Telegram'a gitmez)."""
+        try:
+            send_guncelle(self.chat_id, refs, metin, gecici=True)
+        except Exception as e:
+            log("ara not hata: %r" % e)
+
     def _chat_run(self, prompt, text, mcp_servers, on_usage, sar=None):
         """Sohbet turunu koştur; hata sınıfına göre TEK doğru kurtarmayı seç.
 
@@ -1206,7 +1214,8 @@ class Manager:
 
             mesaj_ts = time.time()             # ölçü: tur başlangıcı (metrik.jsonl)
             nabiz = _nabiz_basla(self.chat_id)
-            ilk = ilk_satir.Sarmal(on_ilk=self._ilk_satir_gonder)   # Faz 2.7: ilk cümle saniyeler içinde, aynı balon dolar
+            ilk = ilk_satir.Sarmal(on_ilk=self._ilk_satir_gonder,   # Faz 2.7: ilk cümle saniyeler içinde, aynı balon dolar
+                                   on_not=self._ara_not_gonder)     # 2026-11-10: sonraki notlar aynı balona akar, kayıtta kalır
             try:
                 res, sid, err = self._chat_run(prompt, text, mcp_servers, _usage, sar=ilk.sar)
             finally:
@@ -1239,7 +1248,8 @@ class Manager:
             self._save_chat()  # şeridi diske yaz → sonraki restart unutmasın
             res = _cikti_kurali(res)         # uzun cevap Masa'ya, sohbete özet (2026-10-29)
             if ilk.refs:
-                send_guncelle(self.chat_id, ilk.refs, res)   # Faz 2.7: ilk satır balonu sonuçla dolar
+                send_guncelle(self.chat_id, ilk.refs, res,   # Faz 2.7: ilk satır balonu sonuçla dolar
+                              ara=ilk.ara_notlar() or None)   # 2026-11-10: ara notlar aynı kayıtta kalır
             else:
                 send(self.chat_id, res)
             try:  # ölçü: mesaj → ilk çıktı → cevap (metrik.jsonl); kanal = birincil kanal
@@ -1248,6 +1258,15 @@ class Manager:
                                   arac=arac_n, uzunluk=len(res or ""), ilk_satir_ts=ilk.gonderim_ts)
             except Exception as _e:
                 _sessiz("_usage@1428", _e)
+            try:  # sessiz ölçüm (tur deneyimi planı §4, 2026-11-10): sorulu + araçlı turda son cevap soruya değindi mi.
+                # Cevap GİTTİKTEN sonra, arka planda; sahibe bir şey gitmez. `ham` = sarmalanmamış mesaj (text'e devir/
+                # süreklilik notları eklenmiş olabilir). Modül açık çekirdekte yok → tembel içe alma.
+                from ghost import cevap_olcum as _cevap_olcum
+                _cevap_olcum.olc_arkaplan(ham, res, arac_n, hata=bool(err))
+            except ImportError:
+                pass
+            except Exception as _e:
+                _sessiz("cevap_olcum", _e)
             try:  # abonelik kotası bu turla değişti → Nabız 5 dk eşikle tazelensin
                 kota.arka_planda_yenile(min_yas=300)
             except Exception as _e:

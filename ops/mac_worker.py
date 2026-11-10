@@ -660,6 +660,31 @@ def _idx_hedef(satir):
     return m.group(1) if m else None
 
 
+def _idx_hedefler(satir):
+    """Satırdaki BÜTÜN hedefler. İndeks 2026-11-09'da sıkıştırıldı: bir satır birden çok hafızaya işaret edebilir
+    ('- [A](a.md) · [B](b.md) — …'). Yalnız ilk hedefe bakan birleşim b.md'yi "yerelde yok" sayıp karşı makinedeki
+    tek satırını geri ekliyordu → sıkıştırılan indeks her eşitlemede yeniden şişiyordu (2026-11-10: 111 → 188 satır)."""
+    return re.findall(r"\]\(([^)]+\.md)\)", satir)
+
+
+def indeks_birlestir(taban, oteki):
+    """Hedef bazlı MEMORY.md birleşimi (satır listeleri → satır listesi). Taban olduğu gibi kalır (kendi içindeki
+    tam tekrar hariç); ötekinden yalnız, hedeflerinden en az biri tabanda HİÇ geçmeyen '- [' satırları eklenir."""
+    gorulen, birlesik = set(), []
+    for l in taban:  # tabanın kendi içindeki tekrarı da toparla
+        h = _idx_hedefler(l)
+        if h and all(x in gorulen for x in h):
+            continue
+        gorulen.update(h)
+        birlesik.append(l)
+    for l in oteki:
+        h = _idx_hedefler(l)
+        if h and any(x not in gorulen for x in h) and l.strip().startswith("- ["):
+            gorulen.update(h)
+            birlesik.append(l)
+    return birlesik
+
+
 def sync_harness():
     """Harness hafızası (Claude'un proje memory/ dizini) iki yönlü senkron —
     Ghost'un Mac'te ve VPS'te öğrendikleri tek beyin olur. 30 dk'da bir.
@@ -693,19 +718,7 @@ def sync_harness():
             yerel_ts = int(os.path.getmtime(idx)) if os.path.exists(idx) else 0
             taban, oteki = ((uzak, yerel) if uzak_ts > yerel_ts
                             else (yerel, uzak))
-            gorulen, birlesik = set(), []
-            for l in taban:  # tabanın kendi içindeki tekrarı da toparla
-                h = _idx_hedef(l)
-                if h and h in gorulen:
-                    continue
-                if h:
-                    gorulen.add(h)
-                birlesik.append(l)
-            for l in oteki:
-                h = _idx_hedef(l)
-                if h and h not in gorulen and l.strip().startswith("- ["):
-                    gorulen.add(h)
-                    birlesik.append(l)
+            birlesik = indeks_birlestir(taban, oteki)
             out = "\n".join(birlesik) + "\n"
             if not os.path.exists(idx) or open(idx, encoding="utf-8").read() != out:
                 with open(idx, "w", encoding="utf-8") as f:

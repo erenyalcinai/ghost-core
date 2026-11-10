@@ -500,6 +500,8 @@ struct MesajBalonu: View, Equatable {
     /// Bu mesajda daha önce basılan buton (varsa): butonlar kilitlenir, seçilen vurgulanır.
     var secili: String?
     var butonTikla: (String) -> Void
+    /// 0.21: "N ara not" satırı açık mı. Yerel durum — liste yüksekliği yalnız Sahip dokununca değişir.
+    @State private var araAcik = false
 
     /// Kapanış (closure) karşılaştırılamaz; SwiftUI o yüzden her üst güncellemede tüm
     /// balonları yeniden çiziyordu. Eager VStack'te bu 50+ markdown çözümlemesi demek —
@@ -512,6 +514,9 @@ struct MesajBalonu: View, Equatable {
             VStack(alignment: .leading, spacing: 8) {
                 if let md = mesaj.medya {
                     MedyaBalonu(mesajID: mesaj.id, medya: md)
+                }
+                if !mesaj.sahipten, mesaj.gecici != true, let notlar = mesaj.ara, !notlar.isEmpty {
+                    AraNotlar(notlar: notlar, acik: $araAcik)   // 0.21: tur notları cevabın üstünde, katlı
                 }
                 if !mesaj.metin.isEmpty {
                     if mesaj.sahipten {
@@ -564,6 +569,58 @@ struct MesajBalonu: View, Equatable {
             }
             if !mesaj.sahipten { Spacer(minLength: 48) }
         }
+    }
+}
+
+/// Turun ara notları (0.21, 2026-11-10): cevabın üstünde tek katlanır satır — "4 ara not · 8 dk".
+/// Dokununca notlar saatleriyle açılır. Kapalıyken tek satır yer tutar; cevap her zaman asıl içeriktir.
+struct AraNotlar: View {
+    var notlar: [AraNot]
+    @Binding var acik: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                acik.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: acik ? "chevron.down" : "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                    Text(baslik).font(.caption)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(Renk.ikincil)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if acik {
+                ForEach(Array(notlar.enumerated()), id: \.offset) { _, n in
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let ts = n.ts, !sohbetSaati(ts).isEmpty {
+                            Text(sohbetSaati(ts)).font(.caption2).foregroundStyle(Renk.ikincil)
+                        }
+                        MarkdownMetin(metin: n.metin, renk: Renk.metin.opacity(0.7))
+                            .font(.footnote)
+                    }
+                }
+                Rectangle().fill(Renk.ikincil.opacity(0.25)).frame(height: 1)
+            }
+        }
+    }
+
+    /// "4 ara not · 8 dk" — süre ilk ve son notun saatinden; okunamazsa yalnız sayı.
+    private var baslik: String {
+        var s = "\(notlar.count) ara not"
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        if notlar.count > 1,
+           let ilk = notlar.first?.ts.flatMap({ f.date(from: $0) }),
+           let son = notlar.last?.ts.flatMap({ f.date(from: $0) }) {
+            let dk = Int((son.timeIntervalSince(ilk) / 60).rounded())
+            s += dk < 1 ? " · 1 dk'dan kısa" : " · \(dk) dk"
+        }
+        return s
     }
 }
 

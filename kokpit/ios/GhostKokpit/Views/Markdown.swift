@@ -31,10 +31,14 @@ struct MarkdownMetin: View {
                 case .paragraf(let t):
                     Text(satirIci(t)).foregroundStyle(renk)
                 case .alinti(let t):
-                    HStack(alignment: .top, spacing: 8) {
-                        Rectangle().fill(Renk.ikincil.opacity(0.6)).frame(width: 3)
-                        Text(satirIci(t)).foregroundStyle(renk.opacity(0.85))
-                    }
+                    // Çubuk metnin overlay'i: yüksekliği metinden gelir, düzene yüksekliği serbest
+                    // şekil girmez; metin dikeyde kesilemez (2026-11-10: sondaki alıntı görünmedi).
+                    Text(satirIci(t)).foregroundStyle(renk.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 11)
+                        .overlay(alignment: .leading) {
+                            Rectangle().fill(Renk.ikincil.opacity(0.6)).frame(width: 3)
+                        }
                 case .tablo(let bas, let satirlar):
                     ScrollView(.horizontal, showsIndicators: false) {
                         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 5) {

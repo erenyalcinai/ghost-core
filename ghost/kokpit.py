@@ -47,7 +47,8 @@ _EK_SUTUNLAR = (("apns_token", "TEXT"), ("apns_env", "TEXT"),   # Faz 2 (push)
 _EK_OUTBOX = (("medya", "TEXT"),    # Faz 4: Ghost'un/sahibin görseli, videosu, sesi, belgesi (JSON)
               ("kanal", "TEXT"),    # Faz 1.13 (2026-10-29): satır hangi kanaldan (kokpit|telegram|…) — teslim ölçüsü
               ("gecici", "INTEGER"),   # Faz 2.7: 1 = ilk satır (geçici balon), sonuç gelince 0 + metin güncellenir
-              ("guncelleme", "REAL"))  # Faz 2.7: son güncelleme anı (epoch); istemci `gts` ile yalnız değişenleri çeker
+              ("guncelleme", "REAL"),  # Faz 2.7: son güncelleme anı (epoch); istemci `gts` ile yalnız değişenleri çeker
+              ("ara", "TEXT"))      # 2026-11-10: turun ara notları (JSON [{"ts","metin"}]); yalnız Ghost'un tur cevabında dolu
 MEDYA_DIZIN = "kokpit_medya"        # ~/.ghost altında (config.veri_dizin); kaynak dosya buraya KOPYALANIR (özgünü silinebilir)
 MEDYA_TAVAN = 200 * 1024 * 1024     # dizin bu boyutu aşınca en eski dosyalar budanır
 SCHEMA += """
@@ -194,13 +195,19 @@ def outbox_yaz(metin, kaynak="ghost", butonlar=None, medya=None, kanal=None, gec
         return None
 
 
-def outbox_guncelle(rid, metin, butonlar=None):
+def outbox_guncelle(rid, metin, butonlar=None, gecici=False, ara=None):
     """Faz 2.7: var olan döküm satırının metnini (ve butonlarını) değiştir — ilk satır balonu sonuçla dolar.
-    gecici→0, guncelleme=şimdi; istemci aynı id'yi yerinde değiştirir. → True/False. Asla fırlatmaz."""
+    gecici→0, guncelleme=şimdi; istemci aynı id'yi yerinde değiştirir. → True/False. Asla fırlatmaz.
+    2026-11-10: `gecici=True` → balon geçici KALIR (tur sürerken en son ara not) ve YALNIZ hâlâ geçici olan satıra
+    yazılır — sonuçla dolmuş balonu geç kalan bir not ezemez (→ False). `ara` = turun ara notları ([{"ts","metin"}],
+    sonuçla birlikte yazılır; verilmezse eldeki korunur)."""
     try:
+        ara_json = json.dumps(ara, ensure_ascii=False) if ara else None
         c = _db()
-        n = c.execute("UPDATE kokpit_outbox SET metin=?, butonlar=COALESCE(?, butonlar), gecici=0, guncelleme=? WHERE id=?",
-                      (metin or "", _butonlar_json(butonlar) if butonlar else None, time.time(), int(rid))).rowcount
+        n = c.execute("UPDATE kokpit_outbox SET metin=?, butonlar=COALESCE(?, butonlar), gecici=?, ara=COALESCE(?, ara), "
+                      "guncelleme=? WHERE id=?" + (" AND gecici=1" if gecici else ""),
+                      (metin or "", _butonlar_json(butonlar) if butonlar else None, 1 if gecici else 0, ara_json,
+                       time.time(), int(rid))).rowcount
         c.commit()
         c.close()
         return n > 0
@@ -213,7 +220,7 @@ def outbox_guncellenenler(since_ts, limit=20):
     if not since_ts:
         return []
     c = _db()
-    rows = c.execute("SELECT id, ts, kaynak, metin, butonlar, medya, gecici FROM kokpit_outbox WHERE guncelleme > ? "
+    rows = c.execute("SELECT id, ts, kaynak, metin, butonlar, medya, gecici, ara FROM kokpit_outbox WHERE guncelleme > ? "
                      "ORDER BY guncelleme LIMIT ?", (float(since_ts), int(limit))).fetchall()
     c.close()
     return [_satir(*r) for r in rows]
@@ -226,7 +233,7 @@ def outbox_son_guncelleme():
     return float(r or 0)
 
 
-def _satir(i, ts, kaynak, metin, but, med, gecici=0):
+def _satir(i, ts, kaynak, metin, but, med, gecici=0, ara=None):
     m = None
     if med:
         try:
@@ -234,8 +241,16 @@ def _satir(i, ts, kaynak, metin, but, med, gecici=0):
             m.pop("yol", None)        # sunucu yolu istemciye ÇIKMAZ; dosya /v1/medya/<id> ile gelir
         except Exception:
             m = None
-    return {"id": i, "ts": ts, "kaynak": kaynak, "metin": metin,
-            "butonlar": json.loads(but) if but else None, "medya": m, "gecici": bool(gecici)}
+    d = {"id": i, "ts": ts, "kaynak": kaynak, "metin": metin,
+         "butonlar": json.loads(but) if but else None, "medya": m, "gecici": bool(gecici)}
+    if ara:                           # yalnız notu olan satırda — eski istemci bilinmeyen alanı yok sayar
+        try:
+            notlar = json.loads(ara)
+            if isinstance(notlar, list) and notlar:
+                d["ara"] = notlar
+        except Exception:
+            pass
+    return d
 
 
 def outbox_oku(since=0, limit=50, once=None):
@@ -243,7 +258,7 @@ def outbox_oku(since=0, limit=50, once=None):
     satırlık dökümü baştan yüklemesin). once verilirse id < once olan son `limit`
     satır ("daha eski" sayfası). Her durumda artan sırada döner."""
     c = _db()
-    sel = "SELECT id, ts, kaynak, metin, butonlar, medya, gecici FROM kokpit_outbox "
+    sel = "SELECT id, ts, kaynak, metin, butonlar, medya, gecici, ara FROM kokpit_outbox "
     if once is not None:
         rows = c.execute(sel + "WHERE id < ? ORDER BY id DESC LIMIT ?",
                          (int(once), int(limit))).fetchall()[::-1]

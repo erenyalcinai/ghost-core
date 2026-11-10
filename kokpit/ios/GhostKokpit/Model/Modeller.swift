@@ -291,7 +291,15 @@ struct Mesaj: Decodable, Identifiable, Equatable {   // Equatable: balon yeniden
     var butonlar: [[Buton]]?
     var medya: Medya?
     var gecici: Bool?            // Faz 2.7: ilk satır balonu — sonuç gelince aynı id metinle dolar
+    var ara: [AraNot]?           // 0.21: turun ara notları — cevabın üstünde katlanır satır (yalnız notu olan cevapta gelir)
     var sahipten: Bool { (kaynak ?? "").lowercased() == "sahip" }
+}
+
+/// Turun ara notu (0.21, 2026-11-10): Ghost'un tur sürerken yazdığı durum cümlesi. Sunucu tur bitince
+/// bunları cevabın kaydında saklar (`ara`); sohbette cevabın üstünde "N ara not" satırı olarak açılır.
+struct AraNot: Decodable, Equatable, Hashable {
+    var ts: String?              // "2026-11-10 07:31:45"
+    var metin: String
 }
 
 /// Sohbet şeridi çalışıyor mu (Telegram'daki "typing" karşılığı) — son araç çağrısı özetle.
