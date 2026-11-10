@@ -6,9 +6,19 @@ Sınıflar (VISION.md'deki durum makinesi):
   PERMANENT   kalıcı yaz (deploy, push, silme, store) — onay ister
   SPEND       harcama / dış taahhüt — onay ister (en üst)
 
-`classify(text)` metinden en yüksek sınıfı çıkarır (regex v2; ileride model
-sınıflandırması eklenebilir). `audit()` her otonom eylemi ops/audit.jsonl'e
-yazar. FREEZE dosyası varken otonom eylemler durur (/freeze · /unfreeze).
+`classify(text)` metinden en yüksek sınıfı çıkarır (anahtar kelime regex'i).
+`audit()` her otonom eylemi ops/audit.jsonl'e yazar. FREEZE dosyası varken
+otonom eylemler durur (/freeze · /unfreeze).
+
+`classify` GÜVENLİK SINIRI DEĞİLDİR — iş METNİNE bakan ön elemedir: gözetimsiz
+işte "başlamadan onay kartı açılsın mı", hangi model koşsun, ikinci göz baksın
+mı. Kaçırır ("eski yedekleri temizle" → read) ve fazla yakalar ("kart
+tasarımını incele" → spend); metin başka türlü yazılarak aşılabilir. Bu yüzden
+sonucu yalnız SIKILAŞTIRMAK için kullanılır, hiçbir yerde izin VERMEZ. Zorlama
+eylemin olduğu yerde ve ajanın dışındadır: ops/guvenlik_kapisi.py (özerk
+oturumda geri alınmaz araç çağrısı reddi), sır vekili (özerk oturum yazamaz),
+onay servisi (ajan onay yazamaz). Regex'i model sınıflandırıcıyla değiştirmek
+bunu sınıra çevirmez: o da metne bakar ve kandırılabilir.
 """
 import json
 import os

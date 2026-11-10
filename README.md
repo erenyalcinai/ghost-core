@@ -148,9 +148,15 @@ dies, the Mac takes over the Telegram listener (baton policy) so the owner at le
 ## What makes it different
 
 **It keeps itself safe in production, not in a demo.**
-- **Action classes** (`ghost/governance.py`): every action is classified read / reversible /
-  permanent / spend. Permanent and spend actions require explicit approval; everything
-  autonomous is written to an audit log; a `FREEZE` file stops all autonomy instantly.
+- **Action classes** (`ghost/governance.py`): work is sorted into read / reversible / permanent /
+  spend. For unattended jobs (scheduler, webhooks, goals) a keyword classifier reads the job text
+  and opens an approval card before a permanent or spend job starts. That classifier is triage,
+  not a security boundary: it reads intent, and intent can be phrased around it. Enforcement sits
+  at the tool call and outside the agent — an unattended session is refused irreversible actions
+  by the root-owned tool guard whatever the job text said, the secret proxy will not write on
+  behalf of an unattended session, and approvals are recorded by a separate system user the agent
+  cannot write as (see *Threat model*). Everything autonomous is written to an audit log; a
+  `FREEZE` file stops all autonomy instantly.
 - **Blind second eye** (`ghost/verify.py`): when a job claims "done", a separate reviewer
   that *cannot see the agent's reasoning* reads only the owner's order and the raw result.
   A "missing" or "wrong" verdict vetoes the ✅. The agent does not decide when it is reviewed.

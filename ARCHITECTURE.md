@@ -45,7 +45,7 @@ Grouped by concern. Line counts are from this tree.
 - `sahip.py` (128) — **owner profile loader**. All personal constants (name, sites, root cards, seed entities, ASR vocabulary, voice prompt facts, SSH fingerprints) come from `ops/sahip.json`; a broken file degrades to the example profile and raises a selfcheck warning instead of crashing imports.
 
 **Governance and verification**
-- `governance.py` (100) — action classes `read < reversible < permanent < spend`, regex classifier, audit log, `FREEZE` file.
+- `governance.py` (100) — action classes `read < reversible < permanent < spend`, keyword (regex) classifier used for triage only (§4), audit log, `FREEZE` file.
 - `verify.py` (196) — blind second-eye reviewer with veto. Triggered by rule (`needs_review`), not by the agent.
 - `sandbox.py` (95) — time/process-group limited subprocess with scrubbed env. **No FS/network jail.**
 - `transparency.py` (73) — weekly "what did Ghost do" report.
@@ -113,6 +113,14 @@ read ──► reversible-write ──► permanent-write ──► spend
 `/freeze` stops every level at once. Every autonomous action lands in `ops/audit.jsonl`. Weekly
 transparency report goes to the owner. Autonomous (unattended) jobs run with an extra
 `AUTONOMOUS_GUARD` restriction: nothing irreversible, nothing that spends.
+
+The class of an unattended job comes from a keyword classifier over the job text
+(`governance.classify`). It decides whether an approval card is opened before the job starts, which
+model runs it and whether the verifier looks at it — nothing more. It misses ("clean up the old
+backups" reads as `read`) and over-matches, so nothing downstream trusts it to *allow* anything.
+What a session may actually do is enforced where the action happens: the `PreToolUse` guard refuses
+irreversible tool calls in an unattended session, the secret proxy refuses its writes, and the
+approval service is a separate user the agent cannot write as.
 
 The verifier (§2) sits *after* the work and *before* the report. Its three properties are the
 whole point: triggered by rule, blind to the agent's reasoning, able to veto.
