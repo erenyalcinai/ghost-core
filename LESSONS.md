@@ -1,7 +1,7 @@
 # Lessons
 
-170 operational lessons from 65 days of running an autonomous personal AI institution in
-production. Each one was written into a commit message (`Ders:` block) at the moment the
+179 operational lessons from running an autonomous personal AI institution in production
+(21 August to 28 October 2026). Each one was written into a commit message (`Ders:` block) at the moment the
 mistake was understood, and extracted into this file automatically. Dates are kept; commit
 hashes, product names and personal details are not. Product references are generalised
 ("the iOS app", "the owner") on purpose — the lesson is the point, not the portfolio.

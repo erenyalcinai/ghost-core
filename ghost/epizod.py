@@ -147,9 +147,7 @@ def _model_komut(istem):
     from ghost import modeller
     kopru = config.load_env()
     claude = modeller.claude_bin()
-    env = {k: os.environ[k] for k in ("HOME", "PATH", "LANG", "CLAUDE_CODE_OAUTH_TOKEN") if os.environ.get(k)}
-    if not env.get("CLAUDE_CODE_OAUTH_TOKEN") and kopru.get("CLAUDE_CODE_OAUTH_TOKEN"):
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = kopru["CLAUDE_CODE_OAUTH_TOKEN"]
+    env = modeller.alt_model_env(kopru)   # HOME/PATH/LANG + tek giriş kimliği (belirteç; yoksa API anahtarı)
     try:
         model = modeller.tam_model(MODEL)
     except Exception:

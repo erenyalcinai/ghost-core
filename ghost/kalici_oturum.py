@@ -46,6 +46,9 @@ from ghost import config
 
 DURUM_DOSYASI = os.path.join(config.OPS, "kalici_oturum.json")
 BOSTA_KAPAT_SN = int(os.environ.get("JARVIS_KALICI_BOSTA", "3600"))
+# Tur içinde süreçten bu kadar sn hiç satır gelmezse takılmış sayılır (2026-11-10; iş yolundaki bekçinin eşi,
+# bkz. motor.IS_TAVAN notu). Tur tavanı (`limit`) 1800 iken etkisizdir; tavan yükselince takılmayı o yakalar.
+SESSIZLIK_SN = int(os.environ.get("JARVIS_SESSIZLIK", "1800"))
 EOF = object()
 
 
@@ -257,15 +260,17 @@ class KaliciOturum:
             except Exception:
                 return None, "", self.err[0], False, True
             son = time.time() + limit
+            son_cikti = time.time()
             while True:
                 kalan = son - time.time()
-                if kalan <= 0:
+                if kalan <= 0 or (SESSIZLIK_SN and time.time() - son_cikti >= SESSIZLIK_SN):
                     zaman_asimi = True
                     break
                 try:
-                    satir = self.q.get(timeout=min(kalan, 5))
+                    satir = self.q.get(timeout=max(0.01, min(kalan, 5, SESSIZLIK_SN / 4.0 if SESSIZLIK_SN else 5)))
                 except queue.Empty:
                     continue
+                son_cikti = time.time()
                 if satir is EOF:
                     oldu = True
                     break

@@ -9,6 +9,7 @@ import os
 import stat
 import sys
 import tempfile
+import time
 import unittest
 
 from tests import common  # noqa: F401
@@ -124,6 +125,20 @@ class TestKaliciOturum(unittest.TestCase):
         self.assertTrue(za)
         self.assertFalse(self.k.canli())
         self.assertFalse(kalici_oturum.durum_oku().get("pid"))
+
+    def test_sessizlik_bekcisi_tavandan_once_keser(self):
+        """Tavan 30 sn ama süreç 1 sn'dir sessiz → takılmış sayılır (2026-11-10)."""
+        eski, kalici_oturum.SESSIZLIK_SN = kalici_oturum.SESSIZLIK_SN, 1
+        try:
+            self.k.baslat("fable", "sid-1", resume=False)
+            t0 = time.time()
+            s, _, _, za, oldu = self.k.tur("uyu", 30)
+            self.assertIsNone(s)
+            self.assertTrue(za)
+            self.assertLess(time.time() - t0, 6)
+            self.assertFalse(self.k.canli())
+        finally:
+            kalici_oturum.SESSIZLIK_SN = eski
 
     def test_surec_olurse_oldu_bayragi(self):
         self.k.baslat("fable", "sid-1", resume=False)

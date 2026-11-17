@@ -67,8 +67,22 @@ def _durum(ad, eski_dosya, default=None):
         return default
 
 
+ISTEGE_BAGLI = ("ghost-hook",)   # her kurulumda bulunmayan servis (webhook): birimi yoksa /durum'da görünmez
+
+
+def _birim_kurulu(u):
+    """systemd bu birimi tanıyor mu (LoadState != not-found). Sorulamıyorsa True: eski davranış, listelenir."""
+    try:
+        r = subprocess.run(["systemctl", "show", u, "-p", "LoadState", "--value"],
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() != "not-found"
+    except Exception:
+        return True
+
+
 def servisler():
-    """[(ad, durum)] — Linux'ta systemd, Mac'te launchd. Hata → boş liste."""
+    """[(ad, durum)] — Linux'ta systemd, Mac'te launchd. Hata → boş liste. Kurulu olup DURMUŞ servis listelenir
+    (inactive/failed görünür); yalnız birimi hiç olmayan isteğe bağlı servis atlanır."""
     out = []
     try:
         if platform.system() == "Darwin":
@@ -83,7 +97,10 @@ def servisler():
             for u in ("ghost-bridge", "ghost-hook"):
                 r = subprocess.run(["systemctl", "is-active", u], capture_output=True,
                                    text=True, timeout=5)
-                out.append((u, r.stdout.strip() or "bilinmiyor"))
+                d = r.stdout.strip() or "bilinmiyor"
+                if u in ISTEGE_BAGLI and d != "active" and not _birim_kurulu(u):
+                    continue          # bu kurulumda hiç kurulmamış servis listelenmez (2026-11-15, kurucu §8.4)
+                out.append((u, d))
             env = dict(os.environ)
             env.setdefault("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())
             for u in ("ghost-api", "ghost-nabiz", "ghost-sohbet"):     # kullanıcı birimleri (Faz 3.1 nabız, 3.2 sohbet)

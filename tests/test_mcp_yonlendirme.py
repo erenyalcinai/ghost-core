@@ -40,12 +40,17 @@ class MCPYonlendirme(unittest.TestCase):
         # makinede (secrets.env var) hepsi, arşiv/CI'da yalnız takip edilen
         # sosumi aranır. (2026-10-19→24: bu satır 5 gün boyunca her push'u
         # kesti, GitHub'a 56 commit gitmedi.)
+        #
+        # 2026-11-15 (kurucu §8.3): "secrets.env varsa hepsi olmalı" koşulu kalktı. O dosyalar SAHİBİN özel
+        # ayarıdır; kurulu bir kopyada secrets.env vardır ama o dosyalar yoktur ve test hep kırılıyordu. Bir
+        # makinede hangi ayar dosyasının bulunduğu birim testinin değil kurulumun konusu. Burada: tablo tam ve
+        # depoyla gelen (anahtarsız) sosumi yerinde, geçerli. Anahtar taşıyan dosyalar testte AÇILMAZ.
+        import json
         for ad in ("github", "github-yaz", "sosumi", "posthog"):
             self.assertIn(ad, tb.MCP_CONFIGS)
-        kurulu = os.path.exists(os.path.join(BASE, "secrets.env"))
-        beklenen = ("github", "github-yaz", "sosumi", "posthog") if kurulu else ("sosumi",)
-        for ad in beklenen:
-            self.assertTrue(os.path.exists(tb.MCP_CONFIGS[ad]), ad)
+        self.assertTrue(os.path.exists(tb.MCP_CONFIGS["sosumi"]), "sosumi")
+        with open(tb.MCP_CONFIGS["sosumi"], encoding="utf-8") as f:
+            self.assertIn("sosumi", json.load(f).get("mcpServers") or {})
 
     def test_tool_note_varsayilan(self):
         self.assertEqual(tb._tool_note(list(tb.MCP_DEFAULT)), "")

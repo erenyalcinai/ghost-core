@@ -264,6 +264,22 @@ def klasor_bul(ad_veya_id, olustur=False, yazar="ghost"):
     return kart_ekle("klasor", s, None, yazar=yazar)
 
 
+def alt_klasor(kok, ad, yazar="ghost"):
+    """`kok` kartının (ad ya da id) DOĞRUDAN altındaki `ad` klasörünün id'si; yoksa orada açar.
+    Otomatik yayıncılar (etki, iş raporu, vardiya, uzun iş, karne) kök kartı doldurmasın diye:
+    2026-11-10'da Ghost kartında ~200, Raporlar'da 42 etki kartı düz duruyordu. Dolaptaki aynı
+    adlı klasör sayılmaz (içine yayın görünmez olurdu) — yenisi açılır."""
+    e = klasor_bul(kok, olustur=True, yazar=yazar)
+    ad = _ad_temizle(ad, "Klasör")
+    c = _db()
+    try:
+        r = c.execute("SELECT id FROM masa_kart WHERE tur='klasor' AND ebeveyn IS ? AND ad=? AND durum='masa' "
+                      "ORDER BY id LIMIT 1", (e, ad)).fetchone()
+    finally:
+        c.close()
+    return int(r["id"]) if r else kart_ekle("klasor", ad, e, yazar=yazar)
+
+
 def _ad_temizle(ad, varsayilan="Adsız"):
     a = " ".join(str(ad or "").split())[:AD_TAVAN]
     return a or varsayilan

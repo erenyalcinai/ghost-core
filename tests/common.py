@@ -24,4 +24,35 @@ os.environ["GHOST_DB"] = os.path.join(_TMP, "ghost-test.db")
 # (29 Ağustos 2026, ekran görüntüsüyle yakalandı). Tek işaret, tek kapı.
 os.environ["GHOST_TEST"] = "1"
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _KOK)
+
+# SAHİP PROFİLİ SABİT (2026-11-15, kurucu §8.3). Testler belirli bir profile göre yazılıdır (izlenen siteler,
+# Masa kök kartları, varlık tohumu). Profil sabitlenmezse ops/sahip.json'da KİM varsa o okunur: kurulu bir
+# kopyada bu, kopyanın sahibinin profilidir ve 20 test kırılır (kopyanın push kapısı hep kırmızı kalır).
+# Kural: testlerin yazıldığı profil = REFERANS_SITE'yi izleyen profil. Önce örnek, sonra gerçek dosyaya bakılır;
+# bu ağaçta ikisinden yalnız biri referans siteyi taşır. Hiçbiri taşımıyorsa sabitleme yapılmaz (eski davranış).
+# Dışarıdan GHOST_SAHIP verildiyse ona dokunulmaz.
+REFERANS_SITE = "example.com"
+
+
+def test_profili(kok=_KOK, site=REFERANS_SITE):
+    import json
+    for ad in ("sahip.example.json", "sahip.json"):
+        yol = os.path.join(kok, "ops", ad)
+        try:
+            with open(yol, encoding="utf-8") as f:
+                d = json.load(f)
+            siteler = d.get("siteler") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        if any(isinstance(s, dict) and s.get("alan") == site for s in siteler):
+            return yol
+    return None
+
+
+test_profili.__test__ = False   # yardımcı; test toplayıcıları (pytest) test sanmasın
+if not os.environ.get("GHOST_SAHIP"):
+    _profil = test_profili()
+    if _profil:
+        os.environ["GHOST_SAHIP"] = _profil

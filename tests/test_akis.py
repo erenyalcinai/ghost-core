@@ -297,6 +297,55 @@ class RunClaudeAkis(unittest.TestCase):
         self.assertIn("Zaman", res)
 
 
+class IsYoluSureSiniri(RunClaudeAkis):
+    """İş yolu (açık timeout yok): duvar saati yerine sessizlik bekçisi + IS_TAVAN (Sahip 2026-11-10)."""
+    def setUp(self):
+        super().setUp()
+        self._eski = (motor.CLAUDE_TIMEOUT, motor.IS_TAVAN)
+
+    def tearDown(self):
+        motor.CLAUDE_TIMEOUT, motor.IS_TAVAN = self._eski
+        super().tearDown()
+
+    def test_cikti_veren_isi_saat_kesmez(self):
+        """Eski kural bu işi 1. saniyede öldürürdü; iş 2 sn sürer ama hep çıktı verir → biter."""
+        motor.CLAUDE_TIMEOUT, motor.IS_TAVAN = 1, 30
+        motor.CLAUDE = self._sahte([json.dumps(STREAM[0])] * 5 + [json.dumps(STREAM[-1])], bekle=0.4)
+        res, _, err = tb.run_claude("selam", "m", use_mcp=False, on_event=lambda s: None)
+        self.assertFalse(err, res)
+        self.assertEqual(res, "Son commit abc1234.")
+
+    def test_sessiz_surec_kesilir(self):
+        motor.CLAUDE_TIMEOUT, motor.IS_TAVAN = 1, 30
+        motor.CLAUDE = self._sahte([json.dumps(STREAM[0])], bekle=8)
+        t0 = time.time()
+        res, _, err = tb.run_claude("selam", "m", use_mcp=False, on_event=lambda s: None)
+        self.assertTrue(err)
+        self.assertTrue(motor.is_timeout(res), res)
+        self.assertIn("hiç çıktı gelmedi", res)
+        self.assertLess(time.time() - t0, 6)
+
+    def test_tavan_cikti_verse_de_keser(self):
+        motor.CLAUDE_TIMEOUT, motor.IS_TAVAN = 1, 2
+        motor.CLAUDE = self._sahte([json.dumps(STREAM[0])] * 30, bekle=0.3)
+        t0 = time.time()
+        res, _, err = tb.run_claude("selam", "m", use_mcp=False, on_event=lambda s: None)
+        self.assertTrue(err)
+        self.assertTrue(motor.is_timeout(res), res)
+        self.assertIn("işi böl", res)
+        self.assertLess(time.time() - t0, 7)
+
+    def test_acik_timeout_duvar_saati_kalir(self):
+        """Sohbet yolu (köprü CHAT_TIMEOUT verir): çıktı verse de açık sürede kesilir."""
+        motor.CLAUDE_TIMEOUT, motor.IS_TAVAN = 60, 600
+        motor.CLAUDE = self._sahte([json.dumps(STREAM[0])] * 30, bekle=0.3)
+        t0 = time.time()
+        res, _, err = tb.run_claude("selam", "m", use_mcp=False, timeout=1, on_event=lambda s: None)
+        self.assertTrue(err)
+        self.assertIn("işi böl", res)
+        self.assertLess(time.time() - t0, 6)
+
+
 if __name__ == "__main__":
     unittest.main()
 

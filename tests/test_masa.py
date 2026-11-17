@@ -59,6 +59,26 @@ class Depo(unittest.TestCase):
         with open(p, encoding="utf-8") as f:
             self.assertTrue(f.read().endswith("ek satır\n"))
 
+    def test_alt_klasor_kok_kartin_altinda_acar_ve_tekrar_bulur(self):
+        masa.hazirla()
+        g = masa.klasor_bul("Ghost")
+        a = masa.alt_klasor("Ghost", "Çalışma kayıtları")
+        self.assertEqual(masa.oku(a)["ebeveyn"], g)                  # köke değil, kartın altına
+        self.assertEqual(masa.alt_klasor("Ghost", "Çalışma kayıtları"), a)   # ikinci çağrı yenisini açmaz
+        # aynı ad başka kartın altında ayrı klasördür
+        self.assertNotEqual(masa.alt_klasor("Raporlar", "Çalışma kayıtları"), a)
+        # yayın alt klasöre iner; kök kartın doğrudan çocuğu olmaz
+        p = os.path.join(config.OPS, "is.md")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("# İş raporu\n\ngövde\n")
+        kid, _ = masa.yayinla(p, a)
+        self.assertEqual(masa.oku(kid)["ebeveyn"], a)
+        # dolaba kalkan klasör sayılmaz: yayın görünmez kalmasın diye yenisi açılır
+        masa.dolap(a, "sahip")
+        b = masa.alt_klasor("Ghost", "Çalışma kayıtları")
+        self.assertNotEqual(b, a)
+        self.assertEqual(masa.oku(b)["ebeveyn"], g)
+
     def test_dosya_ekle_kopya_ve_sil_dosyayi_kaldirir(self):
         v = masa.klasor_bul("AppA", olustur=True)
         kid = masa.dosya_ekle("foto.jpg", b"\xff\xd8\xff\xe0abc", v, yazar="sahip")

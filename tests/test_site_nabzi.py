@@ -8,6 +8,7 @@ import unittest
 
 os.environ.setdefault("GHOST_TEST", "1")
 
+from tests import common  # noqa: F401  — sahip profilini sabitler (tek başına koşunca da)
 from ghost import config, trafik
 
 

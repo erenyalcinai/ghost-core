@@ -30,6 +30,13 @@ AYAR = config._parse_env_file(os.path.join(BASE, ".env"))   # .env yoksa (CI) bo
 CLAUDE = AYAR.get("CLAUDE_BIN", "/usr/local/bin/claude")
 CLAUDE_ARGS = AYAR.get("JARVIS_CLAUDE_ARGS", "").split()
 CLAUDE_TIMEOUT = int(AYAR.get("JARVIS_TIMEOUT", "1800"))
+# İŞ YOLUNDA süre sınırı (Sahip 2026-11-10: "30 dakikalık sınıra artık gerek yok, özellikle alt ajan işleri için"):
+# CLAUDE_TIMEOUT artık duvar saati DEĞİL sessizlik eşiği — süreçten bu kadar süre hiç çıktı gelmezse takılmış sayılır
+# ve öldürülür; çıktı veren (çalışan) işi saat kesmez. Sigorta IS_TAVAN (6 sa). Sessizlik ≥ eşik ise geçen süre de
+# ≥ eşiktir: yeni kural, eskisinin öldürmediği hiçbir işi öldürmez. Ölçüm (2026-11-10): 5.207 iş + 56.324 sohbet olay
+# aralığında en uzun gerçek sessizlik 601 sn (Bash'in 10 dk tavanı). Açık `timeout` veren çağrı (sohbet: köprünün
+# CHAT_TIMEOUT'u) ve akışsız kip eskisi gibi duvar saatiyle kesilir.
+IS_TAVAN = int(AYAR.get("JARVIS_IS_TAVAN", "21600"))
 
 # Token/gecikme ekonomisi: sunucular ayrı dosyalarda, mesaj konusuna göre yalnız gerekli
 # olan(lar) yüklenir (köprü `_mcp_servers_for`) — her mesajda hepsini (playwright headless
@@ -149,18 +156,22 @@ def kill(proc):
             _sessiz("kill", _e)
 
 
-def _akit(proc, limit, on_event):
+def _akit(proc, limit, on_event, sessizlik=None):
     """stream-json: stdout'u SATIR SATIR oku, her satırı on_event'e ver, sonuç
     satırını (type=result) yakala. (sonuc_satiri, kuyruk_metni, stderr, zaman_asimi).
+    limit: duvar saati tavanı (sn). sessizlik: verilirse süreçten bu kadar sn hiç satır gelmeyince de keser
+    (takılmış süreç) — çıktı veren süreç yalnız `limit`te kesilir.
     Neden thread: communicate() çıktıyı sona kadar biriktirir — akış demek
     olayın olduğu anda events tablosuna düşmesi demek (kokpit Akış ekranı)."""
     kuyruk = collections.deque(maxlen=40)
     sonuc = [None]
     err = [""]
+    son_cikti = [time.time()]
 
     def _stdout():
         try:
             for satir in proc.stdout:
+                son_cikti[0] = time.time()
                 satir = satir.rstrip("\n")
                 if not satir:
                     continue
@@ -184,11 +195,18 @@ def _akit(proc, limit, on_event):
     t2 = threading.Thread(target=_stderr, daemon=True)
     t1.start(); t2.start()
     zaman_asimi = False
-    try:
-        proc.wait(timeout=limit)
-    except subprocess.TimeoutExpired:
-        zaman_asimi = True
-        kill(proc)
+    bas = time.time()
+    while True:
+        try:
+            adim = min(5.0, limit - (time.time() - bas), sessizlik / 4.0 if sessizlik else 5.0)
+            proc.wait(timeout=max(0.01, adim))
+            break
+        except subprocess.TimeoutExpired:
+            simdi = time.time()
+            if simdi - bas >= limit or (sessizlik and simdi - son_cikti[0] >= sessizlik):
+                zaman_asimi = True
+                kill(proc)
+                break
     t1.join(5); t2.join(5)
     return sonuc[0], "\n".join(kuyruk), err[0], zaman_asimi
 
@@ -245,8 +263,10 @@ def _sonuc_coz(out, err, returncode, session_id, model, on_usage):
     return ("(boş yanıt)", sid, False)
 
 
-def _zaman_asimi_metni(limit):
+def _zaman_asimi_metni(limit, sessiz=False):
     # Metin TIMEOUT_MARK'tan gelir: kapılar (is_timeout) bu işarete bakıyor — ikisi ayrışmasın.
+    if sessiz:
+        return "%s (%d sn hiç çıktı gelmedi; süreç takılmış sayıldı)." % (TIMEOUT_MARK, limit)
     return "%s (%d sn) — işi böl." % (TIMEOUT_MARK, limit)
 
 
@@ -281,10 +301,14 @@ def _run_kalici(kalici, prompt, model, session_id, resume, limit, on_usage, on_e
                 kalici.baslat(model, session_id, resume, mcp_yollari(True))
         except Exception as e:
             return ("⚠️ Çalıştırma hatası: %r" % e, session_id, True)
+    t_tur = time.time()
     sonuc, kuyruk, err, zaman_asimi, oldu = kalici.tur(prompt, limit, on_event)
     if sonuc is None:
         _sentetik_sonuc(on_event, zaman_asimi, "_run_kalici")
     if zaman_asimi:
+        if time.time() - t_tur < limit - 5:   # tavan dolmadan kesildi → kalıcı sürecin sessizlik bekçisi
+            from ghost import kalici_oturum
+            return (_zaman_asimi_metni(kalici_oturum.SESSIZLIK_SN, sessiz=True), session_id, True)
         return (_zaman_asimi_metni(limit), session_id, True)
     if sonuc is None:
         return ("⚠️ Hata:\n" + (err or kuyruk or "bilinmeyen")[-1500:], session_id, True)
@@ -326,6 +350,8 @@ def run_claude(prompt, model, session_id=None, resume=False, on_proc=None,
     SİSTEM istemine (`--append-system-prompt`). İstemdeki açık işaret ([DEPARTMAN:x@model], `departman ver`)
     köprü yönlendirmesinden üstün. Köprü iş yolunda artık system_prefix yazmaz; verilmezse (eski çağıran) yalnız işaret."""
     limit = timeout or CLAUDE_TIMEOUT
+    # iş yolu (açık timeout yok + akış var): saat yerine sessizlik bekçisi, tavan IS_TAVAN — bkz. IS_TAVAN notu
+    sessizlik = None if timeout else CLAUDE_TIMEOUT
     seviye = efor if efor in _efor.SEVIYELER else (None if ozerk else _efor.oku())
     # Takma ad (opus/sonnet/…) → API+CLI'nin ortak EN GÜNCEL kimliği (Sahip 2026-10-01).
     # CLI'nin kendi eşlemesi derlendiği güne aittir; bkz. ghost/modeller.py.
@@ -376,11 +402,15 @@ def run_claude(prompt, model, session_id=None, resume=False, on_proc=None,
         if on_proc:
             on_proc(proc)
         if on_event:
-            sonuc, kuyruk, err, zaman_asimi = _akit(proc, limit, on_event)
+            tavan = max(IS_TAVAN, sessizlik) if sessizlik else limit
+            t_akis = time.time()
+            sonuc, kuyruk, err, zaman_asimi = _akit(proc, tavan, on_event, sessizlik=sessizlik)
             if sonuc is None:
                 _sentetik_sonuc(on_event, zaman_asimi, "run_claude")
             if zaman_asimi:
-                return _is_kaydi((_zaman_asimi_metni(limit), session_id, True), t0, dep_key, model, ozerk, zaman_asimi=True, rol=rol)
+                sessiz = bool(sessizlik) and time.time() - t_akis < tavan
+                return _is_kaydi((_zaman_asimi_metni(sessizlik if sessiz else tavan, sessiz), session_id, True),
+                                 t0, dep_key, model, ozerk, zaman_asimi=True, rol=rol)
             # result satırı yoksa CLI erken öldü: dönüş kodu sıfır değilse hata,
             # sıfırsa kuyruk metni ham çıktı gibi işlenir
             if sonuc is None and proc.returncode != 0:

@@ -7,7 +7,7 @@ TASARIM: iş = başlık + 2-12 adımlık plan (ghost.db `uzun_is`). Her adım AY
 penceresi + ikinci göz AYNEN geçerli). Adım oturumu bitince `python3 -m ghost.uzun_is adim <id> <n> tamam|soru|hata
 "<metin>"` ile rapor verir; `tamam` bir sonraki adımı kuyruklar (zincir kendini sürer), `soru`/`hata` işi DURDURUR
 ve sahibe TEK butonlu soru (Devam / Adımı atla / İptal) gider — cevap gelene dek hiçbir adım koşmaz.
-Durum kartı: dossier/uzun_is/<id>.md → Masa "Ghost" kartına yayınlanır (aynı kaynak → güncellenir).
+Durum kartı: dossier/uzun_is/<id>.md → Masa'da Ghost › Çalışma kayıtları'na yayınlanır (aynı kaynak → güncellenir).
 BÜTÇE: toplam süre (varsayılan 4 sa, adım süreleri toplanır) ve adım tavanı; dolunca durur, sorar.
 BEKÇİ (`tick`, selfcheck 15 dk): adım işi rapor vermeden hata/iptal/denetimde takıldıysa → durdur + soru;
 "bitti" ama rapor yoksa (≥5 dk) → adım tamam sayılır, zincir sürer; FREEZE → koşan/soran işler iptal.
@@ -293,7 +293,7 @@ def _bitir(is_):
     _yaz(is_)
     tamam = sum(1 for a in is_["adimlar"] if a["durum"] == "tamam")
     atlanan = sum(1 for a in is_["adimlar"] if a["durum"] == "atlandi")
-    metin = "🧭 Uzun iş #%d bitti: %s — %d adım tamam%s, %d dk. Durum kartı Masa'da (Ghost)." % (
+    metin = "🧭 Uzun iş #%d bitti: %s — %d adım tamam%s, %d dk. Durum kartı Masa'da (Ghost → Çalışma kayıtları)." % (
         is_["id"], is_["baslik"][:80], tamam, (", %d atlandı" % atlanan) if atlanan else "", int(is_["kullanilan_sn"]) // 60)
     _bildir_metin(metin)
     governance.audit("uzun_is", "bitti", governance.READ, "#%d %d/%d adım, %d sn" % (is_["id"], tamam, len(is_["adimlar"]), is_["kullanilan_sn"]))
@@ -524,7 +524,7 @@ def kart_metni(is_):
 
 
 def _kart_yaz(is_):
-    """dossier/uzun_is/<id>.md yaz + Masa 'Ghost' kartına yayınla (aynı kaynak → günceller). Sessiz başarısız."""
+    """dossier/uzun_is/<id>.md yaz + Masa'da Ghost › Çalışma kayıtları'na yayınla (aynı kaynak → günceller). Sessiz başarısız."""
     try:
         d = _kart_dizini()
         os.makedirs(d, exist_ok=True)
@@ -535,7 +535,7 @@ def _kart_yaz(is_):
             kid = _yayinla(yol)
         else:
             from ghost import masa
-            kid, _ = masa.yayinla(yol, "Ghost")
+            kid, _ = masa.yayinla(yol, masa.alt_klasor("Ghost", "Çalışma kayıtları"))
         if kid and kid != is_.get("masa_id"):
             is_["masa_id"] = kid
             c = _conn()

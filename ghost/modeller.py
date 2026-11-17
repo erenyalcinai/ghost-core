@@ -120,6 +120,37 @@ def claude_bin():
             or os.path.expanduser("~/.local/bin/claude"))
 
 
+# Araçsız alt model çağrısının (karantina, epizod, gündem, özet) DAR ortamı — tek yerde (2026-11-15, kurucu §8.1).
+# Alt süreç yalnız bu adları görür; başka hiçbir değişken (Telegram, vekil, köprü ayarı) taşınmaz.
+ALT_ORTAM_TEMEL = ("HOME", "PATH", "LANG")
+GIRIS_BELIRTEC = "CLAUDE_CODE_OAUTH_TOKEN"   # abonelik kipi
+GIRIS_ANAHTAR = "ANTHROPIC_API_KEY"          # API anahtarı kipi
+
+
+def alt_model_env(kopru=None, ortam=None):
+    """Alt model sürecinin ortamı: HOME/PATH/LANG + TEK giriş kimliği. Kimlik yalnız CLI'nin kendi
+    doğrulaması içindir; isteme ya da çıktıya girmez.
+
+    Sıra: abonelik belirteci (süreç ortamı → köprü dosyaları); HİÇ belirteç yoksa API anahtarı (aynı sıra).
+    Belirteç varken anahtar TAŞINMAZ: abonelikle koşan kurulumun davranışı bu işlevden önceki dört satırlık
+    kalıpla birebir aynıdır (CLI `-p` kipinde anahtarı görürse aboneliğin önüne koyar; bilerek gösterilmez).
+    İkisi de yoksa ortam kimliksiz döner; çağıran CLI'nin "giriş yok" hatasını olduğu gibi görür.
+    `kopru`: config.load_env() sözlüğü (verilmezse okunur) · `ortam`: testler için os.environ yerine."""
+    ortam = os.environ if ortam is None else ortam
+    if kopru is None:
+        try:
+            kopru = config.load_env()
+        except Exception:  # noqa: BLE001 — dosya okunamadıysa süreç ortamıyla yetin
+            kopru = {}
+    env = {k: ortam[k] for k in ALT_ORTAM_TEMEL if ortam.get(k)}
+    for ad in (GIRIS_BELIRTEC, GIRIS_ANAHTAR):
+        deger = ortam.get(ad) or kopru.get(ad)
+        if deger:
+            env[ad] = deger
+            break
+    return env
+
+
 def cli_modeller(bin_yolu=None, onbellek=None):
     """CLI ikilisinin tanıdığı kimlikler. İkili (yol, boyut, mtime) değişmediyse
     önbellekten; değiştiyse (güncelleme) baştan taranır (~240 MB, 1-2 sn)."""

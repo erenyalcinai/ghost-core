@@ -6,7 +6,7 @@ a Mac it uses as a worker, an iPhone it physically controls, a Telegram bridge, 
 native iOS/macOS cockpit app, a voice agent, a persistent memory, a governance layer
 with approval gates, and a blind second-eye verifier that can veto its own reports.
 
-For its owner it is the thing that reads the mail, searches the last ten years of messages,
+For its owner it is the thing that reads the mail, searches years of messages,
 notes, photos and calls when asked, writes reminders into the phone, drives the Mac, ships
 the apps, and reports every morning. For a studio it is the invisible half of the team.
 
@@ -24,13 +24,13 @@ here and probably the most useful.
 
 | | |
 |---|---|
-| Core Python (`ghost/`) | ~19,200 lines, 72 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
-| Organs (`ops/`) | ~16,800 lines: bridge, sentinels, Mac and iPhone limbs |
+| Core Python (`ghost/`) | ~19,300 lines, 72 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
+| Organs (`ops/`) | ~16,900 lines: bridge, sentinels, Mac and iPhone limbs |
 | Cockpit app (`kokpit/ios`) | ~8,200 lines Swift, iOS + macOS targets, one source |
-| Tests | ~1102, run with `python -m unittest` in well under a minute, no network, CI on every push |
-| Scheduling units | 8 launchd agents (Mac) + 3 systemd units (VPS) in this tree; the bridge and self-check units themselves live in the private deploy |
-| Lessons | 170 operational lessons, auto-extracted from commit messages, curated in [LESSONS.md](LESSONS.md) |
-| History | Started 11 August 2026; this open-core snapshot is from day 78 (880+ commits in the private tree) |
+| Tests | ~1135, run with `python -m unittest` in about 90 seconds on a small VPS, no network, CI on every code push |
+| Scheduling units | 9 launchd agents (Mac) + 7 systemd services and one timer (VPS) in this tree; the VPS bridge and self-check units themselves live in the private deploy |
+| Lessons | 179 operational lessons up to 28 October 2026, extracted from commit messages and curated in [LESSONS.md](LESSONS.md) |
+| History | Started 11 August 2026; this README was last checked against the code on day 98, 17 November 2026 (1,680+ commits in the private tree, about 670 of them automatic knowledge-sync commits) |
 
 ## What it does, day to day
 
@@ -41,7 +41,8 @@ scripts and two readers. Everything else named here is in this repository.
 ### For one person
 
 - **Morning report.** What it did overnight, what it is waiting on you for, how the business is
-  doing. On Telegram and on the Pulse page of the cockpit. 589 briefing lines so far.
+  doing. On Telegram and on the Pulse page of the cockpit. 589 briefing lines so far. *(The Pulse
+  page is public; the script that writes the morning message is private.)*
 - **Reads your mail.** Your inbox is forwarded to its own address and spooled into a digest; it
   reads your Gmail over IMAP with Gmail's own query language, full history. *(private)*
 - **Writes into your phone.** Real iOS reminders and calendar events, queued through the cockpit,
@@ -50,8 +51,9 @@ scripts and two readers. Everything else named here is in this repository.
 - **Knows your context.** Your location, today's calendar and your battery are one line in every
   turn. Stale data is dropped rather than guessed.
 - **Searches your past.** Apple Notes, Photos, iCloud Drive, WhatsApp (live and from backup),
-  SMS/iMessage history, call log, contacts, Safari history, all from an unencrypted iPhone backup
-  it takes itself every night, plus 2,623 ChatGPT conversations imported and full-text indexed.
+  SMS/iMessage history, call log, contacts, Safari history: read from the Mac's own stores and
+  from an unencrypted iPhone backup it takes itself every night, plus 2,623 ChatGPT conversations
+  imported and full-text indexed.
   Every read goes through one localhost process with a token and a log: `ops/mac_veri_okuyucu.py`,
   14 endpoints, public. Only the Gmail IMAP reader and the ChatGPT importer are *(private)*.
 - **Uses your machines.** Screenshots, clicks, typing and app launches on the Mac in ~0.3 s; the
@@ -60,8 +62,9 @@ scripts and two readers. Everything else named here is in this repository.
 - **Shows instead of telling.** Tables, diffs, charts and approval cards drawn by the server inside
   the native app; a shared Desk of cards you can add notes and files to. 80 images and files sent
   into the app so far.
-- **Remembers.** 164 memories; the three most relevant are injected into every turn, the rest
-  are a full-text search away. An entity graph you can query (`/varlik`), standing goals it works
+- **Remembers.** 164 memories; up to three that match the message are injected into the chat
+  turn (none when nothing matches), the rest are a full-text search away.
+  An entity graph you can query (`/varlik`), standing goals it works
   on when idle, and an encrypted backup of the memory database to a git branch with a restore drill.
 
 ### For a studio or a team
@@ -73,7 +76,7 @@ scripts and two readers. Everything else named here is in this repository.
   API is closed to it. 220 deployments of its own diary site alone.
 - **Watches.** Uptime, open ports, SSH logins, tunnel health and PostHog traffic with the owner
   and bots filtered out (public sentinels); Sentry errors, App Store review status and subscriber
-  counts read straight from the D1 database *(private)*. A self-check every few minutes; 172
+  counts read straight from the D1 database *(private)*. A self-check every 15 minutes; 172
   alerts raised in 65 days, most of them about its own stale code.
 - **Reports on the business** *(private)*. A daily business digest (42 snapshots) and a daily
   intelligence briefing; the weekly synthesis and the weekly transparency report (what it did
@@ -110,15 +113,17 @@ without being told where to look, quotes the message with its date, and offers t
 date into the calendar. The policy is explicit: it only touches personal data when the question
 is about the owner's own history, never in code or business work, and every read is logged.
 
-**Say it, get an alarm.** *"Remind me tomorrow at 10 to call the factory."* The intent layer turns
-the sentence into a reminder proposal with an approve button; on approval a real iOS reminder is
-written on the phone, so the alarm fires even if the server is down. *"Add a zone around here, 300 m"*
-makes a geofence from the phone's current position; arriving there wakes the agent, which decides
+**Say it, get an alarm.** *"Remind me tomorrow at 10 to call the factory."* The agent queues a
+reminder for the phone (`ghost/gorevler.py`); the cockpit app writes it as a real iOS reminder and
+reports back, so the alarm fires even if the server is down. (The intent layer's own shortcut,
+with an approve button, sets a server-side reminder that arrives as a message.)
+*"Add a zone around here, 300 m"* makes a geofence from the phone's current position; arriving there wakes the agent, which decides
 what, if anything, to say.
 
 **Mail without opening mail.** *"Did a bank statement come this week?"* It reads the forwarded
 inbox spool and runs a Gmail query (`from:bank newer_than:7d`), answers with sender and date, and
-can hand back the attachment. It cannot send mail; it says so instead of promising.
+can hand back the attachment. Sending is a separate gate: one approval card from the owner, one
+message *(the sending script is private; the gate in `ops/vekil/` is public)*.
 
 **Ship a release.** *"Put App B 1.0.1 out."* On the Mac it builds, signs and uploads the build,
 writes the release notes in two languages, and shows an approval card in the cockpit with the
@@ -131,15 +136,18 @@ shared Desk with the table instead of pasting it into chat.
 
 **Change its own code.** *"The chat jumps when I scroll."* It reads the app's diagnostics channel,
 patches the Swift view, builds and installs on the phone through the Mac, commits with a `Ders:`
-block explaining the root cause, and the lesson lands in `LESSONS.md` by itself. Pushes pass a
+block explaining the root cause, and the lesson lands in the lessons playbook by itself
+(`LESSONS.md` is the curated selection). Pushes pass a
 test gate; the bridge reloads its own new code only when idle, so the reply that triggered the
-change is not lost. A `FREEZE` file
-or the pulled YubiKey stops all of it.
+change is not lost. A `FREEZE` file stops all of it;
+the pulled YubiKey stops the Mac half.
 
 **Fan out when one head is not enough.** `/fleet audit the backend for security` splits the job,
-runs sub-agents in parallel, has them critique each other, and returns one synthesis. Every
-ordinary job is first routed to one of five departments (engineering, intelligence, finance,
-revenue, operations), each with its own persona and tool permissions.
+runs sub-agents in parallel, has them critique each other, and returns one synthesis. A job
+whose text matches a department's keywords is routed to one of four departments (engineering,
+intelligence, finance, operations). In the default mode the department is a persona added to the
+session; in department mode three of them run as separate agents with their own tool list and
+model (finance stays a persona).
 
 **Work at night, report in the morning.** Standing goals are picked up when the chat is idle; the
 morning report lists what was done, with the audit entries, and what needs the owner. If the server
@@ -162,9 +170,11 @@ dies, the Mac takes over the Telegram listener (baton policy) so the owner at le
   A "missing" or "wrong" verdict vetoes the ✅. The agent does not decide when it is reviewed.
 - **Physical kill switch** (`ops/mac_anahtar.py`): a YubiKey plugged into the Mac is a hardware
   button for the agent's access to the Mac. Pull it and every Mac path returns "locked".
-- **Self-renewal that does not kill the reply** (`ops/self_restart.sh`, `ghost/kesik_mesaj.py`):
-  the chat session is a child of the bridge process, so a naive restart kills the answer
-  mid-flight. Restarts wait for idle; an interrupted message is re-queued exactly once.
+- **Self-renewal that does not kill the reply** (`ops/self_restart.sh`, `ghost/sohbet_sunucu.py`,
+  `ghost/kesik_mesaj.py`): the chat session used to be a child of the bridge process, so a naive
+  restart killed the answer mid-flight. The chat process now runs in its own unit and a restarted
+  bridge re-attaches to the turn in progress. Restarts still wait for idle, and a message that
+  does get interrupted is re-queued exactly once.
 - **Lessons pipeline** (`ops/ders_yaz.py`): a `Ders:` block in a commit message is extracted
   into a playbook automatically. Knowledge is written where it is produced and moved to
   where it is read, without anyone remembering to do it.
@@ -188,7 +198,8 @@ the agent takes itself) is readable by exactly one process on the Mac: a Full-Di
 reader bound to localhost, token-gated, with every read written to a log the owner can open
 (`ops/mac_veri_okuyucu.py`, 14 endpoints). The fast lane the agent uses for everything else
 deliberately has no such access. A YubiKey in the Mac is the physical switch: pull it and the
-reader answers "locked". The rule the agent follows is written, not implied: it searches
+reader answers "locked". The rule the agent follows is written in its operating context
+(private; a rule, not code), not implied: it searches
 personal history only when the question is about the owner's own life, never for code,
 infrastructure or business work, and it says "not found" only after it has looked everywhere
 (`ops/mac_veri.py` documents the sources). Backup, chat history and mail readers that import
@@ -209,44 +220,52 @@ third-party data (Gmail IMAP, ChatGPT export) stayed private; the gate is public
   "Decisions" page with swipe-to-approve, and a shared persistent "Desk" of cards. Around it:
   a Siri shortcut and Action-button intents for the lock screen, a Share Extension ("send to
   Ghost" from any app), a home-screen widget, Live Activities for running jobs, push via APNs,
-  a Mac menu-bar app from the same source, QR pairing with HMAC+nonce device auth. The app
+  a Mac menu-bar app from the same source, pairing by a one-time six-digit code followed by
+  HMAC+nonce device auth. The app
   writes real iOS reminders and calendar events on the owner's phone, and geofences wake the agent.
 
-**It remembers.** SQLite + FTS5 memory injected into every turn, an entity graph, standing
-goals the agent works on when idle, and continuity hooks that notice when a session is
-about to end without writing anything down.
+**It remembers.** SQLite + FTS5 memory searched on every chat turn, with matching entries
+injected, an entity graph, standing goals the agent works on when idle, and continuity hooks
+that flag a session that ended without writing anything down.
 
-**It is multi-engine.** Claude is primary; Codex, Gemini and a local Ollama model are detected
-and used as fallback, on an API outage *or* when the quota is hit, and the owner is told which
-engine answered. Model aliases resolve to the newest model the API *and* the CLI both know,
-because a stale CLI silently rejects new model ids. Quota is shown as a percentage, and one
-persistent `claude` process per chat keeps the prompt cache warm.
+**It is multi-engine.** Claude does the work and writes the answer. Codex is an independent
+third eye (`ghost/codex.py`): a second opinion on a patch to a protected file, a referee when
+Claude's own verifier returns "cannot verify" on a permanent or spend job (it can only make the
+verdict stricter), and a task the owner hands it directly. It reads a temporary read-only copy
+of the code, its quota is enforced in code (3 calls a day, 10 a week by default), and it is not
+called in unattended jobs or under `FREEZE`. There is no fallback engine: when Claude fails, the
+error goes to the owner as it is. For work handed to a department the model follows the weight
+of the job: the department's default, raised to the strongest model when the job is classed
+permanent or spend (`ghost/departman.py`). Model aliases resolve to the newest model the API
+*and* the CLI both know, because a stale CLI silently rejects new model ids. Quota is shown as a
+percentage, and one persistent `claude` process per chat keeps the prompt cache warm.
 
 **It survives its own server.** If the VPS goes dark, a baton policy lets the Mac take over the
 Telegram listener, so the owner is told why instead of hearing silence. The memory database is
 backed up encrypted to a git branch, and a restore drill script proves the backup is readable.
 
-**It is an institution, literally.** Every job is routed to one of five departments defined in a
-YAML file (persona, tools, keywords); `/fleet` runs parallel sub-agents with cross-critique; a
+**It is an institution, literally.** A job that matches a department's keywords is routed to one
+of four departments defined in a YAML file (persona, tools, keywords, model); `/fleet` runs
+parallel sub-agents with cross-critique; a
 weekly transparency report turns the audit log into "what I did on my own, what you approved,
-what you refused". Continuity hooks flag a session that is about to end without writing anything
+what you refused". Continuity hooks flag a session that ended without writing anything
 down; idle time goes to standing goals.
 
-**It is tested like it will be run.** ~580 tests in 20 s with every path redirected and the
-network cut (`tests/common.py`, after a test once leaked into production), a pre-push gate that
-runs them, and CI that runs the same command on the same file set.
+**It is tested like it will be run.** ~1135 tests in about 90 s with every path
+redirected and the network cut (`tests/common.py`, after a test once leaked into production), a
+pre-push gate that runs them, and CI that runs the same command on the same file set.
 
 ## How you talk to it
 
 Plain language, in Turkish or English, on Telegram or in the app; the agent answers in your
-language. About 50 slash commands exist for the operating side. A sampler:
+language. About 45 slash commands exist for the operating side. A sampler:
 
 ```
-/durum  /saglik  /kota  /motorlar       health, quota, which engine answered
+/durum  /saglik  /kota  /motorlar       health, quota, the model in use and the third eye's quota
 /nerede  /bugun  /duyular              where you are, your day, what the agent currently senses
 /hatirlat  /gorev  /izle  /bolge         schedule in natural language, watch a URL, add a geofence
 /gorevler  /istekler                   what is queued for your phone, what awaits your approval
-/sahne  /masa  /rapor                   draw on the Stage, publish to the Desk
+/sahne  /rapor                          draw on the Stage, weekly transparency report
 /hafiza  /varlik  /ogren  /hedef        memory, entities, teach it a fact, set a standing goal
 /fleet  /departmanlar  /job  /jobs      multi-agent mode, routing, background jobs
 /model  /kanal  /sesli                  pick a model alias, primary channel, spoken replies
@@ -259,7 +278,7 @@ language. About 50 slash commands exist for the operating side. A sampler:
   CHANNELS      Telegram · Cockpit app (iOS/macOS) · voice agent · webhooks · e-mail (in)
       │
   CORE  ghost/  event bus · command registry · governance + audit + freeze · blind verifier
-                memory (SQLite+FTS) · entities · goals · scheduler · monitors · engines
+                memory (SQLite+FTS) · entities · goals · scheduler · monitors · third eye
                 stage / desk / pulse (server-drawn UI) · senses (location, calendar, battery)
       │
   ORGANS ops/   telegram bridge · selfcheck · heartbeat · uptime · port · login sentinels
@@ -273,13 +292,13 @@ toward: [VISION.md](VISION.md).
 
 ## Run it
 
-[QUICKSTART.md](QUICKSTART.md) gets the core (bridge + Telegram + Claude CLI) running in
-about 20 minutes on a Linux box. The Mac and iPhone limbs and the Cockpit app are documented
+[QUICKSTART.md](QUICKSTART.md) gets the core (bridge + Telegram + Claude CLI) running
+on a Linux box. The Mac and iPhone limbs and the Cockpit app are documented
 but optional; they need your own hardware and Apple developer setup.
 
 ```bash
 git clone https://github.com/erenyalcinai/ghost-core && cd ghost-core
-python3 -m unittest discover -s tests        # ~580 tests, ~20 s, no network
+python3 -m unittest discover -s tests        # ~1135 tests, about 90 s, no network
 cp ops/sahip.example.json ops/sahip.json     # owner profile: sites, products, root cards
 printf 'TELEGRAM_BOT_TOKEN=...\nTELEGRAM_OWNER_ID=...\nCLAUDE_BIN=/path/to/claude\n' > .env
 python3 ops/telegram_bridge.py
@@ -289,8 +308,9 @@ python3 ops/telegram_bridge.py
 
 Identifiers, comments, commands and the chat itself are Turkish. This was a deliberate
 choice for a single Turkish-speaking owner, and it is kept here as-is: the code is what ran,
-not a translation. Documentation in this repository (README, architecture, quickstart,
-lessons) is English. If you read the code, a few words carry most of the weight:
+not a translation. The top-level documentation (README, architecture, quickstart, vision,
+lessons) is English; the two notes under `docs/` and `playbooks/` are Turkish, as written.
+If you read the code, a few words carry most of the weight:
 *köprü* bridge · *nöbetçi* sentinel · *uzuv* limb · *hızlı hat* fast lane · *sahip* owner ·
 *sahne* stage · *masa* desk · *nabız* pulse · *ders* lesson · *onay* approval.
 
@@ -321,7 +341,9 @@ not a general one.
   - Unattended jobs cannot take irreversible actions; irreversible actions need the owner's real
     approval.
   - Secrets and personal data cannot be sent to unknown hosts; secret values cannot be committed.
-  - Dependency versions are pinned; the owner's accounts use 2FA.
+  - The core has no third-party dependencies and the `npx` tools around it are pinned to exact
+    versions (the Claude CLI is the exception: it is updated daily on purpose); the owner's
+    accounts use 2FA.
 - **Structural separation where it costs nothing.** API keys live in a separate system user behind a
   local secret proxy (`ops/vekil/`): the agent calls every endpoint as before but never holds the key,
   and each key can only reach its own fixed host. Approvals, cockpit device keys and the mail gate live
@@ -351,9 +373,11 @@ not a general one.
   Full e-mails and external pages are read through `ops/karantina.py` (a tool-less, secret-less
   sub-model); the main session only sees its answer and a flag if the text tries to instruct it.
 - **Not finished.** Automated inputs (monitors, scheduler, goals, webhooks) flow through the
-  event bus, chat input still bypasses it; outbound e-mail exists but is unwired (no key);
-  the economy module from the private tree is intentionally excluded; several modules carry
-  a `NOT:` comment admitting what they don't do. Those comments are kept on purpose.
+  event bus; chat input is recorded there but not dispatched through it. The older outbound
+  e-mail module (`ghost/email.py`) is unwired (no key), and the client for the approval-gated
+  mail path stayed private. The economy module from the private tree is intentionally excluded.
+  A few modules say in their own docstring what they do not do (`ghost/sandbox.py`: no network
+  isolation). Those notes are kept on purpose.
 
 ## Provenance and privacy
 

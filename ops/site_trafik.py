@@ -46,7 +46,9 @@ SAHIP_SAFARI = "26"
 BOT_EKRAN = {(800.0, 600.0), (1600.0, 1200.0), (1280.0, 1280.0), (1280.0, 720.0), (2000.0, 2000.0)}
 # Veri merkezi şehirleri (ekran ölçüsü ele vermezse ikinci kapı).
 BOT_SEHIR = {"Council Bluffs", "Ashburn", "Eatonton", "North Charleston", "Boardman",
-             "Boydton"}  # Boydton VA = Microsoft Azure veri merkezi (2026-11-04)
+             "Boydton",  # Boydton VA = Microsoft Azure veri merkezi (2026-11-04)
+             "Falkenstein"}  # Hetzner veri merkezi; 2026-11-15:
+#                              Chrome 131 + saat dilimi Los Angeles + $direct → "dış" sayılmıştı
 
 
 def sorgu(hogql):

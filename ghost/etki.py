@@ -149,7 +149,8 @@ def _yayinla(kayit, metin):
         f.write(metin)
     try:
         from ghost import masa
-        kart = KART.get(kayit["urun"], "Raporlar")
+        # ürün kartı (AppA/App B) ya da site etkileri için Raporlar › Etki kartları (kök kart dolmasın)
+        kart = KART.get(kayit["urun"]) or masa.alt_klasor("Raporlar", "Etki kartları")
         masa.yayinla(yol, kart, "Etki · %s" % kayit["etiket"])
     except Exception:
         pass

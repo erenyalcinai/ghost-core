@@ -39,8 +39,8 @@ agent knows before it reads anything else. Keep it true; a stale line misleads e
    The guard is on, but think anyway.
 2. **Never delete or commit `.env` / `secrets.env`.**
 3. **Short, clear reports** — they are read on a phone. Result first.
-4. **Never restart the bridge synchronously.** Your session is its child process; a restart
-   kills your own answer. Use `ops/self_restart.sh`, which waits for idle.
+4. **Never restart the bridge synchronously.** A job session is its child process; a restart
+   kills it mid-answer. Use `ops/self_restart.sh`, which waits for idle.
 5. **Don't assume, look.** Verify an account, a machine, a version before stating it. A display
    name is not an identity. Mark anything unverified as "assuming".
 6. **If this file goes stale, fix it.**

@@ -51,7 +51,7 @@ Grouped by concern. Line counts are from this tree.
 - `transparency.py` (73) — weekly "what did Ghost do" report.
 
 **Engines and quota**
-- `engines.py` (107) — engine plurality: Claude primary, local Ollama fallback.
+- `codex.py` (281) — independent third eye: second opinion on protected-file patches, referee when the verifier cannot confirm irreversible work, owner-issued tasks. There is no fallback engine.
 - `modeller.py` (271) — resolves an alias (opus/sonnet/haiku) to the newest id both the API and the installed CLI accept; warns when the CLI is stale.
 - `kalici_oturum.py` (281) — one long-lived `claude` process across many turns (prompt-cache friendly).
 - `chat_policy.py` (239) — when a chat session may be refreshed (never silently; owner-driven).
@@ -81,7 +81,7 @@ Grouped by concern. Line counts are from this tree.
 **Other**
 - `email.py` (43) — outbound via Resend, real but unwired until `RESEND_API_KEY` exists, audited as a permanent action; the inbound Cloudflare worker is not in this tree.
 - `dersler.py` (82) — lessons extraction (see §5).
-- `agents/` — five departments as YAML (engineering, intelligence, finance, earnings, operations); a department is a persona + tool set + routing keywords, not code. The earnings department points at the economy module, which is not in this tree; its two commands say so.
+- `agents/` — four departments as YAML (engineering, intelligence, finance, operations); a department is a persona + tool set + routing keywords, not code.
 - `tools/registry.py` (111) — capability inventory.
 - `config.py` (52) — single source for paths and `.env`/`secrets.env` loading.
 

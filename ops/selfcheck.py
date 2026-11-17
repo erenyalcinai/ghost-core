@@ -71,6 +71,28 @@ def log(msg):
     gunluk.yaz("selfcheck", msg)   # journald: journalctl -t ghost-selfcheck (Faz 2.9)
 
 
+def mac_tanimli(ortam=None):
+    """Bu kurulumda Mac uzvu var mı. Ölçüt: Mac hattının belirteci (GHOST_MACLINK_TOKEN) ayarlı mı — hızlı hat
+    onsuz zaten çalışmaz. Mac'siz kurulumda (açık çekirdek kopyası) Mac'e bağlı denetimler SESSİZ geçer; eskiden
+    her turda günlüğe "Mac'e ulaşılamadı" ve tünel satırı düşüyordu (2026-11-15, kurucu §8.4)."""
+    ortam = _env if ortam is None else ortam
+    return bool((ortam.get("GHOST_MACLINK_TOKEN") or "").strip().strip('"').strip("'"))
+
+
+def istege_bagli(ad, paket=None):
+    """Her kurulumda bulunmayan organ modülü (özel ağaçta var, açık çekirdekte yok): dosyası YOKSA None döner ve
+    çağıran sessiz geçer. Dosya var ama içe aktarılamıyorsa hata olduğu gibi yükselir (gerçek arıza gizlenmez)."""
+    import importlib
+    import importlib.util
+    tam = "%s.%s" % (paket, ad) if paket else ad
+    try:
+        if importlib.util.find_spec(tam) is None:
+            return None
+    except (ImportError, ValueError):
+        return None
+    return importlib.import_module(tam)
+
+
 def owner_id():
     if ENV.get("TELEGRAM_OWNER_ID", "").strip().isdigit():
         return int(ENV["TELEGRAM_OWNER_ID"])
@@ -255,6 +277,8 @@ def mac_cli_guncel_tut():
     basılmaz → Mac açılınca ilk turda dener. Mac işçisi CLAUDE_BIN ile bu ikiliyi kullanır;
     koşan oturum etkilenmez. Döner: bildirilecek satırlar (boş = sessiz)."""
     if os.environ.get("GHOST_TEST"):
+        return []
+    if not mac_tanimli():      # Mac'siz kurulum: denenecek bir şey yok, günlüğe de yazma
         return []
     try:
         if time.time() - os.path.getmtime(MAC_CLI_STAMP) < CLI_GAP:
@@ -810,9 +834,9 @@ def tunel_nobetcisi_yerinde():
     zombi tünel arızası [[ters-tunel-zombi-port]] yine 131 dakika sürer.
     Bu fonksiyon o sessiz ölümün üstünü örtmesin diye var: selfcheck sistem
     timer'ıyla koşar, root kurulumludur, linger'dan bağımsızdır.
-    Yalnız VPS'te anlamlı — tünel orada sonlanır.
+    Yalnız VPS'te anlamlı — tünel orada sonlanır. Mac'siz kurulumda tünel de yoktur: sessiz geç.
     """
-    if IS_MAC:
+    if IS_MAC or not mac_tanimli():
         return None
     try:
         from ghost import durum             # Faz 1.9: nöbetçi damgası durum tablosunda (`tunnel_watch`)
@@ -986,8 +1010,8 @@ def main():
         log("kota yenileme hata: %r" % e)
     if not IS_MAC:
         try:  # Boşta Ghost v1 (Faz 1.7, 2026-10-29): günde bir, köprü boşta, pencere <%50 → tek satır ya da sessiz
-            import bosta_ghost
-            kostu, ihtiyac, satir = bosta_ghost.tick(bosta=_kopru_bosta(pid))
+            bosta_ghost = istege_bagli("bosta_ghost")      # açık çekirdekte yok → sessiz
+            kostu, ihtiyac, satir = bosta_ghost.tick(bosta=_kopru_bosta(pid)) if bosta_ghost else (False, None, None)
             if kostu:
                 log("boşta ghost koştu: ihtiyaç %s → %s" % (ihtiyac, satir or "sessiz"))
         except Exception as e:
@@ -1007,22 +1031,22 @@ def main():
         except Exception as e:
             log("etki hata: %r" % e)
         try:  # Mağaza yorumlarına cevap organı (Faz 2.3, 2026-10-29): saatte bir cevapsız yorum → taslak + onay-komut kartı (günde ≤5)
-            import yorum_cevap
-            _acilan = yorum_cevap.tick()
+            yorum_cevap = istege_bagli("yorum_cevap")      # açık çekirdekte yok → sessiz
+            _acilan = yorum_cevap.tick() if yorum_cevap else None
             if _acilan:
                 log("yorum cevap kartı açıldı: %s" % ", ".join("%s:%s→%s" % a for a in _acilan))
         except Exception as e:
             log("yorum cevap hata: %r" % e)
         try:  # Haftalık GÜNDEM (Faz 2.2, 2026-10-29): 24 sa sessizlik → aktif; Pazar ≥20:30 gündem kartı; Cuma ≥18:00 karne
-            from ghost import gundem
-            _g = gundem.tick()
+            gundem = istege_bagli("gundem", "ghost")       # açık çekirdekte yok → sessiz
+            _g = gundem.tick() if gundem else None
             if _g:
                 log("gündem: %s" % ", ".join(_g))
         except Exception as e:
             log("gündem hata: %r" % e)
         try:  # Tek Gün kartı (Faz 2.8, 2026-10-29): sabah parçaları tek mesaj — telefon ilk hareket edince ya da 09:00
-            from ghost import gun_karti
-            _m = gun_karti.tick()
+            gun_karti = istege_bagli("gun_karti", "ghost")   # açık çekirdekte yok → sessiz
+            _m = gun_karti.tick() if gun_karti else None
             if _m:
                 log("tek gün kartı gönderildi (%d karakter)" % len(_m))
         except Exception as e:

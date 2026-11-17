@@ -11,7 +11,7 @@ dolmadıysa ve bir önceki vardiya işi hâlâ koşmuyorsa → sıradaki AKTİF 
 değil, kill ölçütü/puan/durum geçerli). Pencere bitince (ilk tick) SABAH RAPORU: koşulan her hedef için iş kaydı
 (ops/jobs kind eşlemesi) + `dossier/hedefler/<id>-son.md`'nin ilk satırları → "✅ bitti / ⚠️ yarım-hata / 🔍 denetimde
 / ⏳ sürüyor", açık onay kartı sayısı; `gun_karti.parca_kaydet("vardiya", …)` ile Tek Gün kartına girer (ayrı mesaj
-YOK) + dossier/vardiya/<pencere>.md → Masa Ghost. Hedef koşulmadıysa rapor satırı yok (sessizlik).
+YOK) + dossier/vardiya/<pencere>.md → Masa (Ghost › Çalışma kayıtları). Hedef koşulmadıysa rapor satırı yok (sessizlik).
 CLI: python3 -m ghost.vardiya durum | ayar [--baslangic HH:MM] [--bitis HH:MM] [--tavan N] [--kota N] [--aralik DK] |
 ac | kapat | tick | rapor [--kuru]
 """
@@ -236,7 +236,7 @@ def _acik_onay_sayisi():
 
 
 def rapor(st=None, now=None, kuru=False):
-    """Pencere kapanınca: koşulan hedeflerin hükmü → Tek Gün kartı parçası + dossier/vardiya/<pencere>.md (Masa Ghost).
+    """Pencere kapanınca: koşulan hedeflerin hükmü → Tek Gün kartı parçası + dossier/vardiya/<pencere>.md (Masa: Ghost › Çalışma kayıtları).
     Koşulan yoksa boş döner (sessiz)."""
     st = st if st is not None else (durum.oku(DURUM_AD) or {})
     now = now or time.time()
@@ -286,7 +286,7 @@ def rapor(st=None, now=None, kuru=False):
             _yayinla(yol)
         else:
             from ghost import masa
-            masa.yayinla(yol, "Ghost")
+            masa.yayinla(yol, masa.alt_klasor("Ghost", "Çalışma kayıtları"))
     except Exception:
         pass
     governance.audit("vardiya", "rapor", governance.READ, "%s: %d hedef" % (st.get("pencere"), len(kosulan)))

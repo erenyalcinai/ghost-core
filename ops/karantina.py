@@ -281,12 +281,16 @@ def oku_karantinada(veri, soru, model=None, kosucu=None):
             from ghost import config as _cfg, modeller as _mod
             _kopru = _cfg.load_env()
             claude = _mod.claude_bin()
+            # Dar ortam: HOME/PATH/LANG + TEK giriş kimliği (abonelik belirteci; hiç yoksa API anahtarı). Kimlik
+            # yalnız CLI'nin doğrulaması için ortamdadır; isteme ve çıktıya girmez, başka değişken taşınmaz.
+            env = _mod.alt_model_env(_kopru)
         except Exception:
-            _kopru = {}
             claude = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "/usr/bin/claude"
-        env = {k: os.environ[k] for k in ("HOME", "PATH", "LANG", "CLAUDE_CODE_OAUTH_TOKEN") if os.environ.get(k)}
-        if not env.get("CLAUDE_CODE_OAUTH_TOKEN") and _kopru.get("CLAUDE_CODE_OAUTH_TOKEN"):
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = _kopru["CLAUDE_CODE_OAUTH_TOKEN"]
+            env = {k: os.environ[k] for k in ("HOME", "PATH", "LANG") if os.environ.get(k)}
+            for _ad in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):   # ghost paketi yoksa: yalnız süreç ortamı
+                if os.environ.get(_ad):
+                    env[_ad] = os.environ[_ad]
+                    break
         with tempfile.TemporaryDirectory(prefix="karantina-") as kum:
             r = subprocess.run([claude, "-p", istem, "--output-format", "text", "--model", _tam_model(model or MODEL),
                                 "--tools", "", "--strict-mcp-config"],

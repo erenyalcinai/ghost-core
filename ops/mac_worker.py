@@ -250,6 +250,10 @@ IPHONE_KW = re.compile(
     r"(\biphone|\btelefon|\bmobil cihaz|\bwda\b|\bwebdriveragent|"
     r"\bmobile-mcp|\bcihaz(?:ın|in)? ekran)", re.I)
 MCP_MOBILE = os.path.join(BASE, "mcp-mobile.json")
+# Mac ajan işinin süre tavanı. ESKİDEN 1800 sn (30 dk) idi; Sahip 2026-11-10: "30 dakikalık sınıra artık gerek yok,
+# özellikle alt ajan işleri için" + "Mac'te yapsan daha iyi olurdu" (video üretimi). Çıktı json (akış yok) → sessizlik
+# bekçisi kurulamaz, yalnız duvar saati sigortası: 6 sa (VPS'teki motor.IS_TAVAN ile aynı). FREEZE yine 10 sn'de keser.
+IS_TAVAN_SN = int(os.environ.get("GHOST_MAC_IS_TAVAN", "21600"))
 
 
 def _claude_once(prompt, sid, resume):
@@ -261,7 +265,7 @@ def _claude_once(prompt, sid, resume):
         base += ["--mcp-config", MCP_MOBILE]
         log("iPhone işi: mobile-mcp yükleniyor")
     cmd = base + (["--resume", sid] if resume else ["--session-id", sid])
-    return _kosu(cmd, 1800, cwd=BASE, env=env)
+    return _kosu(cmd, IS_TAVAN_SN, cwd=BASE, env=env)
 
 
 def _parse_result(r, sid):
@@ -296,7 +300,7 @@ def run_local(prompt):
     try:
         r = _claude_once(prompt, sid, resume)
     except subprocess.TimeoutExpired:
-        return "⏱ Mac işi zaman aşımı (30 dk)."
+        return "⏱ Mac işi zaman aşımı (%d dk)." % (IS_TAVAN_SN // 60)
     result, err = _parse_result(r, sid)
     if not err or not resume:
         return result
@@ -312,7 +316,7 @@ def run_local(prompt):
     try:
         r = _claude_once(prompt, sid, False)
     except subprocess.TimeoutExpired:
-        return "⏱ Mac işi zaman aşımı (30 dk)."
+        return "⏱ Mac işi zaman aşımı (%d dk)." % (IS_TAVAN_SN // 60)
     result, _ = _parse_result(r, sid)
     return result
 

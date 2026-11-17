@@ -5,16 +5,22 @@ import tempfile
 import unittest
 from unittest import mock
 
+from tests import common
 from ghost import sahip
 
 
 class Profil(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
+        # tests/common profili sabitler (GHOST_SAHIP); bu testler sabitlemesiz davranışı sınar → kaldır, bitince GERİ KOY
+        # (geri konmazsa sıradaki test dosyaları kurulu kopyada sahibin profilini okur).
+        self._onceki = os.environ.pop("GHOST_SAHIP", None)
         sahip.profil(yenile=True)
 
     def tearDown(self):
         os.environ.pop("GHOST_SAHIP", None)
+        if self._onceki is not None:
+            os.environ["GHOST_SAHIP"] = self._onceki
         sahip.profil(yenile=True)
 
     def _yaz(self, metin):
@@ -63,6 +69,36 @@ class Profil(unittest.TestCase):
                 json.dump({"ad": "Örnek"}, f)
             self.assertEqual(sahip.profil(yenile=True).get("ad"), "Örnek")
             self.assertIn("örnek profille", sahip.durum())
+
+
+class TestProfiliSabit(unittest.TestCase):
+    """tests/common: testler yazıldıkları profile sabitlenir; kurulu kopyanın sahibinin profili okunmaz."""
+
+    def _agac(self, **dosyalar):
+        kok = tempfile.mkdtemp()
+        os.makedirs(os.path.join(kok, "ops"))
+        for ad, icerik in dosyalar.items():
+            with open(os.path.join(kok, "ops", ad.replace("_", ".")), "w", encoding="utf-8") as f:
+                f.write(icerik if isinstance(icerik, str) else json.dumps(icerik))
+        return kok
+
+    def test_hangi_dosya_secilir(self):
+        ref = {"siteler": [{"alan": common.REFERANS_SITE}]}
+        uye = {"ad": "Ada Deneme", "siteler": []}
+        son = lambda kok: os.path.basename(common.test_profili(kok) or "")   # noqa: E731
+        self.assertEqual(son(self._agac(sahip_example_json=ref, sahip_json=uye)), "sahip.example.json")   # kurulu kopya
+        self.assertEqual(son(self._agac(sahip_example_json=ref)), "sahip.example.json")                   # temiz çekirdek
+        self.assertEqual(son(self._agac(sahip_example_json={"siteler": [{"alan": "baska.example"}]},
+                                        sahip_json=ref)), "sahip.json")                                    # özel ağaç
+        self.assertEqual(son(self._agac(sahip_example_json="{bozuk", sahip_json="[1]")), "")              # okunamıyor
+        self.assertEqual(son(self._agac()), "")
+
+    def test_bu_kosuda_sabit(self):
+        """Bu ağaçta referans profil varsa süreç ona sabitlenmiş olmalı (dışarıdan verilmediyse)."""
+        beklenen = common.test_profili()
+        simdiki = os.environ.get("GHOST_SAHIP")
+        if beklenen and simdiki in (None, beklenen):       # None = önceki bir test sabitlemeyi düşürmüş → kırıl
+            self.assertEqual(simdiki, beklenen)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # Quickstart
 
-Goal: the core running on a Linux box in about 20 minutes — Telegram bridge, Claude as the
+Goal: the core running on a Linux box — Telegram bridge, Claude as the
 engine, memory, governance, sentinels. The Mac/iPhone limbs and the Cockpit app are separate
 optional steps at the end.
 
@@ -20,7 +20,7 @@ Clone into `~/jarvis`: the launchd/systemd units and a few scripts assume that c
 
 ```bash
 git clone https://github.com/erenyalcinai/ghost-core ~/jarvis && cd ~/jarvis
-python3 -m unittest discover -s tests      # ~580 tests, ~20 s, no network, no secrets
+python3 -m unittest discover -s tests      # ~1135 tests, about 90 s, no network, no secrets
 ```
 
 If this is green, the core is intact on your machine.
