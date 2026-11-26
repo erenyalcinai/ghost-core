@@ -1,3 +1,6 @@
+// watchOS: bu dosya saat hedefine GİRMEZ (project.yml) ve yanlışlıkla girerse boş derlenir — saatte UIKit var ama
+// pano, UIDevice, titreşim üreteçleri, görsel çizici yok; saatin karşılıkları GhostKokpitWatch/SaatPlatform.swift'te.
+#if !os(watchOS)
 import SwiftUI
 import UniformTypeIdentifiers
 #if canImport(UIKit)
@@ -223,3 +226,4 @@ extension View {
         #endif
     }
 }
+#endif  // !os(watchOS)

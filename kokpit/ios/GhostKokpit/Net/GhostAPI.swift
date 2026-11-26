@@ -5,8 +5,31 @@ import CryptoKit
 struct Kimlik: Equatable {
     var deviceID: String
     var key: String
+    /// Cep cihazı türü (Kokpit Watch, Cardputer): eşleşmede `tur: "cep"` ile gelen sahiplik anahtarı. Doluysa her
+    /// imzalı istek `X-Ghost-Sig0` da taşır (sunucu cep türünde zorunlu tutar). Telefon ve Mac'te nil → davranış aynı.
+    var key0: String? = nil
     var keyBytes: Data? { Data(hex: key) }
-    var gecerli: Bool { !deviceID.isEmpty && key.count == 64 && keyBytes != nil }
+    var key0Bytes: Data? { key0.flatMap { $0.count == 64 ? Data(hex: $0) : nil } }
+    var gecerli: Bool { !deviceID.isEmpty && key.count == 64 && keyBytes != nil && (key0 == nil || key0Bytes != nil) }
+}
+
+/// İmza hesabı — saf işlevler (ağ yok), sunucuyla aynı vektörlerle sınanır (tools/sig0_test.swift).
+///   kanonik = ts \n nonce \n METHOD \n path?query \n sha256hex(body)
+///   sig     = hex(HMAC-SHA256(key,  kanonik))
+///   sig0    = hex(HMAC-SHA256(key0, kanonik + "\n" + sig))        (yalnız cep cihazı)
+enum GhostImza {
+    static func kanonik(ts: String, nonce: String, method: String, yolSorgu: String, govde: Data) -> String {
+        [ts, nonce, method.uppercased(), yolSorgu, Data(SHA256.hash(data: govde)).hex].joined(separator: "\n")
+    }
+
+    static func sig(anahtar: Data, kanonik: String) -> String {
+        Data(HMAC<SHA256>.authenticationCode(for: Data(kanonik.utf8), using: SymmetricKey(data: anahtar))).hex
+    }
+
+    static func sig0(anahtar0: Data, kanonik: String, sig: String) -> String {
+        Data(HMAC<SHA256>.authenticationCode(for: Data((kanonik + "\n" + sig).utf8),
+                                             using: SymmetricKey(data: anahtar0))).hex
+    }
 }
 
 enum APIHata: LocalizedError {
@@ -158,6 +181,7 @@ final class GhostAPI {
         let _: OkYanit = try await istek("POST", "/v1/eylem", govde: g)
     }
 
+    #if !os(watchOS)   // saatte telefonun Keychain sarmalayıcısı YOK (kimlik yalnız SaatKasa'dan, kod kuruluyken)
     /// Uygulama dışı süreçler (widget, intent, paylaşım) için: Keychain kimliğiyle API.
     static func keychaindan() -> GhostAPI? {
         guard let id = Keychain.oku("device_id"), let key = Keychain.oku("device_key") else { return nil }
@@ -169,6 +193,7 @@ final class GhostAPI {
         guard let url = URL(string: taban) else { return nil }
         return GhostAPI(base: url, kimlik: k)
     }
+    #endif
 
     func etkinlikToken(tur: String, token: String, jid: Int?) async throws -> OkYanit {
         var g: [String: Any] = ["tur": tur, "token": token]
@@ -363,19 +388,26 @@ final class GhostAPI {
 
         if imzali {
             guard let k = kimlik, k.gecerli, let anahtar = k.keyBytes else { throw APIHata.kimlikYok }
+            #if os(watchOS)
+            // Saat YALNIZ cep cihazı kimliğiyle konuşur: sahiplik anahtarı yoksa istek hiç kurulmaz (Sig0'sız
+            // imzalı istek saat ikilisinden çıkamaz — çağıran koda bırakılmış bir alışkanlık değil, derleme kuralı).
+            guard k.key0Bytes != nil else { throw APIHata.kimlikYok }
+            #endif
             // İmzalanan yol = path + "?" + query (sunucu ham istek hedefini imzalar).
             var yolSorgu = parcalar.percentEncodedPath
             if let q = parcalar.percentEncodedQuery, !q.isEmpty { yolSorgu += "?" + q }
             let ts = String(Int(Date().timeIntervalSince1970))
             let nonce = Data((0..<16).map { _ in UInt8.random(in: 0...255) }).hex
-            let govdeOzeti = Data(SHA256.hash(data: govdeVeri)).hex
-            let mesaj = [ts, nonce, method, yolSorgu, govdeOzeti].joined(separator: "\n")
-            let imza = HMAC<SHA256>.authenticationCode(for: Data(mesaj.utf8),
-                                                       using: SymmetricKey(data: anahtar))
+            let mesaj = GhostImza.kanonik(ts: ts, nonce: nonce, method: method, yolSorgu: yolSorgu, govde: govdeVeri)
+            let imza = GhostImza.sig(anahtar: anahtar, kanonik: mesaj)
             req.setValue(k.deviceID, forHTTPHeaderField: "X-Ghost-Device")
             req.setValue(ts, forHTTPHeaderField: "X-Ghost-Ts")
             req.setValue(nonce, forHTTPHeaderField: "X-Ghost-Nonce")
-            req.setValue(Data(imza).hex, forHTTPHeaderField: "X-Ghost-Sig")
+            req.setValue(imza, forHTTPHeaderField: "X-Ghost-Sig")
+            if let anahtar0 = k.key0Bytes {     // cep cihazı: sahiplik imzası (asıl imzayı da kapsar)
+                req.setValue(GhostImza.sig0(anahtar0: anahtar0, kanonik: mesaj, sig: imza),
+                             forHTTPHeaderField: "X-Ghost-Sig0")
+            }
         }
         return req
     }

@@ -18,6 +18,7 @@ biten iş. Her mesaja push YOK — gürültü kanalı öldürür.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -62,6 +63,51 @@ def _jwt():
 ONEM = ("passive", "active", "time-sensitive")
 
 
+# ---------------------------------------------------------------- cihaz başına konu (Kokpit Watch, 2026-11-23)
+# APNs konusu = bildirimi alacak UYGULAMANIN paket kimliği. Saat uygulaması ayrı pakettir, kendi belirtecini alır;
+# telefonun konusuyla gönderilen bildirimi Apple "DeviceTokenNotForTopic" ile reddeder. Konuyu İSTEMCİ SEÇMEZ:
+# sunucudaki cihaz sınıfı kaydından (`ghost/cihaz_sinif.py`, açık alan) okunur; kayıt yoksa cihaz türünden (onay
+# servisi: tam | cep) türetilir — bildirim belirteci kaydetmiş cep cihazı = saat (Cardputer belirteç kaydetmez).
+# Tür okunamazsa cihaz telefon sayılır (eski davranış).
+def konu_ana():
+    return _ayar("APNS_TOPIC", "com.example.ghost.kokpit")
+
+
+def konu_saat():
+    return _ayar("APNS_TOPIC_SAAT", konu_ana() + ".watchkitapp")
+
+
+def cihaz_turleri():
+    """{cihaz id: "tam" | "cep"} — kaynak kokpit.cihazlar() (onay servisi). Asla fırlatmaz; hata → {}."""
+    try:
+        from ghost import kokpit
+        return {c["id"]: (c.get("tur") or "tam") for c in kokpit.cihazlar() if c.get("durum", "aktif") == "aktif"}
+    except Exception:
+        return {}
+
+
+def cihaz_sinifi(cihaz_id, turler=None, kayit=None):
+    """Belirteç kaydetmiş cihazın bildirim sınıfı: "saat" | "telefon".
+    2026-11-24: ÖNCE cihaz kaydındaki açık alan (`ghost/cihaz_sinif.py`): sınıfı "saat" olan saat konusunu alır,
+    başka bir sınıf kayıtlıysa (cardputer) cihaz ASLA saat sayılmaz. Açık alan yoksa geçiş kuralı sürer (yama 01:
+    belirteçli cep cihazı = saat) — saat istemcisi sınıfını kendi bildirmeye başlayınca bu dal ölü kalır."""
+    if kayit is None:
+        try:
+            from ghost import cihaz_sinif
+            kayit = cihaz_sinif.oku()
+        except Exception:
+            kayit = {}
+    acik = kayit.get(cihaz_id)
+    if acik:
+        return "saat" if acik == "saat" else "telefon"
+    turler = cihaz_turleri() if turler is None else turler
+    return "saat" if turler.get(cihaz_id) == "cep" else "telefon"
+
+
+def konu_sec(sinif):
+    return konu_saat() if sinif == "saat" else konu_ana()
+
+
 def onem_sec(collapse=None, veri=None):
     """Faz 1.12 (2026-10-29, denetim 06 #7) + Sahip aynı gün "bildirimler çok yoruyor": onay/karar kartı NORMAL (active)
     düzeyde — Odak'ı delmez; sohbet cevabı (collapse "sohbet") da active (Sahip 2026-10-30: ilk satır balonu sessiz, tam cevap
@@ -75,8 +121,79 @@ def onem_sec(collapse=None, veri=None):
     return "passive"
 
 
-def yuk(baslik, govde, veri=None, ses=True, rozet=None, onem=None):
-    aps = {"alert": {"title": baslik[:80], "body": govde[:500]}}
+# ---------------------------------------------------------------- bildirim gövdesi (Kokpit Watch, 2026-11-23)
+# Bildirim cevabın İLK PARAGRAFINI taşır (eskiden ilk 200 harf: cümle ortasında, Markdown işaretleriyle kesiliyordu).
+# Bilekte okunacak şey bu; devamı varsa sonuna DEVAM_EKI gelir. Tablo ve kod bloğu bildirime girmez.
+GOVDE_TAVAN = 600                       # ilk paragraf bundan uzunsa kelime sınırında kesilir
+DEVAM_EKI = " … devamı telefonda"       # saatte
+DEVAM_EKI_TELEFON = " …"                # telefonda (herkese() çevirir)
+KATEGORI_SOHBET = "sohbet"              # saat uygulamasının kaydettiği kategori (Cevapla + Aç); telefona GİTMEZ
+GOVDE_YUK_TAVAN = GOVDE_TAVAN + 40      # yuk() son sigortası (APNs yükü 4 KB; 640 harf ≈ en çok 2,5 KB)
+_KOD_BLOGU = re.compile(r"```.*?(```|\Z)", re.S)
+_SATIR_ICI = (
+    (re.compile(r"!\[([^\]]*)\]\([^)]*\)"), r"\1"),             # görsel → alt metin
+    (re.compile(r"\[([^\]]+)\]\([^)]*\)"), r"\1"),              # bağlantı → metni
+    (re.compile(r"\*\*(.+?)\*\*", re.S), r"\1"),                # kalın
+    (re.compile(r"__(.+?)__", re.S), r"\1"),
+    (re.compile(r"~~(.+?)~~", re.S), r"\1"),
+    (re.compile(r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])"), r"\1"),   # eğik (2 * 3 bozulmaz)
+    (re.compile(r"`([^`\n]*)`"), r"\1"),                        # satır içi kod
+)
+
+
+def duz_metin(paragraf):
+    """Tek paragrafı Markdown işaretlerinden temizle → (düz metin, yalnız başlık mıydı)."""
+    satirlar, baslik = [], True
+    for s in paragraf.splitlines():
+        s = s.strip()
+        if not s or s.startswith("|") or re.fullmatch(r"[-=*_]{3,}", s):
+            continue                                            # tablo satırı / ayraç bildirime girmez
+        m = re.match(r"#{1,6}\s+(.*)", s)
+        if m:
+            s = m.group(1).strip()
+        else:
+            baslik = False
+        s = re.sub(r"^>\s?", "", s)
+        s = re.sub(r"^[-*+]\s+", "• ", s)
+        for desen, yerine in _SATIR_ICI:
+            s = desen.sub(yerine, s)
+        s = re.sub(r"[ \t]{2,}", " ", s).strip()
+        if s:
+            satirlar.append(s)
+    return "\n".join(satirlar), bool(satirlar) and baslik
+
+
+def bildirim_govdesi(metin, tavan=GOVDE_TAVAN):
+    """Cevabın ilk paragrafı, işaretlerden temiz; devamı varsa DEVAM_EKI. Boş metin → ""."""
+    ham = _KOD_BLOGU.sub("\n\n", (metin or "").replace("\r\n", "\n"))
+    kodlu = ham != (metin or "").replace("\r\n", "\n")
+    temiz = [duz_metin(p) for p in re.split(r"\n\s*\n", ham)]
+    temiz = [(t, b) for t, b in temiz if t]
+    if not temiz:
+        return "(tablo ya da kod — telefonda)" if (metin or "").strip() else ""
+    govde, kalan = temiz[0][0], temiz[1:]
+    if temiz[0][1] and kalan:               # ilk paragraf yalnız başlıksa altındaki paragrafla birlikte okunur
+        govde, kalan = govde + "\n" + kalan[0][0], kalan[1:]
+    atlanan = len([p for p in re.split(r"\n\s*\n", ham) if p.strip()]) != len(temiz)   # süzülen tablo paragrafı
+    devam = bool(kalan) or kodlu or atlanan
+    if len(govde) > tavan:
+        kesik = govde[:tavan]
+        bosluk = max(kesik.rfind(" "), kesik.rfind("\n"))
+        govde = (kesik[:bosluk] if bosluk > tavan * 0.6 else kesik).rstrip(" ,;:\n")
+        devam = True
+    return govde + (DEVAM_EKI if devam else "")
+
+
+def telefon_govdesi(govde):
+    """Aynı gövdenin telefon hâli: sondaki "… devamı telefonda" yerine yalnız " …"."""
+    g = govde or ""
+    return g[:-len(DEVAM_EKI)] + DEVAM_EKI_TELEFON if g.endswith(DEVAM_EKI) else g
+
+
+def yuk(baslik, govde, veri=None, ses=True, rozet=None, onem=None, kategori=None):
+    aps = {"alert": {"title": baslik[:80], "body": govde[:GOVDE_YUK_TAVAN]}}
+    if kategori:                            # saat uygulaması bu kategoriye "Cevapla" eylemini bağlar
+        aps["category"] = str(kategori)[:40]
     onem = onem or onem_sec(None, veri)
     if onem in ONEM:
         aps["interruption-level"] = onem
@@ -90,24 +207,33 @@ def yuk(baslik, govde, veri=None, ses=True, rozet=None, onem=None):
     return p
 
 
-def gonder(token, env, baslik, govde, veri=None, ses=True, rozet=None, collapse=None, onem=None):
-    """Tek cihaza push → (ok, durum_kodu, apns_yanit). Asla fırlatmaz."""
+def uyari_basliklari(jwt_, konu=None, collapse=None):
+    """Görünür (alert) bildirimin curl başlıkları — saf işlev (ağ yok), testte doğrudan sınanır."""
+    hdr = ["-H", "authorization: bearer " + jwt_,
+           "-H", "apns-topic: " + (konu or konu_ana()),
+           "-H", "apns-push-type: alert", "-H", "apns-priority: 10",
+           "-H", "content-type: application/json"]
+    if collapse:
+        hdr += ["-H", "apns-collapse-id: " + collapse[:64]]
+    return hdr
+
+
+def gonder(token, env, baslik, govde, veri=None, ses=True, rozet=None, collapse=None, onem=None, konu=None,
+           kategori=None):
+    """Tek cihaza push → (ok, durum_kodu, apns_yanit). Asla fırlatmaz. konu: APNs konusu (verilmezse telefonunki).
+    kategori: bildirim kategorisi (yalnız saate verilir; herkese() seçer)."""
     onem = onem or onem_sec(collapse, veri)
     if os.environ.get("GHOST_TEST"):
         return False, 0, "test"
     if not hazir():
         return False, 0, "APNs anahtarı yok"
     url = "%s/3/device/%s" % (HOST.get(env or "development", HOST["development"]), token)
-    hdr = ["-H", "authorization: bearer " + _jwt(),
-           "-H", "apns-topic: " + _ayar("APNS_TOPIC", "com.example.ghost.kokpit"),
-           "-H", "apns-push-type: alert", "-H", "apns-priority: 10",
-           "-H", "content-type: application/json"]
-    if collapse:
-        hdr += ["-H", "apns-collapse-id: " + collapse[:64]]
+    hdr = uyari_basliklari(_jwt(), konu, collapse)
     try:
         r = subprocess.run(["curl", "-sS", "--http2", "-m", "15", "-o", "-", "-w", "\n%{http_code}",
                             "-X", "POST", *hdr, "-d",
-                            json.dumps(yuk(baslik, govde, veri, ses, rozet, onem), ensure_ascii=False), url],
+                            json.dumps(yuk(baslik, govde, veri, ses, rozet, onem, kategori=kategori),
+                                       ensure_ascii=False), url],
                            capture_output=True, text=True, timeout=25)
         out = r.stdout.strip().rsplit("\n", 1)
         kod = int(out[-1]) if out and out[-1].isdigit() else 0
@@ -149,9 +275,12 @@ def sessiz(token, env, veri=None):
 
 
 def sessiz_herkese(veri=None):
+    """Sessiz push yalnız TELEFONA: kuyruk (hatırlatıcı/etkinlik yazma) telefonun işi; saat belirtecine telefon
+    konusuyla gönderim reddedilir, saatin de boşaltacağı kuyruk yok."""
     from ghost import kokpit
+    turler = cihaz_turleri()
     return [dict(cihaz=c["id"], ok=sessiz(c["apns_token"], c["apns_env"], veri)[0])
-            for c in kokpit.apns_cihazlar()]
+            for c in kokpit.apns_cihazlar() if cihaz_sinifi(c["id"], turler) != "saat"]
 
 
 ALARM_ON = ("🚨", "⚠️", "❌", "🔴", "⛔", "🆘")
@@ -204,34 +333,100 @@ def la_durum(jid, tur, durum, ozet="", basladi=None, bitti=None):
             "basladi": basladi or int(time.time()), "bitti": bitti}
 
 
+# 2026-11-26 (Sahip "ekran widget'ı iş bitince de kapanmıyor"; teşhis dossier/kokpit/canli-etkinlik-kapanmiyor-2026-11-26.md):
+#  - aynı telefon her yeniden eşlemede yeni cihaz kaydı açıyor, push-to-start belirteci eski kayıtlarda da kalıyordu
+#    (ölçüm: 4 aktif kayıt, belirteç dördünde aynı) → her iş başında aynı telefona 4 start push. Belirteç başına BİR push.
+#  - iOS 18+ start yükünde `input-push-token: 1` (Apple: "Starting and updating Live Activities with ActivityKit push
+#    notifications") → sistem uygulamayı uyandırıp etkinliğin güncelleme belirtecini verir.
+#  - `stale-date`: iş tavanı (motor.IS_TAVAN 6 sa) + pay; bu tarihe dek bitiş gelmezse kart "sonuç bilinmiyor" der.
+#  - bitişte kart HEMEN kalkar (dismissal-date geçmişte): sonucu zaten "İş #N bitti" bildirimi taşıyor; 15 dk kalan
+#    "bitti" kartı sahibe "kapanmıyor" gibi görünüyordu.
+#  - iş için güncelleme belirteci yoksa (ölçüm: işlerin ~%43'ünde gelmemiş) ya da end push'u reddedildiyse telefona
+#    iş numarasıyla sessiz push → uygulama etkinliği yerelde kapatır (Bildirim.swift). Teslim garantisi yok; asıl
+#    toparlayıcı uygulamanın açılışta / öne gelişte yaptığı karşılaştırmadır (/v1/nabiz isler.aktif_idler).
+#  - her Live Activity push'u ops/apns.jsonl'e (tur=la); belirteç değeri YAZILMAZ.
+LA_BAYAT_SN = 6 * 3600 + 10 * 60
+LA_KAPANIS_GECMIS_SN = 1        # dismissal-date = şimdi - 1 → kilit ekranından hemen kalkar (Apple: geçmiş tarih)
+
+
+def _neden(yanit):
+    """APNs hata gövdesinden yalnız `reason` (belirteç ya da başka değer taşımaz)."""
+    try:
+        return str((json.loads(yanit or "{}") or {}).get("reason") or "")[:60]
+    except Exception:
+        return ""
+
+
+def _la_kaydet(olay, cihaz, jid, ok, kod, yanit=""):
+    """ops/apns.jsonl satırı: tur=la · olay start|end|yedek · cihaz · jid · ok · kod (+ APNs reason). Asla fırlatmaz."""
+    try:
+        satir = {"ts": time.strftime("%F %T"), "tur": "la", "olay": olay, "cihaz": cihaz, "jid": int(jid),
+                 "ok": bool(ok), "kod": kod}
+        if not ok:
+            satir["neden"] = _neden(yanit) if kod else re.sub(r"[0-9a-fA-F]{32,}", "…", str(yanit or ""))[:60]
+        with open(os.path.join(config.OPS, "apns.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(satir, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def etkinlik_baslat(jid, tur, ozet=""):
-    """Push-to-start: kayıtlı start token'ı olan tüm cihazlarda Live Activity açar."""
+    """Push-to-start: kayıtlı start token'ı olan cihazlarda Live Activity açar — aynı belirtece TEK push."""
     from ghost import kokpit
     sonuc = []
+    simdi = int(time.time())
     st = la_durum(jid, tur, "çalışıyor", ozet)
+    goruldu = set()
     for c in kokpit.la_start_tokenlar():
-        aps = {"timestamp": int(time.time()), "event": "start",
+        if c["token"] in goruldu:          # aynı telefonun eski eşleme kaydı: ikinci etkinlik açma
+            continue
+        goruldu.add(c["token"])
+        aps = {"timestamp": simdi, "event": "start",
                "content-state": st, "attributes-type": "IsEtkinligi",
                "attributes": {"jid": int(jid), "tur": (tur or "iş")[:40]},
+               "input-push-token": 1,
+               "stale-date": simdi + LA_BAYAT_SN,
                "alert": {"title": "İş #%d başladı" % int(jid), "body": (ozet or tur or "")[:100]}}
         ok, kod, y = _la_gonder(c["token"], c["env"], aps, "start")
         sonuc.append({"cihaz": c["id"], "ok": ok, "kod": kod, "yanit": y})
+        _la_kaydet("start", c["id"], jid, ok, kod, y)
         if kod == 410:
             kokpit.la_start_sil(c["id"])
     return sonuc
 
 
 def etkinlik_bitir(jid, tur, durum, ozet="", basladi=None):
-    """Update token'ı gelen etkinlikleri kapat (event=end); token gelmediyse sessiz."""
+    """Update token'ı gelen etkinlikleri kapat (event=end). Token yoksa ya da end reddedildiyse YEDEK: telefona iş
+    numarasını taşıyan sessiz push (uygulama etkinliği kendisi kapatır)."""
     from ghost import kokpit
     sonuc = []
-    st = la_durum(jid, tur, durum, ozet, basladi, int(time.time()))
+    simdi = int(time.time())
+    st = la_durum(jid, tur, durum, ozet, basladi, simdi)
+    basarili = 0
     for e in kokpit.la_update_tokenlar(jid):
-        aps = {"timestamp": int(time.time()), "event": "end", "content-state": st,
-               "dismissal-date": int(time.time()) + 15 * 60}
+        aps = {"timestamp": simdi, "event": "end", "content-state": st,
+               "dismissal-date": simdi - LA_KAPANIS_GECMIS_SN}
         ok, kod, y = _la_gonder(e["token"], e["env"], aps, "end")
         sonuc.append({"cihaz": e["device_id"], "ok": ok, "kod": kod, "yanit": y})
+        _la_kaydet("end", e["device_id"], jid, ok, kod, y)
+        basarili += 1 if ok else 0
     kokpit.la_update_sil(jid)
+    if not basarili:
+        sonuc.extend(etkinlik_yedek_kapat(jid))
+    return sonuc
+
+
+def etkinlik_yedek_kapat(jid):
+    """Sessiz push {"etkinlik_bitti": jid} yalnız telefonlara (saatte Live Activity yok). Sonuç listesi."""
+    from ghost import kokpit
+    sonuc = []
+    turler = cihaz_turleri()
+    for c in kokpit.apns_cihazlar():
+        if cihaz_sinifi(c["id"], turler) == "saat":
+            continue
+        ok, kod, y = sessiz(c["apns_token"], c["apns_env"], {"etkinlik_bitti": int(jid)})
+        sonuc.append({"cihaz": c["id"], "ok": ok, "kod": kod, "yanit": y, "yedek": True})
+        _la_kaydet("yedek", c["id"], jid, ok, kod, y)
     return sonuc
 
 
@@ -239,9 +434,16 @@ def herkese(baslik, govde, veri=None, collapse=None, onem=None):
     """Kayıtlı token'ı olan tüm aktif cihazlara. Sonuç listesi; 410 (Unregistered) token'ı siler."""
     from ghost import kokpit
     sonuc = []
+    turler = cihaz_turleri()
     for c in kokpit.apns_cihazlar():
-        ok, kod, y = gonder(c["apns_token"], c["apns_env"], baslik, govde, veri, collapse=collapse, onem=onem)
-        sonuc.append({"cihaz": c["id"], "ok": ok, "kod": kod, "yanit": y})
+        sinif = cihaz_sinifi(c["id"], turler)
+        saat = sinif == "saat"
+        # "… devamı telefonda" eki ve "sohbet" kategorisi (Cevapla eylemi) YALNIZ saate: telefon bildiriminde ek " …"
+        # olur (zaten telefondasın), kategori gitmez — telefonun bildirim davranışı gövde metni dışında değişmez.
+        ok, kod, y = gonder(c["apns_token"], c["apns_env"], baslik, govde if saat else telefon_govdesi(govde), veri,
+                            collapse=collapse, onem=onem, konu=konu_sec(sinif),
+                            kategori=KATEGORI_SOHBET if (saat and collapse == "sohbet") else None)
+        sonuc.append({"cihaz": c["id"], "sinif": sinif, "ok": ok, "kod": kod, "yanit": y})
         try:  # Faz 1.13 (denetim 02 e2): her push ops/apns.jsonl'e — teslim oranı ölçülebilsin
             from ghost import config as _cfg
             with open(os.path.join(_cfg.OPS, "apns.jsonl"), "a", encoding="utf-8") as f:

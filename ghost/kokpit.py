@@ -415,14 +415,17 @@ def bekleyen_kararlar():
 
 
 # ---------------------------------------------------------------- CİHAZLAR / KİMLİK
-def kod_uret(ad=None):
+def kod_uret(ad=None, tur=None):
     """Tek kullanımlık 6 haneli eşleme kodu (10 dk). Eski bekleyen kodlar silinir.
     Onay servisi kuruluysa (Faz 1) kod servis tarafından üretilir ve YALNIZ Telegram'dan sahibe
-    gider; burada None döner (kod dökümde/oturumda görünmez — model okuyup eşleyemesin)."""
+    gider; burada None döner (kod dökümde/oturumda görünmez — model okuyup eşleyemesin).
+    tur="cep" (2026-11-23): düz metni onay sayılmayan küçük cihaz; tür onay servisinde tutulur, servissiz kipte yoktur."""
     from ghost import onay
     if onay.servis_modu():
-        onay.kod_uret(ad)
+        onay.kod_uret(ad, tur)
         return None
+    if tur and tur != "tam":
+        raise RuntimeError("cep cihazı yalnız onay servisi kuruluyken eşlenir")
     kod = "%06d" % secrets.randbelow(10 ** 6)
     _hata_say(sifirla=True)
     c = _db()
@@ -476,8 +479,9 @@ def _uyar(metin):
         pass
 
 
-def esle(kod, ad=None):
+def esle(kod, ad=None, ek=None):
     """Kod doğruysa cihazı etkinleştir → (device_id, key_hex); değilse None.
+    ek (dict, isteğe bağlı): cep cihazında servisin verdiği tür ve sahiplik anahtarı buraya yazılır (tur, key0).
     Kod ömründe ESLESME_DENEME_TAVANI yanlış deneme → bekleyen kod iptal, sahibe uyarı
     (6 hane × 10 dk × paralel istek = kaba kuvvet penceresi; tavan bunu kapatır)."""
     kod = (kod or "").strip()
@@ -493,6 +497,8 @@ def esle(kod, ad=None):
                   "VALUES(?,?,'','aktif',?,?)", (r["id"], r.get("ad") or ad or "", r.get("created") or _now(), _now()))
         c.commit()
         c.close()
+        if ek is not None and r.get("tur") == "cep":
+            ek.update(tur="cep", key0=r.get("key0") or "")
         return r["id"], r["key"]
     c = _db()
     row = c.execute("SELECT id, kod_son FROM kokpit_devices WHERE durum='bekliyor' AND kod=?",

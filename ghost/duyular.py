@@ -18,18 +18,41 @@ Gizlilik kuralları (bilinçli):
   üç anahtar (konum/takvim/cihaz) ayrı bir kat — ikisi de kapatabilir.
 - Takvimden yalnız BAŞLIK, saat ve yer alınır; not/katılımcı/URL alanları
   uygulamada zaten gönderilmez.
+
+SAAT (2026-11-24, Kokpit Watch hazırlığı): dördüncü duyu `saat` — bilekte mi, pil, şarjda mı, son dokunuş. Telefonun
+`cihaz` yuvasından AYRIDIR (saat `cihaz` adıyla gönderseydi telefonun pilini ezer, bağlama "telefon %X" diye saatin
+pili girerdi) ve üst düzey `cihaz_id`'yi değiştirmez. SAĞLIK VERİSİ DEĞİLDİR: nabız, uyku, HRV, adım burada YOK ve
+bu yuvaya eklenmez (o akış ayrı karar).
+
+GERÇEK DEĞİŞİM DAMGALARI (2026-11-24): her duyunun `ts`'i sunucunun ALIM anıdır ve uygulama her gönderide son bilinen
+konumu yeniden yollar → `ts` "telefon hareket etti" demek değildir (arka plan yenilemesi de onu tazeler). Hareket
+soran (sabah kartı) şunlara bakar, hepsi `yaz()` içinde ÖNCEKİ kayıtla karşılaştırılarak konur (`hareketler()`):
+konum `degisim_ts` (yer KONUM_DEGISIM_M'den fazla değişti), cihaz `fis_ts` (şarjdan çekildi), saat `bilek_ts`
+(bileğe takıldı) ve saatin kendi bildirdiği `son_dokunus`.
 """
+import contextlib
 import json
+import math
 import os
 import time
 
 from ghost import config
 
+try:
+    import fcntl
+except ImportError:                     # fcntl yoksa kilitsiz sürer (eski davranış)
+    fcntl = None
+
 DOSYA = "duyular.json"
 # Bayatlık sınırları (sn): bu yaştan sonra veri bağlama girmez.
-BAYAT = {"konum": 6 * 3600, "takvim": 3 * 3600, "cihaz": 2 * 3600}
-DUYULAR = ("konum", "takvim", "cihaz")
+BAYAT = {"konum": 6 * 3600, "takvim": 3 * 3600, "cihaz": 2 * 3600, "saat": 2 * 3600}
+DUYULAR = ("konum", "takvim", "cihaz")            # telefonun duyuları (uygulamadaki üç anahtar)
+EK_DUYULAR = ("saat",)                             # başka cihazın duyusu: ayrı yuva, üst düzey cihaz_id'yi değiştirmez
 ETKINLIK_TAVAN = 12          # tek gönderide alınacak en fazla etkinlik
+KONUM_DEGISIM_M = 150        # bundan (ve bildirilen doğruluktan) küçük kayma "yer değişti" sayılmaz (GPS gezinmesi)
+DOKUNUS_ESKI_SN = 7 * 86400  # saatin bildirdiği son dokunuş bundan eskiyse yok sayılır
+SAAT_KAYMA_SN = 120          # cihaz saati sunucudan en çok bu kadar ileride olabilir (üstü: damga güvenilmez)
+SAAT_PIL_DUSUK = 0.15
 
 
 def _yol():
@@ -54,6 +77,30 @@ def _yaz_dosya(d):
     os.replace(tmp, y)
 
 
+@contextlib.contextmanager
+def _kilit():
+    """duyular.json oku-değiştir-yaz kilidi (iplikler ve süreçler arası). NEDEN (ikinci inceleme, 2026-11-26): saat
+    duyusuyla dosyanın İKİ göndereni oldu (telefon + saat; API çok iplikli). Kilitsiz hâlde eşzamanlı iki gönderiden
+    biri FileNotFoundError alıyor (ortak ".tmp"; istek 500), yarım dosyayı `{}` okuyan yazar öteki yuvaları ve değişim
+    damgalarını (fis_ts, bilek_ts, degisim_ts) düşürüyordu. Yazarlar sıraya girince ortak ".tmp" adı da güvenlidir.
+    Kilit alınamazsa kilitsiz sürer (eski davranış)."""
+    f = None
+    try:
+        if fcntl is not None:
+            os.makedirs(os.path.dirname(_yol()), exist_ok=True)
+            f = open(_yol() + ".lock", "a")      # ops/*.lock git tarafından yok sayılır
+            fcntl.flock(f, fcntl.LOCK_EX)
+    except Exception:
+        if f is not None:
+            f.close()
+        f = None
+    try:
+        yield
+    finally:
+        if f is not None:
+            f.close()                   # kapanış kilidi bırakır
+
+
 def acik():
     """Ana şalter. Varsayılan AÇIK — uygulama izin verilmeden zaten veri göndermez,
     bu şalter sahibin tek hamlede kapatabilmesi için var."""
@@ -61,9 +108,10 @@ def acik():
 
 
 def salter(deger):
-    d = oku()
-    d["acik"] = bool(deger)
-    _yaz_dosya(d)
+    with _kilit():
+        d = oku()
+        d["acik"] = bool(deger)
+        _yaz_dosya(d)
     return d["acik"]
 
 
@@ -118,7 +166,60 @@ def _temizle_cihaz(c):
             "ios": _metin(c.get("ios"), 20), "ts": time.time()}
 
 
-_TEMIZLE = {"konum": _temizle_konum, "takvim": _temizle_takvim, "cihaz": _temizle_cihaz}
+def _temizle_saat(s):
+    """Saat (Apple Watch) anlık görüntüsü. `bilekte` üç durumludur: True | False | None (saat söylemedi).
+    `son_dokunus` saatin KENDİ damgasıdır (epoch sn): gelecekteyse ya da çok eskiyse yok sayılır."""
+    simdi = time.time()
+    b = s.get("bilekte")
+    dokunus = _sayi(s.get("son_dokunus"), simdi - DOKUNUS_ESKI_SN, simdi + SAAT_KAYMA_SN)
+    return {"bilekte": b if isinstance(b, bool) else None, "pil": _sayi(s.get("pil"), 0, 1),
+            "sarj": bool(s.get("sarj")), "son_dokunus": min(dokunus, simdi) if dokunus is not None else None,
+            "model": _metin(s.get("model"), 40), "os": _metin(s.get("os"), 20), "ts": simdi}
+
+
+_TEMIZLE = {"konum": _temizle_konum, "takvim": _temizle_takvim, "cihaz": _temizle_cihaz, "saat": _temizle_saat}
+
+
+def _mesafe_m(a, b):
+    """İki konum kaydı arası yaklaşık mesafe (m, haversine)."""
+    f1, f2 = math.radians(a["enlem"]), math.radians(b["enlem"])
+    df, dl = f2 - f1, math.radians(b["boylam"] - a["boylam"])
+    h = math.sin(df / 2) ** 2 + math.cos(f1) * math.cos(f2) * math.sin(dl / 2) ** 2
+    return 2 * 6371000 * math.asin(min(1.0, math.sqrt(h)))
+
+
+def _degisim_isle(ad, yeni, eski):
+    """Yeni kayda GERÇEK değişim damgasını koy (önceki kayıtla karşılaştırarak). Değişim yoksa önceki damga taşınır;
+    karşılaştıracak önceki kayıt yoksa damga konmaz (ilk gönderi değişim değildir)."""
+    eski = eski if isinstance(eski, dict) else {}
+    try:
+        if ad == "konum":
+            yeni["degisim_ts"] = eski.get("degisim_ts")
+            if eski.get("enlem") is not None and eski.get("boylam") is not None:
+                esik = max(KONUM_DEGISIM_M, yeni.get("dogruluk") or 0, eski.get("dogruluk") or 0)
+                if _mesafe_m(eski, yeni) > esik:
+                    yeni["degisim_ts"] = yeni["ts"]
+        elif ad == "cihaz":
+            yeni["fis_ts"] = eski.get("fis_ts")
+            if eski.get("sarj") is True and yeni.get("sarj") is False and yas_degeri(eski) < BAYAT["cihaz"]:
+                yeni["fis_ts"] = yeni["ts"]          # şarjdan çekildi (bayat kayıtla kıyas: ne zaman çekildiği bilinmez)
+        elif ad == "saat":
+            yeni["bilek_ts"] = eski.get("bilek_ts")
+            if eski.get("bilekte") is False and yeni.get("bilekte") is True and yas_degeri(eski) < BAYAT["saat"]:
+                yeni["bilek_ts"] = yeni["ts"]        # bileğe takıldı
+            if yeni.get("son_dokunus") is None:      # saat bu gönderide dokunuş bildirmedi: bilinen son dokunuş silinmez
+                yeni["son_dokunus"] = _sayi(eski.get("son_dokunus"), yeni["ts"] - DOKUNUS_ESKI_SN, yeni["ts"])
+    except (TypeError, ValueError, KeyError):
+        pass
+    return yeni
+
+
+def yas_degeri(kayit):
+    """Bir duyu kaydının yaşı (sn); damgasızsa sonsuz."""
+    try:
+        return max(0.0, time.time() - float(kayit["ts"]))
+    except (TypeError, ValueError, KeyError):
+        return float("inf")
 
 
 def yaz(veri, cihaz=None):
@@ -127,22 +228,46 @@ def yaz(veri, cihaz=None):
     Dönen: güncellenen duyu adları."""
     if not isinstance(veri, dict):
         return []
-    d = oku()
-    guncel = []
-    for ad in DUYULAR:
+    temizler = []
+    for ad in DUYULAR + EK_DUYULAR:
         ham = veri.get(ad)
         if not isinstance(ham, dict):
             continue
         temiz = _TEMIZLE[ad](ham)
         if temiz is None:
             continue
-        d[ad] = temiz
-        guncel.append(ad)
-    if guncel:
-        d["cihaz_id"] = cihaz or d.get("cihaz_id")
+        if ad in EK_DUYULAR:
+            temiz["cihaz_id"] = cihaz        # saatin kimliği kendi yuvasında; üst düzey cihaz_id telefonun kalır
+        temizler.append((ad, temiz))
+    if not temizler:
+        return []
+    with _kilit():                           # oku-değiştir-yaz tek parça: telefon ve saat aynı anda gönderebilir
+        d = oku()
+        for ad, temiz in temizler:
+            d[ad] = _degisim_isle(ad, temiz, d.get(ad))
+        if any(ad in DUYULAR for ad, _ in temizler):
+            d["cihaz_id"] = cihaz or d.get("cihaz_id")
         d["son"] = time.time()
         _yaz_dosya(d)
-    return guncel
+    return [ad for ad, _ in temizler]
+
+
+def hareketler(d=None):
+    """Gerçek değişim damgaları {işaret: epoch} — yalnız damgası olanlar. Sıra tercih sırasıdır (saat önce):
+    saat-dokunus (saatin bildirdiği son dokunuş) · saat-bilek (bileğe takıldı) · fis (telefon şarjdan çekildi) ·
+    konum (yer değişti). Şalter kapalıysa boş. Alım damgası (`ts`) burada YOKTUR: o hareket değildir."""
+    d = oku() if d is None else d
+    if not d.get("acik", True):
+        return {}
+    s, c, k = d.get("saat") or {}, d.get("cihaz") or {}, d.get("konum") or {}
+    aday = (("saat-dokunus", s.get("son_dokunus")), ("saat-bilek", s.get("bilek_ts")),
+            ("fis", c.get("fis_ts")), ("konum", k.get("degisim_ts")))
+    cikti = {}
+    for ad, ts in aday:
+        v = _sayi(ts, 0)
+        if v:
+            cikti[ad] = v
+    return cikti
 
 
 def yas(duyu, d=None):
@@ -204,7 +329,31 @@ def ozet(d=None):
         "siradaki": ("%s %s" % (sr.get("bas", ""), sr.get("ad", ""))).strip() if sr else "",
         "pil": c.get("pil"), "sarj": bool(c.get("sarj")), "ag": c.get("ag") or "",
         "cihaz_taze": taze("cihaz", d),
+        "saat": saat_ozet(d),
     }
+
+
+def saat_ozet(d=None):
+    """Saat duyusunun küçük özeti (Nabız ve yönlendirme için): hiç veri yoksa {"var": False}."""
+    d = oku() if d is None else d
+    s = d.get("saat") or {}
+    if not s.get("ts"):
+        return {"var": False}
+    return {"var": True, "taze": taze("saat", d), "bilekte": s.get("bilekte"), "pil": s.get("pil"),
+            "sarj": bool(s.get("sarj")), "yas": _yas_metin(yas("saat", d))}
+
+
+def _saat_parcasi(d):
+    """Bağlam satırına girecek saat bilgisi — yalnız işe yarayan durumda, kısa: bilekte değilse (bileğe giden
+    bildirimi görmez) ya da pili bitmek üzereyse. Bilekte ve pili yerindeyse hiçbir şey (satır şişmesin)."""
+    s = d.get("saat") or {}
+    if not taze("saat", d):
+        return ""
+    if s.get("bilekte") is False:
+        return "saat bilekte değil" + (" (şarjda)" if s.get("sarj") else "")
+    if s.get("pil") is not None and s["pil"] < SAAT_PIL_DUSUK and not s.get("sarj"):
+        return "saat pili %%%d" % round(s["pil"] * 100)
+    return ""
 
 
 def satir():
@@ -230,6 +379,9 @@ def satir():
     if taze("cihaz", d) and c.get("pil") is not None:
         p.append("telefon %%%d%s%s" % (round(c["pil"] * 100), " şarjda" if c.get("sarj") else "",
                                        " · düşük güç" if c.get("dusuk_guc") else ""))
+    sp = _saat_parcasi(d)
+    if sp:
+        p.append(sp)
     if not p:
         return ""
     return ("[SAHİBİN BAĞLAMI (kendi telefonundan, izin verdiği duyular): %s. "
@@ -277,6 +429,13 @@ def metin():
             round((c.get("pil") or 0) * 100), " şarjda" if c.get("sarj") else "",
             c.get("ag") or "ağ?", " · düşük güç" if c.get("dusuk_guc") else "",
             _yas_metin(yas("cihaz", d))))
+    w = d.get("saat") or {}
+    if w.get("ts"):
+        s.append("⌚ %s · %s%s (%s)%s" % (
+            w.get("model") or "saat",
+            {True: "bilekte", False: "bilekte değil"}.get(w.get("bilekte"), "bilek durumu bilinmiyor"),
+            (" · pil %%%d%s" % (round(w["pil"] * 100), " şarjda" if w.get("sarj") else "")) if w.get("pil") is not None else "",
+            _yas_metin(yas("saat", d)), "" if taze("saat", d) else "  ⚠️ bayat, bağlama girmiyor"))
     return "\n".join(s)
 
 

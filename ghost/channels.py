@@ -164,10 +164,10 @@ class AppKanal:
             return rid                      # ilk satır: push yok, sonuç gelince gider
         try:
             if buttons:
-                apns.herkese("Ghost onay bekliyor", text[:200], {"sekme": "kararlar"},
+                apns.herkese("Ghost onay bekliyor", apns.bildirim_govdesi(text), {"sekme": "kararlar"},
                              collapse="karar")
             elif birincil() == "kokpit" or son_kanal() == "kokpit":
-                apns.herkese("Ghost", text[:200], {"sekme": "sohbet"}, collapse="sohbet")
+                apns.herkese("Ghost", apns.bildirim_govdesi(text), {"sekme": "sohbet"}, collapse="sohbet")
         except Exception as e:
             if self.log:
                 self.log("push hata: %r" % e)
@@ -184,9 +184,9 @@ class AppKanal:
             return self.send(text, buttons)
         try:
             if buttons:
-                apns.herkese("Ghost onay bekliyor", text[:200], {"sekme": "kararlar"}, collapse="karar")
+                apns.herkese("Ghost onay bekliyor", apns.bildirim_govdesi(text), {"sekme": "kararlar"}, collapse="karar")
             elif birincil() == "kokpit" or son_kanal() == "kokpit":
-                apns.herkese("Ghost", text[:200], {"sekme": "sohbet"}, collapse="sohbet")
+                apns.herkese("Ghost", apns.bildirim_govdesi(text), {"sekme": "sohbet"}, collapse="sohbet")
         except Exception as e:
             if self.log:
                 self.log("push hata: %r" % e)
@@ -201,7 +201,7 @@ def app_medya(yol, aciklama="", kaynak="ghost"):
         from ghost import apns, kokpit
         rid = kokpit.outbox_yaz(aciklama or "", kaynak, medya=yol)
         if rid and kaynak == "ghost" and birincil() == "kokpit":
-            apns.herkese("Ghost", (aciklama or "📎 %s" % os.path.basename(yol))[:200],
+            apns.herkese("Ghost", apns.bildirim_govdesi(aciklama) or "📎 %s" % os.path.basename(yol)[:160],
                          {"sekme": "sohbet"}, collapse="sohbet")
         return rid
     except Exception:

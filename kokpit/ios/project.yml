@@ -6,6 +6,7 @@ options:
   deploymentTarget:
     iOS: "18.0"
     macOS: "15.0"
+    watchOS: "26.0"
   createIntermediateGroups: true
   generateEmptyDirectories: false
   # Secrets.xcconfig yoksa build_install.sh örnekten boş kopya üretir; yine de
@@ -51,8 +52,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
         ENABLE_PREVIEWS: YES
-        MARKETING_VERSION: "0.21"
-        CURRENT_PROJECT_VERSION: "31"
+        MARKETING_VERSION: "0.22"
+        CURRENT_PROJECT_VERSION: "32"
         # Dış paket: yalnız ElevenLabs (ses ajanı). Gerisi Foundation/SwiftUI/CryptoKit/Security.
         OTHER_LDFLAGS: ""
 
@@ -134,4 +135,35 @@ targets:
         ENABLE_HARDENED_RUNTIME: NO
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
+        OTHER_LDFLAGS: ""
+
+  # watchOS (2026-11-23, Kokpit Watch aşama 1): bilek uygulaması. Tek hedefli saat uygulaması, telefon uygulamasına
+  # gömülür ama bağımsız çalışır (kendi ağı, kendi eşleşmesi: "cep" cihaz türü, kendi APNs belirteci).
+  # Paylaşılan kaynak: Net/GhostAPI.swift (+ imza) · Model/Modeller.swift · Views/Tema.swift. Keychain.swift,
+  # Platform.swift, Oturum.swift, MasaModel/SahneModel/Etkinlik GİRMEZ (UIKit/ActivityKit; saatin kendi SaatOturum + SaatPlatform'u var).
+  # Sürüm numaraları telefon uygulamasıyla AYNI tutulur (gömülü saat uygulaması için doğrulama bunu ister).
+  GhostKokpitWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: GhostKokpitWatch
+      - path: GhostKokpit/Net/GhostAPI.swift      # Keychain.swift GİRMEZ: saatin kasası SaatKasa
+      - path: GhostKokpit/Model/Modeller.swift
+      - path: GhostKokpit/Views/Tema.swift
+    entitlements:
+      path: GhostKokpitWatch/GhostKokpitWatch.entitlements
+      properties:
+        aps-environment: development    # saatin kendi APNs belirteci (konu: com.example.ghost.kokpit.watchkitapp)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.ghost.kokpit.watchkitapp
+        PRODUCT_NAME: GhostWatch
+        INFOPLIST_FILE: GhostKokpitWatch/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        WATCHOS_DEPLOYMENT_TARGET: "26.0"
+        TARGETED_DEVICE_FAMILY: "4"
+        ENABLE_PREVIEWS: YES
+        SKIP_INSTALL: YES
+        MARKETING_VERSION: "0.22"
+        CURRENT_PROJECT_VERSION: "32"
         OTHER_LDFLAGS: ""

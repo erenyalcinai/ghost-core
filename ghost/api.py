@@ -89,7 +89,7 @@ ROTALAR = (
     ("GET", "/v1/outbox", "tam", "cihaz", "g_outbox", "birleşik döküm; ?since&limit&bekle&once&gts&durum (uzun yoklama + güncellenen balonlar)"),
     ("GET", "/v1/medya/<id>", "onek", "cihaz", "g_medya", "döküm medyası (imzalı; yol DB'den)"),
     ("GET", "/v1/duyular", "tam", "cihaz", "g_duyular", "duyular şalteri + özet (uygulama kendi durumunu görsün)"),
-    ("GET", "/v1/gorevler", "tam", "cihaz", "g_gorevler", "telefona yazılacak bekleyen işler (hatırlatıcı/etkinlik)"),
+    ("GET", "/v1/gorevler", "tam", "cihaz", "g_gorevler", "telefona yazılacak bekleyen işler (hatırlatıcı/etkinlik); cep cihazına kendi işleri: ?bekle uzun yoklama (≤55 sn), en çok bir kez teslim"),
     ("GET", "/v1/bolgeler", "tam", "cihaz", "g_bolgeler", "coğrafi tetik tanımları (seq değişince uygulama yeniden kaydeder)"),
     ("GET", "/v1/komutlar", "tam", "cihaz", "g_komutlar", "slash komut defteri (ghost + claude grubu)"),
     ("GET", "/v1/siteler", "tam", "cihaz", "g_siteler", "siteler + canlılık (uptime_state) + başlık/proje"),
@@ -115,7 +115,7 @@ ROTALAR = (
     ("POST", "/v1/paylas", "tam", "cihaz", "p_paylas", "Share Extension: JSON metin/URL ya da ham dosya gövdesi; ?ad&not&grup&sira&toplam"),
     ("POST", "/v1/masa", "tam", "cihaz", "p_masa", "Masa'ya kart ekle {tur, ad, ebeveyn?, icerik?}"),
     ("POST", "/v1/masa/<id>|dosya", "onek", "cihaz", "p_masa", "/dosya?ad&ebeveyn ham gövde; /<id> {eylem: duzenle|adlandir|tasi|sirala|dolap|geri|sil|ilet}"),
-    ("POST", "/v1/gorevler/<id>", "onek", "cihaz", "p_gorev_sonuc", "telefona yazma sonucu {ok, mesaj, yerel_id} → haber_ver"),
+    ("POST", "/v1/gorevler/<id>", "onek", "cihaz", "p_gorev_sonuc", "telefona yazma sonucu {ok, mesaj, yerel_id} → haber_ver; cep cihazı {ok, mesaj, sonuc} → çağırana döner (bildirim yok); başka türün görevi 403"),
     ("POST", "/v1/bolge", "tam", "cihaz", "p_bolge", "bölge giriş/çıkış olayı → Ghost düşünür + kural tetiği"),
     ("POST", "/v1/kararlar/<id>", "onek", "cihaz", "p_karar", "{karar: onay|ret} → kokpit_kararlar kuyruğu"),
 )
@@ -383,7 +383,11 @@ class H(BaseHTTPRequestHandler):
                                 "bayat": duyular.BAYAT})
 
     def _g_gorevler(self, cihaz, u, q):     # Faz 6: telefona yazılacak işler
-        return self._json(200, {"gorevler": gorevler.bekleyenler()})
+        if cihaz.get("tur") == "cep":
+            # Cep cihazı (2026-11-23): kendi işlerini uzun yoklamayla çeker; alınan görev en çok bir kez verilir.
+            # İki kuyruk hedefle ayrılır: telefon cep türünü tanımaz (hata diye tüketir), cep de telefonunkini.
+            return self._json(200, {"gorevler": gorevler.cep_bekle_al(cihaz["id"], q.get("bekle", ["0"])[0])})
+        return self._json(200, {"gorevler": gorevler.bekleyenler(hedef="telefon")})
 
     def _g_bolgeler(self, cihaz, u, q):     # coğrafi tetik tanımları (seq değişince yeniden kaydet)
         d = bolgeler.oku()
@@ -594,12 +598,13 @@ class H(BaseHTTPRequestHandler):
 
     def _p_eslesme(self, cihaz, u, q, veri, body, ham):
         time.sleep(1.0)  # kaba kuvvete karşı yavaşlat (6 hane, 10 dk, tek kod)
-        r = kokpit.esle(str(veri.get("kod", "")), veri.get("ad", ""))
+        ek = {}       # cep cihazı: tur + sahiplik anahtarı (key0) da döner
+        r = kokpit.esle(str(veri.get("kod", "")), veri.get("ad", ""), ek)
         if not r:
             governance.audit("api", "eslesme", governance.READ, "başarısız kod")
             return self._json(403, {"hata": "kod geçersiz"})
         governance.audit("api", "eslesme", governance.READ, "cihaz eşlendi: %s" % r[0])
-        return self._json(200, {"device_id": r[0], "key": r[1]})
+        return self._json(200, dict({"device_id": r[0], "key": r[1]}, **ek))
 
     def _p_ses_arac(self, cihaz, u, q, veri, body, ham):
         # Ses ajanının webhook aracı: çağıran ElevenLabs, cihaz imzası yok. Paylaşılan
@@ -626,10 +631,18 @@ class H(BaseHTTPRequestHandler):
         if governance.is_frozen() and metin.split(None, 1)[0].lower() not in (
                 "/unfreeze", "/freeze", "/durum", "/saglik", "/help"):
             return self._json(423, {"hata": "FREEZE aktif — yalnız /unfreeze, /durum"})
-        try:  # imzalı istek: gerçek onay kapısı (ghost/sahne.py GERÇEK ONAY KAYDI)
-            sahne.sahip_onayi_kaydet(metin, "kokpit-mesaj")
-        except Exception:
-            pass
+        if cihaz.get("tur") == "cep":
+            # Cep cihazı (2026-11-23): düz metin onay SAYILMAZ; kartı /v1/eylem ile bilerek onaylar. Köprünün imzalı
+            # sayacağı metni onay servisi kurar (komut olduğu gibi, düz metin "[Cep cihazı: ad] " önekli) — döküme
+            # ve kuyruğa o girer: düz "tamam" açık kartın görünümünü de kapatmaz. Asıl sınır serviste, burada değil.
+            if not cihaz.get("inbox_metin"):
+                return self._json(503, {"hata": "onay servisi cep cihazı imzası vermedi"})
+            metin = cihaz["inbox_metin"]
+        else:
+            try:  # imzalı istek: gerçek onay kapısı (ghost/sahne.py GERÇEK ONAY KAYDI)
+                sahne.sahip_onayi_kaydet(metin, "kokpit-mesaj")
+            except Exception:
+                pass
         mid = kokpit.outbox_yaz(metin, "sahip")
         channels.son_kanal_ayarla("kokpit")      # cevap uygulamaya push olsun
         kokpit.mesaj_kuyrukla(metin, cihaz["id"], sesli=bool(veri.get("sesli")),
@@ -680,12 +693,18 @@ class H(BaseHTTPRequestHandler):
         gid = u.path.rsplit("/", 1)[1]
         if not gid.isdigit():
             return self._json(400, {"hata": "id sayı değil"})
-        g = gorevler.sonuclandir(gid, bool(veri.get("ok")), veri.get("mesaj", ""),
-                                 veri.get("yerel_id", ""), cihaz["id"])
+        cep = cihaz.get("tur") == "cep"
+        try:
+            g = gorevler.sonuclandir(gid, bool(veri.get("ok")), veri.get("mesaj", ""),
+                                     veri.get("yerel_id", ""), cihaz["id"],
+                                     hedef="cep" if cep else "telefon", cikti=veri.get("sonuc") if cep else None)
+        except gorevler.HedefUyusmuyor:
+            return self._json(403, {"hata": "görev bu cihaz türüne ait değil"})
         if not g:
             # Zaten sonuçlanmış: ikinci deneme sessizce yutulur (çift yazım olmaz).
             return self._json(200, {"ok": True, "yinelenen": True})
-        gorevler.haber_ver(g)
+        if not cep:
+            gorevler.haber_ver(g)       # cep görevinin sonucu çağırana döner (gorevler.cep_bekle); bildirim yok
         return self._json(200, {"ok": True, "durum": g["durum"]})
 
     def _p_bolge(self, cihaz, u, q, veri, body, ham):        # bölgeye giriş/çıkış — Ghost'u DÜŞÜNDÜRÜR

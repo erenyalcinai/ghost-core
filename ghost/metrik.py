@@ -46,6 +46,11 @@ def tur_kaydet(kanal, mesaj_ts, ilk_cikti_ts, cevap_ts, zaman_asimi=False,
         if ek:
             for k, v in ek.items():
                 kayit.setdefault(k, v)          # çekirdek alanlar ezilmez
+        if tur == "sohbet":                     # köken cihaz (2026-11-24): tur BAŞINDA yakalanan, yoksa şimdiki
+            ham = getattr(_ILK_CIKTI, "koken", None)
+            _ILK_CIKTI.koken = None
+            for ad, v in koken_oku(ham).items():
+                kayit.setdefault(ad, v)
         with _LOCK:
             with open(_yol("metrik.jsonl"), "a", encoding="utf-8") as f:
                 f.write(json.dumps(kayit, ensure_ascii=False) + "\n")
@@ -55,9 +60,66 @@ def tur_kaydet(kanal, mesaj_ts, ilk_cikti_ts, cevap_ts, zaman_asimi=False,
         pass
 
 
+# ---------- köken cihaz (2026-11-24, Kokpit Watch hazırlığı) ----------
+# `kanal` alanı köprünün BİRİNCİL kanalıdır (30 günde 1.447 turun hepsi "kokpit"): mesajın telefondan mı, Mac'ten mi,
+# Cardputer'dan mı geldiğini söylemez. Saatin beklemeyi azaltıp azaltmadığını ölçmek için tur satırına köken yazılır.
+# Kaynak: `channels.son_kanal()` + `channels.son_cihaz()` — ikincisi yönlendirme yamasının (yamalar/03, api.py)
+# tuttuğu AYNI alandır; o yama uygulanmadıysa cihaz bilinmez ve köken "kokpit" kalır (ölçüm kanal düzeyinde).
+# Köken tur BAŞINDA yakalanır (`ilk_cikti_sifirla`, köprü her turda çağırır): tur sürerken başka cihazdan gelen
+# mesaj kaydı kaydırmasın. Tur başında yalnız ucuz kısım okunur (kanal + cihaz kimliği, küçük bir dosya); cihazın
+# adı/sınıfı (onay servisine sorgu) tur SONUNDA, cevap gittikten sonra çözülür — ölçüm turu geciktirmez. Köprü değişmez.
+KOKEN_SINIFLARI = ("telefon", "mac", "saat", "cardputer", "cep", "tam", "kokpit", "telegram", "bilinmiyor")
+
+
+def koken_ham():
+    """Son mesajın (kanal, cihaz kimliği | None) çifti — ucuz okuma. Asla fırlatmaz."""
+    try:
+        from ghost import channels
+        kanal = channels.son_kanal()
+        son_cihaz = getattr(channels, "son_cihaz", None)        # yama 03 yoksa alan da yok
+        return kanal, ((son_cihaz() if callable(son_cihaz) else None) if kanal == "kokpit" else None)
+    except Exception:
+        return None, None
+
+
+def koken_oku(ham=None):
+    """Mesajın geldiği yer → {"koken": sınıf, "koken_kanal": kanal[, "koken_cihaz": ad, "koken_id": kimlik]}.
+    `ham`: tur başında yakalanan `koken_ham()` çifti; verilmezse şimdi okunur.
+    Sınıf: telegram | telefon (bildirim belirteci olan tam cihaz) | mac | saat | cardputer | cep (sınıfı kayıtsız
+    cep cihazı) | tam (ayırt edilemeyen tam cihaz) | kokpit (cihaz bilinmiyor) | bilinmiyor. Asla fırlatmaz."""
+    try:
+        kanal, cid = ham if ham is not None else koken_ham()
+        if kanal != "kokpit":
+            return {"koken": "telegram" if kanal == "telegram" else "bilinmiyor", "koken_kanal": kanal or ""}
+        cikti = {"koken": "kokpit", "koken_kanal": "kokpit"}
+        if not cid:
+            return cikti
+        cikti["koken_id"] = str(cid)[:16]
+        from ghost import kokpit
+        c = next((x for x in kokpit.cihazlar() if x.get("id") == cid), None)
+        if c is None:
+            return cikti
+        ad = str(c.get("ad") or "")
+        cikti["koken_cihaz"] = " ".join(ad.split())[:24]
+        if (c.get("tur") or "tam") == "cep":
+            try:
+                from ghost import cihaz_sinif                   # sınıf kaydı (ayrı yama) yoksa "cep" kalır
+                cikti["koken"] = cihaz_sinif.sinif(cid) or "cep"
+            except Exception:
+                cikti["koken"] = "cep"
+        elif any(x["id"] == cid for x in kokpit.apns_cihazlar()):
+            cikti["koken"] = "telefon"                          # Mac belirteç kaydetmez (yerel bildirim)
+        else:
+            cikti["koken"] = "mac" if "mac" in ad.lower() else "tam"
+        return cikti
+    except Exception:
+        return {"koken": "bilinmiyor", "koken_kanal": ""}
+
+
 def ilk_cikti_sifirla():
     _ILK_CIKTI.ts = None
     _ILK_CIKTI.arac = 0
+    _ILK_CIKTI.koken = koken_ham()       # tur başı: bu turu başlatan mesajın kökeni (ucuz; çözümleme tur sonunda)
 
 
 def ilk_cikti_sarmala(on_event):
@@ -100,6 +162,7 @@ def ozet(gun=7, simdi=None):
     esik = simdi - gun * 86400
     ilk, toplam, kayip, n = [], [], 0, 0
     ilk_satir = []
+    koken, koken_n = {}, {}                           # köken cihaza göre sohbet turları (alanı taşıyan satırlar)
     is_n, is_toplam, is_hata, is_dep = 0, [], 0, {}   # Faz 4.1.0: iş turları (motor.run_claude yazar)
     denetim_n = 0                                     # ikinci göz koşuları (rol=denetim) iş sayılmaz
     try:
@@ -135,11 +198,18 @@ def ozet(gun=7, simdi=None):
                     toplam.append(r["toplam_sn"])
                 if r.get("zaman_asimi"):
                     kayip += 1
+                if r.get("koken"):                    # 2026-11-24 öncesi satırlarda alan yok: dökülmezler
+                    k = koken.setdefault(str(r["koken"]), [])
+                    if r.get("toplam_sn") is not None:
+                        k.append(r["toplam_sn"])
+                    koken_n[str(r["koken"])] = koken_n.get(str(r["koken"]), 0) + 1
     except FileNotFoundError:
         pass
     except Exception:
         pass
     return {"var": n > 0 or is_n > 0, "gun": gun, "tur": n,
+            "koken": {k: {"tur": koken_n[k], "toplam_p50": _yuzdelik(koken.get(k) or [], 50),
+                          "toplam_p95": _yuzdelik(koken.get(k) or [], 95)} for k in koken_n},
             "is_tur": is_n, "is_p50": _yuzdelik(is_toplam, 50), "is_p95": _yuzdelik(is_toplam, 95),
             "is_hata": is_hata, "is_departman": is_dep, "denetim_tur": denetim_n,
             "ilk_p50": _yuzdelik(ilk, 50), "ilk_p95": _yuzdelik(ilk, 95),
@@ -212,6 +282,10 @@ def metin(gun=7):
     if o["toplam_p50"] is not None:
         satir.append("tur p50 %ss · p95 %ss" % (o["toplam_p50"], o["toplam_p95"]))
     satir.append("kayıp cevap %d" % o["kayip"])
+    if o.get("koken"):
+        satir.append("köken: " + ", ".join(
+            "%s %d%s" % (k, v["tur"], " (p50 %ss)" % v["toplam_p50"] if v["toplam_p50"] is not None else "")
+            for k, v in sorted(o["koken"].items(), key=lambda kv: -kv[1]["tur"])))
     if o.get("is_tur"):
         dep = ", ".join("%s %d" % (k, v) for k, v in sorted(o["is_departman"].items(), key=lambda kv: -kv[1]))
         satir.append("iş %d tur (p50 %ss · p95 %ss · hata %d; %s)%s" % (

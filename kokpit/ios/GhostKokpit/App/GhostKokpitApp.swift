@@ -30,6 +30,7 @@ struct GhostKokpitApp: App {
                             await DuyuYoneticisi.paylasilan.bildir()
                             await DuyuYoneticisi.paylasilan.bolgeleriTazele()
                             await EllerYoneticisi.paylasilan.kuyrugaBak()
+                            await BildirimDelegesi.etkinlikleriToparla()   // bitmiş işin kilit ekranı kartı kalmasın
                         }
                     }
                 }

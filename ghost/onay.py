@@ -152,7 +152,7 @@ def kokpit_dogrula(headers, method, path, body=b""):
     (uygulama 401'de eşleme ekranına düşer)."""
     g = lambda k: headers.get(k) or headers.get(k.lower()) or ""  # noqa: E731
     kw = {"h": {"device": g("X-Ghost-Device"), "ts": g("X-Ghost-Ts"), "nonce": g("X-Ghost-Nonce"),
-                "sig": g("X-Ghost-Sig")},
+                "sig": g("X-Ghost-Sig"), "sig0": g("X-Ghost-Sig0")},     # sig0: cep cihazının sahiplik imzası
           "method": method.upper(), "path": path}
     yol = urlparse(path).path
     if method.upper() == "POST" and (yol in ONAY_YOLLARI or yol.startswith("/v1/kararlar/")):
@@ -175,9 +175,17 @@ def karar_tuket(pid):
         return False
 
 
-def kod_uret(ad):
-    """Kod çağırana DÖNMEZ; servis Telegram'dan sahibe yollar. → gönderildi mi."""
-    r = _cagir("kod_uret", ad=ad or "")
+def kod_uret(ad, tur=None):
+    """Kod çağırana DÖNMEZ; servis Telegram'dan sahibe yollar. → gönderildi mi.
+    tur="cep": onay kartını sohbetin içinde göstermeyen küçük cihaz — telefonla aynı yetki, ama düz metin onay
+    sayılmaz (servis sürüm 3). Eski servis 'tur' alanını yok sayıp TAM cihaz kodu üretirdi (düz "tamam" onay olurdu) —
+    o yüzden önce sürüm sorulur, eskiyse kod HİÇ istenmez."""
+    kw = {"ad": ad or ""}
+    if tur and tur != "tam":
+        if int(_cagir("ping").get("surum") or 0) < 3:
+            raise ServisHatasi("onay servisi eski: cep cihazı için sürüm 3 gerekir (root kurulum bekliyor)")
+        kw["tur"] = tur
+    r = _cagir("kod_uret", **kw)
     if not r.get("ok"):
         raise ServisHatasi(r.get("hata") or "kod üretilemedi")
     return bool(r.get("gonderildi"))

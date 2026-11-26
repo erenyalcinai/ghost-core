@@ -142,10 +142,25 @@ def _matches(kw, text):
                      % re.escape(kw), text) is not None
 
 
+# Köprünün işin başına koyduğu çerçeveler işin KONUSU değildir. Özerk kalkan metnindeki "deploy" kelimesi
+# her özerk işi Mühendislik'e düşürüyordu (2026-11-23: Flipper'dan yazılan "naber" Mühendislik ajanına gitti).
+_CERCEVE = re.compile(r"^\s*\[(?:ÖZERK MOD|İmzasız gelen kutusu)[^\]]*\]\s*")
+
+
+def _cercevesiz(text):
+    t = text or ""
+    while True:
+        y = _CERCEVE.sub("", t, count=1)
+        if y == t:
+            return t
+        t = y
+
+
 def route(text):
     """(departman_anahtarı, departman_dict) — anahtar kelime skoruyla en iyi
-    eşleşme; hiçbiri tutmazsa None (genel işlem)."""
-    t = (text or "").lower()
+    eşleşme; hiçbiri tutmazsa None (genel işlem). Köprü çerçeveleri (özerk kalkan,
+    imzasız gelen kutusu etiketi) eşleşmeye girmez."""
+    t = _cercevesiz(text).lower()
     best, best_score = None, 0
     for key, dep in DEPARTMENTS.items():
         score = sum(1 for kw in dep["anahtar"] if _matches(kw.lower(), t))

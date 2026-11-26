@@ -20,7 +20,7 @@ Clone into `~/jarvis`: the launchd/systemd units and a few scripts assume that c
 
 ```bash
 git clone https://github.com/erenyalcinai/ghost-core ~/jarvis && cd ~/jarvis
-python3 -m unittest discover -s tests      # ~1135 tests, about 90 s, no network, no secrets
+python3 -m unittest discover -s tests      # ~1238 tests, about 90 s, no network, no secrets
 ```
 
 If this is green, the core is intact on your machine.

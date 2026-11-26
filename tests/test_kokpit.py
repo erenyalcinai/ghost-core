@@ -181,6 +181,39 @@ class Api(unittest.TestCase):
         st, _ = _istek(self.base, "GET", "/v1/nabiz", key="00" * 32, did=self.did)
         self.assertEqual(st, 401)
 
+    def test_cep_cihazi_mesaj_kurallari(self):
+        """2026-11-23: cep cihazı (onay servisi türü). Servis cevabı taklit edilir; API'nin kendi payı: kuyruğa ve
+        döküme servisin imzaladığı metin girer (düz metin önekli, komut olduğu gibi), imzasız kalırsa 503."""
+        from unittest import mock
+        cep = {"id": self.did, "ad": "Cardputer", "tur": "cep"}
+        with mock.patch.object(kokpit, "dogrula_neden", lambda *a, **k: (dict(cep), "ok")):
+            st, _ = _istek(self.base, "POST", "/v1/mesaj", key=self.key, did=self.did, body={"metin": "merhaba"})
+            self.assertEqual(st, 503)                                 # servis cep imzası vermedi → kuyruğa girmez
+        kokpit.inbox_al()
+        for metin, imzalanan in (("tamam", "[Cep cihazı: Cardputer] tamam"), ("/durum", "/durum")):
+            imzali = dict(cep, inbox_metin=imzalanan, inbox_imza="ab" * 32, inbox_ts=123)
+            with mock.patch.object(kokpit, "dogrula_neden", lambda *a, **k: (dict(imzali), "ok")):
+                st, j = _istek(self.base, "POST", "/v1/mesaj", key=self.key, did=self.did, body={"metin": metin})
+                self.assertEqual(st, 200)
+            gelen = kokpit.inbox_al()
+            self.assertEqual([m["metin"] for m in gelen], [imzalanan])
+            self.assertEqual((gelen[0]["imza"], gelen[0]["imza_ts"]), ("ab" * 32, 123))
+            self.assertEqual(kokpit.outbox_oku(since=j["id"] - 1)[0]["metin"], imzalanan)
+
+    def test_cep_eslesmesi_sahiplik_anahtarini_dondurur(self):
+        from unittest import mock
+
+        def sahte(kod, ad=None, ek=None):
+            ek.update(tur="cep", key0="cd" * 32)
+            return "d1d1d1d1d1d1", "ab" * 32
+        with mock.patch.object(kokpit, "esle", sahte):
+            st, j = _istek(self.base, "POST", "/v1/eslesme", body={"kod": "123456", "ad": "Cardputer"})
+        self.assertEqual((st, j), (200, {"device_id": "d1d1d1d1d1d1", "key": "ab" * 32, "tur": "cep",
+                                         "key0": "cd" * 32}))
+        with mock.patch.object(kokpit, "esle", lambda kod, ad=None, ek=None: ("d2d2d2d2d2d2", "ab" * 32)):
+            st, j = _istek(self.base, "POST", "/v1/eslesme", body={"kod": "123456", "ad": "iPhone"})
+        self.assertEqual(j, {"device_id": "d2d2d2d2d2d2", "key": "ab" * 32})      # tam cihazın cevabı değişmedi
+
     def test_tekrar_ve_saat_401_degil(self):
         """2026-09-07: aynı isteğin ikinci gönderimi GET'te 200, POST'ta 409; saat 400 — 401 değil
         (uygulama 401'de eşleme ekranına düşer)."""
@@ -239,6 +272,32 @@ class Api(unittest.TestCase):
         self.assertEqual(st, 200); self.assertEqual(len(j["key"]), 64)
         st, _ = _istek(self.base, "GET", "/v1/nabiz", j["key"], j["device_id"])
         self.assertEqual(st, 200)
+
+
+class EkDisk(unittest.TestCase):
+    """ops/backups ek diske bağlantıysa ve disk bağlı değilse VPS organı 'kritik' der (2026-11-23)."""
+
+    def test_kopuk_baglanti_kritik_saglam_baglanti_sessiz(self):
+        import tempfile
+        from unittest import mock
+        kok = tempfile.mkdtemp()
+        os.makedirs(os.path.join(kok, "ops"))
+        hedef = tempfile.mkdtemp()
+        os.symlink(hedef, os.path.join(kok, "ops", "backups"))
+        with mock.patch.object(config, "BASE", kok):
+            self.assertNotIn("EK DİSK", health._vps()["detay"])
+            os.rmdir(hedef)                      # disk bağlanmadı: bağlantı boşa düştü
+            d = health._vps()
+        self.assertEqual(d["durum"], "kritik")
+        self.assertIn("EK DİSK BAĞLI DEĞİL", d["detay"])
+
+    def test_gercek_dizin_etkilenmez(self):
+        import tempfile
+        from unittest import mock
+        kok = tempfile.mkdtemp()
+        os.makedirs(os.path.join(kok, "ops", "backups"))
+        with mock.patch.object(config, "BASE", kok):
+            self.assertNotIn("EK DİSK", health._vps()["detay"])
 
 
 if __name__ == "__main__":

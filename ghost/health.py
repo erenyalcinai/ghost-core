@@ -11,6 +11,7 @@ import glob
 import json
 import os
 import platform
+import re
 import subprocess
 import time
 import urllib.request
@@ -129,6 +130,12 @@ def _vps():
             d["durum"] = "kritik"
         elif disk < 6 or mem < 600 or load > 3:
             d["durum"] = "uyari"
+        # Ek disk (2026-11-23): ops/backups ek diskteki dizine bağlantıdır. Disk açılışta bağlanmadıysa bağlantı boşa
+        # düşer ve günlük yedek sessizce yazılamaz — bunu ayrıca söyle.
+        yedek = os.path.join(config.BASE, "ops", "backups")
+        if os.path.islink(yedek) and not os.path.isdir(yedek):
+            d["durum"] = "kritik"
+            d["detay"] += " · EK DİSK BAĞLI DEĞİL (yedek dizini boşta)"
     except Exception:
         d["durum"] = "bilinmiyor"
     return d
@@ -266,8 +273,128 @@ def _isler():
                           "prompt": (j.get("prompt") or "")[:120],
                           "baslangic": j.get("started", "")})
     d["aktif"] = sum(1 for _, j in jobs if j.get("status") in AKTIF_IS)
-    d["bekleyen_onay"] = len(_json("pending.json", {}) or {})
+    # 2026-11-26: telefondaki iş kartı (Live Activity) toparlayıcısı bu listeye bakar — listede olmayan iş bitmiştir.
+    d["aktif_idler"] = sorted(jid for jid, j in jobs if j.get("status") in AKTIF_IS)
+    # 2026-11-24: sayı köprü kararları (pending.json) + açık sahne onay kartları. Widget, GhostDurum ve saat yüzü bu
+    # sayıyı okur; yalnız pending.json sayılırken onay-komut/mail kartı açıkken "0" görünüyordu.
+    d["bekleyen_karar"] = len(_json("pending.json", {}) or {})
+    d["bekleyen_kart"] = onay_kartlari()["n"]
+    d["bekleyen_onay"] = d["bekleyen_karar"] + d["bekleyen_kart"]
     return d
+
+
+# ---------------------------------------------------------------- açık sahne onay kartları (2026-11-24)
+# Sahne onay kartı (onay-komut `kapi`, `mail`, `genel`) köprünün pending.json'una girmez: döküme "Onayla / Vazgeç"
+# düğmeli bir Ghost mesajı ve Sahne'ye bir çizim olarak düşer. Onay servisi açık kartların listesini vermiyor (yalnız
+# sayı, o da "Sahne'de görünen"); bu yüzden sayım dökümden + Sahne'den kurulur ve servisle yalnız SIKILAŞTIRILIR.
+# Kart "bekliyor" sayılır ancak ve ancak:
+#   1. son 24 saatte açıldıysa (onay ömrü; ölçüm 30 gün/159 kart: düğmeyle cevaplanan 136'nın hiçbiri 24 saati aşmadı),
+#   2. dökümde o karta düğme cevabı ("[Sahne eylem: <id>] onayla|vazgeç") yoksa,
+#   3. VE (kart açıldıktan sonra Sahip hiçbir şey yazmadıysa: Sahne'nin üstüne başka şey çizilmiş olsa da henüz
+#          görmediği kart bekliyordur
+#          YA DA Sahip yazdı ama düğmeler Sahne'de hâlâ duruyor ve kart ONAY_KART_TARTISMA_SN'den gençse: kartı
+#          tartışıyor olabilir — cevap hangi kanaldan gelirse gelsin düğme Sahne'den düşer),
+#   4. VE onay kaydı onu onaylanmış / bilinmeyen göstermiyorsa (servis cevap vermezse kart SAYILMAZ).
+# Kural bilerek eksik sayar: Sahip karttan sonra başka şey yazdıysa kart en çok yarım saat daha (o da Sahne'de duruyorsa)
+# "bekliyor" görünür. Ölçüm: düğmesiz kalan 23 kartın hepsinde Sahip ortanca 2 dk içinde düzeltme yazmış, kart terk
+# edilmişti; "boşver, başka yoldan yapalım" gibi bir cümle hayır kalıbına uymaz ve düğmeyi Sahne'den düşürmez
+# (bağımsız inceleme bulgu 3: süre sınırı yokken böyle kart 24 saat sayılırdı). Bedeli: Sahip araya mesaj yazıp
+# yarım saatten SONRA dönerek onayladığı kartlar (136'da 3; 12'sinde araya mesaj girmiş) o arada görünmez.
+ONAY_KART_OMUR_SN = 24 * 3600
+ONAY_KART_TARTISMA_SN = 30 * 60    # Sahip karttan sonra yazdıysa, Sahne'deki kart en çok bu yaşa kadar sayılır
+ONAY_KART_PENCERE = 800            # dökümün son bu kadar satırına bakılır (≈4-5 gün; ömür 24 saat)
+ONAY_KART_ONBELLEK_SN = 5          # nabız sık çağrılır; servis sorgusu her çağrıda yinelenmesin
+_KART_DUGME = re.compile(r"\[Sahne eylem: (onay-[0-9a-f]{16})\] onayla")
+_KART_CEVAP = re.compile(r"^\[Sahne eylem: (onay-[0-9a-f]{16})\]")
+_KART_EK = " — önizleme Sahne'de. Onaylıyor musun?"
+_kart_onbellek = {"ts": 0.0, "deger": None}
+
+
+def _kart_kapali(eid):
+    """Onay kaydına göre kart artık beklemiyor mu (onaylandı / tüketildi / servis tanımıyor / servis susuyor)."""
+    from ghost import onay, sahne
+    if onay.servis_modu():
+        try:
+            r = onay._cagir("onizleme", eid=eid)
+        except Exception:
+            return True                       # emin değilsek eksik say
+        return r.get("sha") is None or bool(r.get("gecerli"))
+    v = sahne._onaylar().get(eid) or {}       # yerel kayıt (servissiz kurulum, test): ts = onaylandı
+    return bool(v.get("ts") or v.get("tuketildi"))
+
+
+def onay_kartlari(taze=False, simdi=None):
+    """sahibin cevabını bekleyen sahne onay kartları → {"n", "baslik", "ts", "kartlar": [{"id","baslik","ts"}]}
+    (en yeni önce; `baslik`/`ts` en yeni kartın). Asla fırlatmaz: okunamayan her şey 'kart yok' sayılır."""
+    simdi = time.time() if simdi is None else simdi
+    if not taze and _kart_onbellek["deger"] is not None and 0 <= simdi - _kart_onbellek["ts"] < ONAY_KART_ONBELLEK_SN:
+        return _kart_onbellek["deger"]
+    try:
+        deger = kart_sec(_kart_satirlari(), _sahnedeki_dugmeler(), simdi, _kart_kapali)
+    except Exception:
+        deger = {"n": 0, "baslik": "", "ts": "", "kartlar": []}
+    _kart_onbellek.update(ts=simdi, deger=deger)
+    return deger
+
+
+def _kart_satirlari():
+    """Dökümün son ONAY_KART_PENCERE satırından sayım için gerekenler: sahibin satırları + onay düğmeli Ghost satırları
+    → [(id, ts, kaynak, metin, butonlar)] (eskiden yeniye). Salt okuma."""
+    from ghost import kokpit
+    c = kokpit._db()
+    try:
+        return c.execute(
+            "SELECT id, ts, kaynak, metin, butonlar FROM kokpit_outbox "
+            "WHERE id > (SELECT COALESCE(MAX(id), 0) FROM kokpit_outbox) - ? "
+            "AND (kaynak='sahip' OR butonlar LIKE '%Sahne eylem: onay-%') ORDER BY id", (ONAY_KART_PENCERE,)).fetchall()
+    finally:
+        c.close()
+
+
+def _sahnedeki_dugmeler():
+    """Şu an Sahne'de düğmesi duran eylem kimlikleri (cevaplanan kartın düğmeleri Sahne'den düşer)."""
+    from ghost import sahne
+    idler = []
+    for b in sahne.oku().get("bilesenler") or []:
+        sahne._eylem_idleri(b, idler)
+    return set(idler)
+
+
+def kart_sec(satirlar, sahnede, simdi, kapali=lambda eid: False):
+    """Sayım kuralının kendisi (saf işlev; kural bu bölümün başındaki notta). `satirlar`: döküm satırları
+    (id, ts, kaynak, metin, butonlar) eskiden yeniye; `sahnede`: Sahne'de düğmesi duran kimlikler; `kapali(eid)`:
+    onay kaydına göre kart artık beklemiyor mu (yalnız öteki elemeleri geçen aday için çağrılır)."""
+    kartlar, cevapli, son_sahip = {}, set(), 0
+    for rid, ts, kaynak, metin, butonlar in satirlar:
+        if kaynak == "sahip":
+            son_sahip = rid
+            m = _KART_CEVAP.match((metin or "").strip())
+            if m:
+                cevapli.add(m.group(1))
+            continue
+        for eid in set(_KART_DUGME.findall(butonlar or "")):
+            kartlar.setdefault(eid, (rid, ts, metin or ""))
+    acik = []
+    for eid, (rid, ts, metin) in kartlar.items():
+        if eid in cevapli:
+            continue
+        try:
+            yas = simdi - time.mktime(time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= yas < ONAY_KART_OMUR_SN:
+            continue
+        if rid < son_sahip and not (eid in sahnede and yas < ONAY_KART_TARTISMA_SN):
+            continue
+        if kapali(eid):
+            continue
+        baslik = metin[:-len(_KART_EK)] if metin.endswith(_KART_EK) else metin
+        acik.append((rid, {"id": eid, "baslik": " ".join(baslik.split())[:120], "ts": ts}))
+    acik.sort(key=lambda x: -x[0])
+    deger = {"n": len(acik), "baslik": "", "ts": "", "kartlar": [k for _, k in acik]}
+    if acik:
+        deger.update(baslik=acik[0][1]["baslik"], ts=acik[0][1]["ts"])
+    return deger
 
 
 def _baglam():
@@ -349,9 +476,15 @@ def _alarmlar():
 def _bekleyen():
     try:
         from ghost import gun, kokpit
-        return {"kararlar": kokpit.bekleyen_kararlar(), "sorular": gun.sorular()}
+        kararlar = kokpit.bekleyen_kararlar()
+        k = onay_kartlari()
+        # `kararlar` listesine kart KARIŞTIRILMAZ: uygulama o listeyi /v1/kararlar/<id> düğmeleriyle çizer, sahne kartı
+        # ise /v1/eylem ile cevaplanır. Kartlar ayrı özet olarak gider; `toplam` saat yüzünün okuyacağı tek sayı.
+        return {"kararlar": kararlar, "sorular": gun.sorular(),
+                "onay_kartlari": {"n": k["n"], "baslik": k["baslik"], "ts": k["ts"]},
+                "toplam": len(kararlar) + k["n"]}
     except Exception:
-        return {"kararlar": [], "sorular": []}
+        return {"kararlar": [], "sorular": [], "onay_kartlari": {"n": 0, "baslik": "", "ts": ""}, "toplam": 0}
 
 
 def _bugun():

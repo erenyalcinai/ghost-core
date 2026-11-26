@@ -138,7 +138,7 @@ struct IsEtkinlikWidget: Widget {
                     Label("İş #\(ctx.attributes.jid)", systemImage: simge(ctx.state.durum)).font(.caption)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(ctx.state.durum).font(.caption).foregroundStyle(durumRenk(ctx.state.durum))
+                    Text(etiket(ctx)).font(.caption).foregroundStyle(durumRenk(ctx.state.durum))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -164,7 +164,7 @@ struct IsEtkinlikWidget: Widget {
                 HStack {
                     Text("Ghost · İş #\(ctx.attributes.jid)").font(.headline)
                     Spacer()
-                    Text(ctx.state.durum).font(.caption).foregroundStyle(durumRenk(ctx.state.durum))
+                    Text(etiket(ctx)).font(.caption).foregroundStyle(durumRenk(ctx.state.durum))
                 }
                 Text(ctx.attributes.tur).font(.caption).foregroundStyle(.secondary)
                 Text(ctx.state.ozet).font(.subheadline).lineLimit(2)
@@ -174,6 +174,11 @@ struct IsEtkinlikWidget: Widget {
         .padding(14)
         .activityBackgroundTint(Renk.zemin)
         .activitySystemActionForegroundColor(Renk.metin)
+    }
+
+    /// Bayat kart (sunucu stale-date'e dek bitiş göndermedi): sürüyor demek yanlış olur → "sonuç bilinmiyor".
+    private func etiket(_ ctx: ActivityViewContext<IsEtkinligi>) -> String {
+        ctx.isStale && ctx.state.bitti == nil ? "sonuç bilinmiyor" : ctx.state.durum
     }
 
     @ViewBuilder private func sure(_ s: IsEtkinligi.ContentState) -> some View {

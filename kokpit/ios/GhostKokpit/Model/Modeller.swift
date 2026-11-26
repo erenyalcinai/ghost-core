@@ -242,7 +242,10 @@ struct Isler: Decodable {
     var aktif: Int?
     var bekleyenOnay: Int?
     var ozet: [IsOzet]?
-    enum CodingKeys: String, CodingKey { case aktif, ozet; case bekleyenOnay = "bekleyen_onay" }
+    var aktifIdler: [Int]?       // 2026-11-26: süren işlerin numaraları (iş kartı toparlayıcısı); eski sunucuda yok
+    enum CodingKeys: String, CodingKey {
+        case aktif, ozet; case bekleyenOnay = "bekleyen_onay"; case aktifIdler = "aktif_idler"
+    }
 }
 
 struct IsOzet: Decodable, Identifiable {
@@ -340,7 +343,10 @@ struct PingYanit: Decodable { var ok: Bool; var at: String?; var surum: String?;
 struct EslesmeYanit: Decodable {
     var deviceId: String
     var key: String
-    enum CodingKeys: String, CodingKey { case key; case deviceId = "device_id" }
+    /// Yalnız cep cihazı eşleşmesinde gelir: `tur == "cep"` + sahiplik anahtarı `key0` (telefon/Mac kodunda ikisi de yok).
+    var tur: String?
+    var key0: String?
+    enum CodingKeys: String, CodingKey { case key, tur, key0; case deviceId = "device_id" }
 }
 struct OkYanit: Decodable { var ok: Bool; var id: Int? }
 struct KararlarZarf: Decodable { var kararlar: [Karar] }

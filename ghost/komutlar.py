@@ -84,9 +84,16 @@ def _unfreeze(arg, mgr, ctx):
     ctx.send(mgr.chat_id, "▶️ Freeze kalktı — Ghost normal çalışıyor.")
 
 
-@komut("/cihaz", "[ad] kokpit eşleme kodu üret")
+@komut("/cihaz", "[cep] [ad] kokpit eşleme kodu üret (cep: düz 'tamam'ı onay sayılmayan küçük cihaz)")
 def _cihaz(arg, mgr, ctx):
     from ghost import kokpit
+    parca = (arg or "").split(None, 1)
+    if parca and parca[0].lower() == "cep":      # Cardputer gibi: kartı sohbetin içinde göstermeyen cihaz
+        try:
+            kokpit.kod_uret(parca[1] if len(parca) > 1 else "Cardputer", tur="cep")
+        except Exception as e:
+            return ctx.send(mgr.chat_id, "📟 Cep cihazı kodu üretilemedi: %s" % e)
+        return ctx.send(mgr.chat_id, "📟 Cep cihazı eşleme kodu Telegram'a gönderildi (10 dk, tek kullanım).")
     kod = kokpit.kod_uret(arg or "iPhone")
     if kod is None:     # onay servisi (Faz 1): kod servisten YALNIZ Telegram'a gider, dökümde görünmez
         return ctx.send(mgr.chat_id, "📱 Eşleme kodu Telegram'a gönderildi (10 dk, tek kullanım).")
@@ -99,7 +106,8 @@ def _cihazlar(arg, mgr, ctx):
     from ghost import kokpit
     cs = kokpit.cihazlar()
     ctx.send(mgr.chat_id, "📱 Kokpit cihazları:\n" + ("\n".join(
-        "• %s %s [%s] son: %s" % (c["id"], c["ad"], c["durum"], c["last_seen"] or "-")
+        "• %s %s [%s%s] son: %s" % (c["id"], c["ad"], c["durum"],
+                                    " · cep" if c.get("tur") == "cep" else "", c["last_seen"] or "-")
         for c in cs) or "yok"))
 
 

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>tr</string>
+	<key>CFBundleDisplayName</key>
+	<string>Ghost</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<!-- Tek hedefli saat uygulaması (Xcode 14+), telefondaki Kokpit'in içine gömülür ama ondan bağımsız çalışır:
+	     kendi ağ bağlantısı, kendi eşleşmesi, kendi APNs belirteci. -->
+	<key>WKApplication</key>
+	<true/>
+	<key>WKCompanionAppBundleIdentifier</key>
+	<string>com.example.ghost.kokpit</string>
+	<key>WKRunsIndependentlyOfCompanionApp</key>
+	<true/>
+	<!-- Sunucu adresi telefonla aynı kaynaktan (Secrets.xcconfig). Cihaz kimliği/anahtarı buraya GİRMEZ:
+	     saat yalnız eşleşmeyle kimlik alır. -->
+	<key>GhostAPIBase</key>
+	<string>$(GHOST_API_BASE)</string>
+</dict>
+</plist>

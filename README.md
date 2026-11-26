@@ -24,10 +24,10 @@ here and probably the most useful.
 
 | | |
 |---|---|
-| Core Python (`ghost/`) | ~19,300 lines, 72 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
-| Organs (`ops/`) | ~16,900 lines: bridge, sentinels, Mac and iPhone limbs |
-| Cockpit app (`kokpit/ios`) | ~8,200 lines Swift, iOS + macOS targets, one source |
-| Tests | ~1135, run with `python -m unittest` in about 90 seconds on a small VPS, no network, CI on every code push |
+| Core Python (`ghost/`) | ~21,200 lines, 74 modules, **zero third-party dependencies** (two optional: PyJWT for APNs, websockets for the voice test client) |
+| Organs (`ops/`) | ~17,000 lines: bridge, sentinels, Mac and iPhone limbs |
+| Cockpit app (`kokpit/ios`) | ~9,800 lines Swift, iOS + macOS targets, one source |
+| Tests | ~1238, run with `python -m unittest` in about 90 seconds on a small VPS, no network, CI on every code push |
 | Scheduling units | 9 launchd agents (Mac) + 7 systemd services and one timer (VPS) in this tree; the VPS bridge and self-check units themselves live in the private deploy |
 | Lessons | 179 operational lessons up to 28 October 2026, extracted from commit messages and curated in [LESSONS.md](LESSONS.md) |
 | History | Started 11 August 2026; this README was last checked against the code on day 98, 17 November 2026 (1,680+ commits in the private tree, about 670 of them automatic knowledge-sync commits) |
@@ -251,7 +251,7 @@ weekly transparency report turns the audit log into "what I did on my own, what 
 what you refused". Continuity hooks flag a session that ended without writing anything
 down; idle time goes to standing goals.
 
-**It is tested like it will be run.** ~1135 tests in about 90 s with every path
+**It is tested like it will be run.** ~1238 tests in about 90 s with every path
 redirected and the network cut (`tests/common.py`, after a test once leaked into production), a
 pre-push gate that runs them, and CI that runs the same command on the same file set.
 
@@ -298,7 +298,7 @@ but optional; they need your own hardware and Apple developer setup.
 
 ```bash
 git clone https://github.com/erenyalcinai/ghost-core && cd ghost-core
-python3 -m unittest discover -s tests        # ~1135 tests, about 90 s, no network
+python3 -m unittest discover -s tests        # ~1238 tests, about 90 s, no network
 cp ops/sahip.example.json ops/sahip.json     # owner profile: sites, products, root cards
 printf 'TELEGRAM_BOT_TOKEN=...\nTELEGRAM_OWNER_ID=...\nCLAUDE_BIN=/path/to/claude\n' > .env
 python3 ops/telegram_bridge.py

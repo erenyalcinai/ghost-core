@@ -9,7 +9,7 @@ import sqlite3
 
 from ghost import config
 
-SURUM = 2
+SURUM = 3
 
 
 def _goc_2_is_kuyrugu(c):
@@ -44,7 +44,38 @@ CREATE TABLE IF NOT EXISTS durum(
 );
 """,
     2: _goc_2_is_kuyrugu,     # sql metni ya da çağrılabilir (bağlantıyı alır)
+    3: None,                  # aşağıda bağlanır (_goc_3_gorev_alici)
 }
+
+
+def _goc_3_gorev_alici(c):
+    """Kokpit Watch hazırlığı (2026-11-24): cep görevi cihaza adreslenir.
+    (a) `kokpit_gorevler.alici` sütunu (görevin gideceği cihaz kimliği; NULL = adressiz eski kayıt). Tablo henüz
+        yoksa atlanır: `gorevler._db()` sütunu kendi de ekler (taze ghost.db).
+    (b) Cihaz sınıfı kaydının tohumu: geçmişte bir cep görevini BAŞARIYLA sonuçlandırmış cihaz o görevleri anlıyor
+        demektir → `cardputer`. Kayıt zaten varsa dokunulmaz. Bundan sonra eşlenen cihaz (saat) kayıtsız kalır ve
+        hiçbir cep görevini alamaz; sınıfı `python3 -m ghost.cep sinif …` ile ya da kendi bildirimiyle yazılır."""
+    import json
+    import time
+    if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kokpit_gorevler'").fetchone():
+        return
+    var = {r[1] for r in c.execute("PRAGMA table_info(kokpit_gorevler)").fetchall()}
+    if "alici" not in var:
+        try:
+            c.execute("ALTER TABLE kokpit_gorevler ADD COLUMN alici TEXT")
+        except sqlite3.OperationalError:          # aynı anda başka süreç ekledi (köprü, api ve nabız birlikte açılır)
+            pass
+    if not {"hedef", "cihaz", "durum"} <= var:
+        return                                    # 2026-11-23 öncesi tablo: cep görevi hiç olmamış
+    idler = [r[0] for r in c.execute("SELECT DISTINCT cihaz FROM kokpit_gorevler "
+                                     "WHERE hedef='cep' AND durum='tamam' AND cihaz IS NOT NULL AND cihaz != ''")]
+    if idler:                                     # kayıt varsa dokunulmaz (OR IGNORE: eşzamanlı ikinci göç de ezmez)
+        simdi = time.time()
+        c.execute("INSERT OR IGNORE INTO durum(ad, deger, ts) VALUES('cihaz_sinif', ?, ?)",
+                  (json.dumps({i: {"sinif": "cardputer", "ts": simdi, "kaynak": "goc3"} for i in idler}), simdi))
+
+
+_GOCLER[3] = _goc_3_gorev_alici
 
 
 def baglan(timeout=10, goc=True):
